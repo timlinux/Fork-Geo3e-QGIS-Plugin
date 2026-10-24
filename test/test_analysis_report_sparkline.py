@@ -15,6 +15,7 @@ from unittest.mock import MagicMock
 
 import numpy
 from osgeo import ogr
+from qgis.PyQt.QtGui import QColor
 
 from geest.core.reports.analysis_report import AnalysisReport
 from geest.core.reports.base_report import BaseReport
@@ -672,6 +673,64 @@ class TestMakeStudyAreaSummaryPage(unittest.TestCase):
 
         self.report.make_page.assert_called_once()
         self.assertEqual(self.report.make_page.call_args.kwargs["title"], "Study Area")
+
+
+class TestMakeByPopulationLegendPage(unittest.TestCase):
+    """make_by_population_legend_page() draws a 5x3 bivariate matrix -
+    one swatch per enablement-x-population class - plus an explanatory
+    note, mirroring make_legend_page()'s plain 0-5 legend.
+    """
+
+    def setUp(self):
+        self.report = MagicMock()
+        self.report.page_descriptions = {}
+
+    def test_adds_the_page_with_the_right_title(self):
+        AnalysisReport.make_by_population_legend_page(self.report, current_page=3)
+
+        self.report.make_page.assert_called_once()
+        self.assertEqual(self.report.make_page.call_args.kwargs["title"], "Reading the By-Population Maps")
+
+    def test_draws_one_swatch_per_bivariate_class(self):
+        AnalysisReport.make_by_population_legend_page(self.report, current_page=3)
+
+        # 15 class swatches + 2 note-box rects (background + accent stripe).
+        self.assertEqual(self.report._rect.call_count, 17)
+
+    def test_bottom_left_swatch_is_the_lowest_class_colour(self):
+        from geest.core.constants import GEOE3_BY_POPULATION_COLORS
+
+        AnalysisReport.make_by_population_legend_page(self.report, current_page=3)
+
+        colours_drawn = [call_args.args[4] for call_args in self.report._rect.call_args_list[:15]]
+        self.assertEqual(colours_drawn[0], QColor(GEOE3_BY_POPULATION_COLORS[1]))
+
+
+class TestThinVectorOutlines(unittest.TestCase):
+    """_thin_vector_outlines() thins a subnational aggregation layer's
+    outline for report rendering only - the style's normal 0.26mm
+    outline (sized for the interactive canvas, where far fewer zones
+    are ever on screen at once) eats into a large share of each tiny
+    zone's visible area once hundreds are packed onto a report page.
+    """
+
+    def test_every_symbol_layer_with_a_stroke_is_thinned(self):
+        from qgis.core import QgsFillSymbol, QgsSingleSymbolRenderer, QgsVectorLayer
+
+        layer = QgsVectorLayer("Polygon?crs=EPSG:4326", "zones", "memory")
+        symbol = QgsFillSymbol.createSimple({"outline_width": "0.26", "outline_width_unit": "MM"})
+        layer.setRenderer(QgsSingleSymbolRenderer(symbol))
+
+        AnalysisReport._thin_vector_outlines(layer, width_mm=0.08)
+
+        renderer_symbol = layer.renderer().symbol()
+        self.assertAlmostEqual(renderer_symbol.symbolLayer(0).strokeWidth(), 0.08)
+
+    def test_a_layer_with_no_renderer_is_a_no_op(self):
+        layer = MagicMock()
+        layer.renderer.return_value = None
+
+        AnalysisReport._thin_vector_outlines(layer, width_mm=0.08)  # must not raise
 
 
 if __name__ == "__main__":

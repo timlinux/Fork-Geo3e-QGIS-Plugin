@@ -18,6 +18,7 @@ from qgis.core import (
     QgsLayoutSize,
     QgsProject,
     QgsRasterLayer,
+    QgsRenderContext,
     QgsSingleSymbolRenderer,
     QgsUnitTypes,
     QgsVectorLayer,
@@ -248,8 +249,13 @@ class AnalysisReport(BaseReport):
         # Explain the colour scheme before showing any maps.
         self.make_legend_page(current_page=2)
 
+        # The "by population" bivariate scale is a different scheme
+        # entirely - explain it on its own page, before any map that
+        # uses it.
+        self.make_by_population_legend_page(current_page=3)
+
         # Then the analysis overview and the dimension/factor pages.
-        current_page = self.create_detail_pages(current_page=3)
+        current_page = self.create_detail_pages(current_page=4)
 
         # Processing times live at the back of the report — they are
         # technical bookkeeping, not analysis content.
@@ -370,6 +376,136 @@ class AnalysisReport(BaseReport):
         )
         note_body.setHAlign(Qt.AlignmentFlag.AlignJustify)
 
+    def make_by_population_legend_page(self, current_page: int) -> None:
+        """Add a second legend page explaining the 15-class "by
+        population" bivariate scale (resources/qml/
+        geoe3_by_population_score.qml): every one of the 5 plain
+        enablement classes crossed with 3 population tercile classes -
+        a different scheme entirely from the 0-5 scale make_legend_page()
+        explains, used by every "By population" map in the report.
+        """
+        self.page_descriptions["by_population_legend"] = (
+            "An enablement score on its own can't show whether a low-scoring "
+            "place is home to a handful of people or a large underserved "
+            "population. This bivariate scale crosses each enablement class "
+            "with how many people live there, so the places most in need of "
+            "intervention AND home to the most people stand out at a glance."
+        )
+        self.make_page(
+            title="Reading the By-Population Maps",
+            description_key="by_population_legend",
+            current_page=current_page,
+            show_header_and_footer=True,
+        )
+
+        population_labels = ["Low", "Medium", "High"]
+        enablement_labels = [name for _, name, _, _ in SCORE_CLASSES]
+        n_cols = len(enablement_labels)
+        n_rows = len(population_labels)
+
+        grid_x = MARGIN + 24
+        grid_y = HEADER_H + 36
+        cell_w = (CONTENT_W - 24) / n_cols
+        cell_h = 16.0
+        gap = 0.6
+
+        for col in range(n_cols):
+            for row in range(n_rows):
+                # Classes run enablement-major, population-minor (see
+                # geoe3_by_population_vector_score.qml): value 1 is
+                # "very low enablement, low population", value 3 is
+                # "very low enablement, high population", value 4 moves
+                # to the next enablement class, and so on.
+                value = col * n_rows + row + 1
+                x = grid_x + col * cell_w
+                # Row 0 ("Low" population) sits at the BOTTOM of the grid.
+                y = grid_y + (n_rows - 1 - row) * cell_h
+                colour = QColor(GEOE3_BY_POPULATION_COLORS[value])
+                self._rect(x, y, cell_w - gap, cell_h - gap, colour, current_page)
+
+        for row, population_name in enumerate(population_labels):
+            y = grid_y + (n_rows - 1 - row) * cell_h
+            self._label(
+                population_name,
+                MARGIN,
+                y + (cell_h - gap) / 2 - 3,
+                22,
+                6,
+                current_page,
+                size=9,
+                color=GREY,
+                halign=Qt.AlignmentFlag.AlignRight,
+            )
+
+        label_y = grid_y + n_rows * cell_h + 2
+        for col, enablement_name in enumerate(enablement_labels):
+            self._label(
+                enablement_name,
+                grid_x + col * cell_w - 4,
+                label_y,
+                cell_w + 8,
+                10,
+                current_page,
+                size=7.5,
+                color=GREY,
+                halign=Qt.AlignmentFlag.AlignHCenter,
+            )
+
+        self._label(
+            "Population density",
+            MARGIN,
+            grid_y - 8,
+            CONTENT_W,
+            6,
+            current_page,
+            size=9,
+            color=NAVY,
+            bold=True,
+        )
+        self._label(
+            "Enablement",
+            grid_x,
+            label_y + 11,
+            CONTENT_W - 24,
+            6,
+            current_page,
+            size=9,
+            color=NAVY,
+            bold=True,
+        )
+
+        note_y = label_y + 21
+        note_h = 38
+        self._rect(MARGIN, note_y, CONTENT_W, note_h, MIST, current_page)
+        self._rect(MARGIN, note_y, 2.2, note_h, CYAN, current_page)
+        self._label(
+            "How the by-population score is calculated",
+            MARGIN + 8,
+            note_y + 4.5,
+            CONTENT_W - 16,
+            7,
+            current_page,
+            size=12,
+            color=NAVY,
+            bold=True,
+        )
+        note_body = self._label(
+            "<p>Each grid cell's plain 0-5 GeoE3 score is combined with its "
+            "population count, split into three tercile classes (low, medium, "
+            "high) computed across the whole study area, to produce one of 15 "
+            "classes. The colour ramp runs from deep red (low enablement, low "
+            "population) to light blue (high enablement, high population).</p>",
+            MARGIN + 8,
+            note_y + 13,
+            CONTENT_W - 16,
+            note_h - 17,
+            current_page,
+            size=9.5,
+            color=CHARCOAL,
+            html=True,
+        )
+        note_body.setHAlign(Qt.AlignmentFlag.AlignJustify)
+
     def _load_raster(self, layer_uri: str, title: str) -> Optional[QgsRasterLayer]:
         """Load (and cache) a raster result layer, or None when unavailable.
 
@@ -416,10 +552,34 @@ class AnalysisReport(BaseReport):
         qml_path = os.path.splitext(gpkg_path)[0] + ".qml"
         if os.path.exists(qml_path):
             layer.loadNamedStyle(qml_path)
+            AnalysisReport._thin_vector_outlines(layer)
         QgsProject.instance().addMapLayer(layer, False)
         self.temp_layers.append(layer)
         self._vector_cache[layer_uri] = layer
         return layer
+
+    #: Outline width (mm) for subnational aggregation report maps - the
+    #: style's normal 0.26mm outline is sized for the interactive QGIS
+    #: canvas, where only a handful of zones are usually on screen at
+    #: once. A report page packs hundreds of zones into 180mm, where
+    #: that same width eats into a large share of each tiny zone's
+    #: visible area, obscuring the fill colour it's meant to show.
+    REPORT_VECTOR_OUTLINE_WIDTH_MM = 0.08
+
+    @staticmethod
+    def _thin_vector_outlines(layer: QgsVectorLayer, width_mm: float = REPORT_VECTOR_OUTLINE_WIDTH_MM) -> None:
+        """Thin every symbol's outline for report rendering only - the
+        layer's own .qml style file (used by the interactive map too) is
+        left untouched. See REPORT_VECTOR_OUTLINE_WIDTH_MM for why.
+        """
+        renderer = layer.renderer()
+        if renderer is None:
+            return
+        for symbol in renderer.symbols(QgsRenderContext()):
+            for i in range(symbol.symbolLayerCount()):
+                symbol_layer = symbol.symbolLayer(i)
+                if hasattr(symbol_layer, "setStrokeWidth"):
+                    symbol_layer.setStrokeWidth(width_mm)
 
     @staticmethod
     def _read_vector_field_values(layer: QgsVectorLayer, field_name: str):
