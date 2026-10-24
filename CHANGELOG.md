@@ -260,6 +260,39 @@ version per the policy above.
   `_draw_total_duration_block()`; `create_execution_time_layout()` now
   returns the Y position it finished at so the block can be placed
   without overlapping a variable-length chart.
+- Four new "Insights" pages, inserted after the dimension/factor/
+  subnational pages, surface patterns in the analysis grid beyond the
+  final score - all computed directly from `study_area_grid`/
+  `model.json`, no new geoprocessing:
+  - **Factor Score Patterns**: every factor's own score distribution
+    (reuses the existing sparkline machinery, just without the map), so
+    a spread or heavy low tail hiding inside one factor is visible even
+    when the blended score looks fine.
+  - **Where Low Scores Come From**: which dimension most often has the
+    lowest value among cells scoring 2 or below (the single biggest
+    lever for moving the most low-scoring cells up a class), and the
+    enablement-class breakdown of cells flagged as an economic
+    opportunity (opportunity cells that also score low are the
+    highest-priority investment targets).
+  - **Settlement and Hazard Patterns**: average score across the whole
+    study area vs within GHSL-identified settlements only (how much of
+    an apparently "good" score comes from uninhabited land), and average
+    score by environmental hazard exposure tercile (does hazard exposure
+    correlate with lower enablement).
+  - **Factor Correlations**: a diverging-colour heatmap of every
+    factor-pair's Pearson correlation - computed PAIRWISE (only
+    requiring the two factors in a given pair to both be valid for a
+    cell), not across every factor simultaneously, since factors cover
+    very different shares of the study area and requiring all of them
+    valid at once could leave zero usable cells even with plenty of
+    pairwise overlap; pairs below a minimum cell-overlap threshold are
+    left blank rather than showing a correlation computed from a
+    handful of coincidentally-aligned cells.
+  New `AnalysisReport._limiting_dimension_counts()`/
+  `_ghsl_settlement_gap_stats()`/`_opportunities_mask_score_histogram()`/
+  `_factor_correlation_matrix()`/`_hazard_exposure_tercile_scores()`/
+  `_read_grid_columns()`/`_read_grid_columns_with_gaps()`, plus the
+  matching page/chart builders and `create_insights_pages()`.
 
 ### Fixed
 

@@ -257,6 +257,11 @@ class AnalysisReport(BaseReport):
         # Then the analysis overview and the dimension/factor pages.
         current_page = self.create_detail_pages(current_page=4)
 
+        # Insights: patterns in the analysis grid beyond the score
+        # itself - what's limiting low-scoring cells, settlement/hazard
+        # effects, factor correlations.
+        current_page = self.create_insights_pages(current_page)
+
         # Processing times live at the back of the report — they are
         # technical bookkeeping, not analysis content.
         self.make_page(
@@ -813,6 +818,92 @@ class AnalysisReport(BaseReport):
             return numpy.array([])
 
         return numpy.array([row[0] for row in rows], dtype=float)
+
+    def _read_grid_columns(self, column_names: list) -> list:
+        """Fetch several study_area_grid columns at once as a list of
+        row tuples (one row per grid cell, in column_names order) -
+        unlike _read_grid_column_values(), which reads one column in
+        isolation and can't preserve the per-cell relationship between
+        columns some insights need (e.g. "which of these columns is
+        lowest for this cell").
+
+        Only rows where every requested column is non-null and > 0 are
+        returned - the same "exclude 0/NULL" convention every other grid
+        read in this file follows (0 typically means outside the
+        populated/opportunity area, not a genuine low score).
+
+        Returns:
+            A list of row tuples, or [] if the grid isn't available or
+            no column name is safe to use.
+        """
+        if not self.grid_gpkg_path or not os.path.exists(self.grid_gpkg_path):
+            return []
+        import sqlite3
+
+        from geest.core.grid_column_utils import _quote_sql_identifier
+
+        try:
+            quoted = [_quote_sql_identifier(c) for c in column_names]
+        except ValueError as error:
+            log_message(f"Refusing to read grid columns: {error}", tag="GeoE3")
+            return []
+
+        where_sql = " AND ".join(f"{c} IS NOT NULL AND {c} > 0" for c in quoted)
+        query = f"SELECT {', '.join(quoted)} FROM study_area_grid WHERE {where_sql}"  # nosec B608
+        try:
+            connection = sqlite3.connect(self.grid_gpkg_path)
+            try:
+                rows = connection.execute(query).fetchall()
+            finally:
+                connection.close()
+        except sqlite3.Error as error:
+            log_message(f"Could not read grid columns {column_names}: {error}", tag="GeoE3")
+            return []
+        return rows
+
+    def _read_grid_columns_with_gaps(self, column_names: list):
+        """Fetch several study_area_grid columns at once with 0/NULL
+        preserved as NaN rather than dropping the row - unlike
+        _read_grid_columns(), which requires EVERY requested column to
+        be valid for a row to be kept. With many columns of very
+        different spatial coverage (e.g. 16 factors, one covering 175k
+        cells and another covering 200), requiring all of them at once
+        can leave zero rows even though plenty of PAIRWISE overlap
+        exists between any two columns.
+
+        Returns:
+            An (n_rows, n_columns) numpy array, or an empty array if the
+            grid isn't available or no column name is safe to use.
+        """
+        if not self.grid_gpkg_path or not os.path.exists(self.grid_gpkg_path):
+            return numpy.empty((0, len(column_names)))
+        import sqlite3
+
+        from geest.core.grid_column_utils import _quote_sql_identifier
+
+        try:
+            quoted = [_quote_sql_identifier(c) for c in column_names]
+        except ValueError as error:
+            log_message(f"Refusing to read grid columns: {error}", tag="GeoE3")
+            return numpy.empty((0, len(column_names)))
+
+        query = f"SELECT {', '.join(quoted)} FROM study_area_grid"  # nosec B608
+        try:
+            connection = sqlite3.connect(self.grid_gpkg_path)
+            try:
+                rows = connection.execute(query).fetchall()
+            finally:
+                connection.close()
+        except sqlite3.Error as error:
+            log_message(f"Could not read grid columns {column_names}: {error}", tag="GeoE3")
+            return numpy.empty((0, len(column_names)))
+
+        data = numpy.array(rows, dtype=float)
+        # 0 means "outside the populated/opportunity area", the same
+        # exclusion convention every other grid read in this file
+        # follows - treat it the same as NULL (already NaN from SQLite).
+        data[data == 0] = numpy.nan
+        return data
 
     def _grid_column_score_histogram(self, column_name: str) -> list:
         """Count study_area_grid's own column values per QGIS's 5-class
@@ -1576,3 +1667,628 @@ class AnalysisReport(BaseReport):
                 color=NAVY,
                 bold=True,
             )
+
+    # ------------------------------------------------------------------
+    # Insights: patterns in study_area_grid beyond the score itself -
+    # which dimension most limits low-scoring cells, how much of the
+    # score comes from uninhabited land, whether economic opportunity
+    # and enablement line up, whether hazard exposure and enablement
+    # move together, and which factors move together. Each is read
+    # straight from study_area_grid/model.json - no new geoprocessing,
+    # consistent with the rest of this report-only module.
+    # ------------------------------------------------------------------
+
+    def _limiting_dimension_counts(self) -> list:
+        """For cells in the two lowest enablement classes (score <= 2),
+        which dimension is dragging the cell down - the dimension with
+        the lowest value for that cell. Whichever dimension appears most
+        often is the single biggest lever for moving the most low-
+        scoring cells up a class.
+
+        Returns:
+            [(dimension_name, count), ...] sorted by count descending,
+            or [] if there are fewer than two usable dimensions.
+        """
+        with open(self.model_path, "r", encoding="utf-8") as f:
+            model = json.load(f)
+        dims = [
+            (dimension.get("name", ""), AnalysisReport._grid_column_name("dimension", dimension.get("id", "")))
+            for dimension in model.get("dimensions", [])
+            if self._has_used_factors(dimension)
+        ]
+        if len(dims) < 2:
+            return []
+
+        rows = self._read_grid_columns(["geoe3"] + [col for _, col in dims])
+        counts = {name: 0 for name, _ in dims}
+        for row in rows:
+            if row[0] > 2:
+                continue
+            dim_values = row[1:]
+            min_index = min(range(len(dim_values)), key=lambda i: dim_values[i])
+            counts[dims[min_index][0]] += 1
+
+        return sorted(counts.items(), key=lambda item: item[1], reverse=True)
+
+    def _ghsl_settlement_gap_stats(self) -> Optional[dict]:
+        """Compare the average GeoE3 score across the whole study area
+        to the average within GHSL-identified settlements only - how
+        much of an apparently "good" overall score comes from
+        uninhabited land rather than places people actually live.
+
+        Returns:
+            {"avg_all", "avg_settlement", "settlement_share"}, with
+            avg_settlement/settlement_share None/0.0 if no settlement
+            cells are scored, or None if the grid isn't available.
+        """
+        rows_all = self._read_grid_columns(["geoe3"])
+        if not rows_all:
+            return None
+        rows_settlement = self._read_grid_columns(["geoe3_masked"])
+
+        avg_all = sum(row[0] for row in rows_all) / len(rows_all)
+        if not rows_settlement:
+            return {"avg_all": avg_all, "avg_settlement": None, "settlement_share": 0.0}
+        avg_settlement = sum(row[0] for row in rows_settlement) / len(rows_settlement)
+        return {
+            "avg_all": avg_all,
+            "avg_settlement": avg_settlement,
+            "settlement_share": len(rows_settlement) / len(rows_all),
+        }
+
+    def _opportunities_mask_score_histogram(self) -> list:
+        """Among cells flagged as an economic opportunity
+        (opportunities_mask = 1), how many fall into each enablement
+        class - the highest-priority cells for investment are
+        opportunity cells that ALSO score low: economic potential
+        exists but the conditions to access it don't (yet).
+
+        Returns:
+            Five counts, one per enablement class (see SCORE_CLASSES).
+        """
+        if not self.grid_gpkg_path or not os.path.exists(self.grid_gpkg_path):
+            return [0, 0, 0, 0, 0]
+        import sqlite3
+
+        try:
+            connection = sqlite3.connect(self.grid_gpkg_path)
+            try:
+                rows = connection.execute(
+                    "SELECT geoe3 FROM study_area_grid "
+                    "WHERE opportunities_mask = 1 AND geoe3 IS NOT NULL AND geoe3 > 0"
+                ).fetchall()
+            finally:
+                connection.close()
+        except sqlite3.Error as error:
+            log_message(f"Could not read opportunities mask overlap: {error}", tag="GeoE3")
+            return [0, 0, 0, 0, 0]
+        values = numpy.array([row[0] for row in rows], dtype=float)
+        return AnalysisReport._score_histogram_from_values(values)
+
+    #: Minimum number of cells where two factors both have a valid
+    #: score before their correlation is shown - below this, a handful
+    #: of coincidentally-aligned cells can produce a misleadingly
+    #: strong-looking coefficient.
+    MIN_CORRELATION_OVERLAP_CELLS = 30
+
+    def _factor_correlation_matrix(self) -> Optional[tuple]:
+        """Pairwise Pearson correlation between every pair of factor
+        scores, read directly from study_area_grid - factors that move
+        together signal a shared root cause, and a bundled intervention
+        might address both at once.
+
+        Computed PAIRWISE (only requiring the two factors in each pair
+        to both have a valid score for a cell), not across all factors
+        at once: factors cover very different shares of the study area
+        (a location-based factor might score a few hundred cells, an
+        index-based one scores almost all of them), so requiring every
+        factor to be valid simultaneously can leave zero usable cells
+        even though plenty of pairwise overlap exists. A factor with NO
+        valid cells anywhere (so it can never form a pair) is dropped
+        entirely rather than shown as a blank row/column.
+
+        Returns:
+            (factor_names, matrix) where matrix is an NxN numpy array of
+            correlation coefficients (NaN where two factors overlap on
+            fewer than MIN_CORRELATION_OVERLAP_CELLS cells), or None if
+            there are too few usable factors.
+        """
+        with open(self.model_path, "r", encoding="utf-8") as f:
+            model = json.load(f)
+        factors = []
+        for dimension in model.get("dimensions", []):
+            for factor in dimension.get("factors", []):
+                if self._has_used_indicators(factor):
+                    factors.append(
+                        (factor.get("name", ""), AnalysisReport._grid_column_name("factor", factor.get("id", "")))
+                    )
+        if len(factors) < 2:
+            return None
+
+        data = self._read_grid_columns_with_gaps([col for _, col in factors])
+        if data.shape[0] < AnalysisReport.MIN_CORRELATION_OVERLAP_CELLS:
+            return None
+
+        has_any_data = ~numpy.all(numpy.isnan(data), axis=0)
+        if numpy.count_nonzero(has_any_data) < 2:
+            return None
+        data = data[:, has_any_data]
+        names = [name for (name, _), keep in zip(factors, has_any_data) if keep]
+
+        n = data.shape[1]
+        matrix = numpy.full((n, n), numpy.nan)
+        for i in range(n):
+            matrix[i, i] = 1.0
+            for j in range(i + 1, n):
+                overlap = ~numpy.isnan(data[:, i]) & ~numpy.isnan(data[:, j])
+                if numpy.count_nonzero(overlap) >= AnalysisReport.MIN_CORRELATION_OVERLAP_CELLS:
+                    coefficient = numpy.corrcoef(data[overlap, i], data[overlap, j])[0, 1]
+                    matrix[i, j] = matrix[j, i] = coefficient
+
+        return names, matrix
+
+    def _hazard_exposure_tercile_scores(self) -> list:
+        """Average GeoE3 score for cells grouped into hazard-exposure
+        terciles (low/medium/high), via fac_environmental_hazards -
+        tests whether climate/hazard-exposed areas also tend to have
+        lower enablement, the case for pairing resilience and
+        empowerment investment rather than treating them separately.
+
+        fac_environmental_hazards follows the same 0-5 "higher is
+        better" convention as every other factor - a HIGH value means
+        LOW hazard exposure - so the lowest tercile of this column is
+        the highest-exposure group.
+
+        Returns:
+            [("High hazard exposure", avg_score), ("Medium ...", ...),
+            ("Low ...", ...)], with avg_score None for an empty bin, or
+            [] if there are too few scored cells to bin.
+        """
+        rows = self._read_grid_columns(["fac_environmental_hazards", "geoe3"])
+        if len(rows) < 3:
+            return []
+        hazards = numpy.array([row[0] for row in rows])
+        scores = numpy.array([row[1] for row in rows])
+        low_cut, high_cut = numpy.percentile(hazards, [33.33, 66.67])
+        bins = [
+            ("High hazard exposure", scores[hazards <= low_cut]),
+            ("Medium hazard exposure", scores[(hazards > low_cut) & (hazards <= high_cut)]),
+            ("Low hazard exposure", scores[hazards > high_cut]),
+        ]
+        return [(label, float(numpy.mean(values)) if values.size else None) for label, values in bins]
+
+    @staticmethod
+    def _diverging_color(value: float) -> QColor:
+        """White at 0, deepening to NAVY for +1 and off-red for -1 - a
+        standard diverging scale for the factor correlation heatmap
+        (distinct from interpolate_color(), which is a good/bad scale
+        for hazard/score values, not a magnitude-and-sign scale).
+        """
+        value = max(-1.0, min(1.0, value))
+        white = (255, 255, 255)
+        if value >= 0:
+            target = (0, 34, 68)  # NAVY
+            t = value
+        else:
+            target = (204, 68, 68)  # off-red, matches interpolate_color()
+            t = -value
+        r = int(white[0] + (target[0] - white[0]) * t)
+        g = int(white[1] + (target[1] - white[1]) * t)
+        b = int(white[2] + (target[2] - white[2]) * t)
+        return QColor(r, g, b)
+
+    def _draw_factor_distribution_grid(self, factors: list, current_page: int, top: float) -> None:
+        """Lay out one small score-distribution histogram per factor, 4
+        to a row - which specific factor has the widest spread or worst
+        tail, not just the final blended score.
+        """
+        columns = 4
+        gap = 6.0
+        cell_w = (CONTENT_W - (columns - 1) * gap) / columns
+        label_h = 8.0
+        sparkline_h = 20.0
+        row_pitch = label_h + sparkline_h + gap
+        for index, (name, grid_column) in enumerate(factors):
+            row, col = divmod(index, columns)
+            x = MARGIN + col * (cell_w + gap)
+            y = top + row * row_pitch
+            self._label(name, x, y, cell_w, label_h, current_page, size=7.5, color=CHARCOAL, bold=True)
+            self._draw_sparkline_for_column(
+                column_name=grid_column,
+                palette="likert",
+                x=x,
+                y=y + label_h,
+                w=cell_w,
+                h=sparkline_h,
+                page=current_page,
+            )
+
+    def make_factor_distributions_page(self, current_page: int) -> bool:
+        """Add a page showing every factor's own score distribution -
+        reuses the same sparkline this report already draws under every
+        minimap, just without the map.
+        """
+        with open(self.model_path, "r", encoding="utf-8") as f:
+            model = json.load(f)
+        factors = [
+            (factor.get("name", ""), AnalysisReport._grid_column_name("factor", factor.get("id", "")))
+            for dimension in model.get("dimensions", [])
+            for factor in dimension.get("factors", [])
+            if self._has_used_indicators(factor)
+        ]
+        if not factors:
+            return False
+
+        self.page_descriptions["factor_distributions"] = (
+            "Every factor's own score distribution across the analysis grid, so a "
+            "spread or a heavy low tail hiding inside a single factor is visible "
+            "even when the blended score above looks fine."
+        )
+        self.make_page(
+            title="Factor Score Patterns",
+            description_key="factor_distributions",
+            current_page=current_page,
+            show_header_and_footer=True,
+        )
+        self._draw_factor_distribution_grid(factors, current_page, top=HEADER_H + 28)
+        return True
+
+    def _draw_limiting_dimension_chart(self, counts: list, current_page: int, top: float) -> float:
+        """Horizontal bar chart: among cells in the two lowest enablement
+        classes, how often each dimension is the one dragging the cell
+        down.
+
+        Returns:
+            Y position (mm) just below the chart.
+        """
+        total = sum(n for _, n in counts) or 1
+        row_pitch = 12.0
+        bar_h = 6.0
+        label_w = 65.0
+        bar_x = MARGIN + label_w + 4
+        bar_max_w = CONTENT_W - label_w - 4 - 28
+        for i, (name, count) in enumerate(counts):
+            y = top + i * row_pitch
+            percentage = count / total * 100
+            self._label(
+                name,
+                MARGIN,
+                y,
+                label_w,
+                bar_h,
+                current_page,
+                size=9.5,
+                color=CHARCOAL,
+                halign=Qt.AlignmentFlag.AlignRight,
+            )
+            bar_w = max(0.6, bar_max_w * count / total)
+            self._rect(bar_x, y, bar_w, bar_h, CYAN, current_page)
+            self._label(f"{percentage:.0f}%", bar_x + bar_w + 2, y, 24, bar_h, current_page, size=9, color=GREY)
+        return top + len(counts) * row_pitch
+
+    def _draw_opportunities_overlap_chart(self, counts: list, current_page: int, top: float) -> float:
+        """Horizontal bar chart: among cells flagged as an economic
+        opportunity, how many fall into each enablement class, coloured
+        to match the main legend.
+
+        Returns:
+            Y position (mm) just below the chart.
+        """
+        total = sum(counts) or 1
+        row_pitch = 12.0
+        bar_h = 6.0
+        label_w = 65.0
+        bar_x = MARGIN + label_w + 4
+        bar_max_w = CONTENT_W - label_w - 4 - 28
+        for i, (count, (_range, class_name, colour, _meaning)) in enumerate(zip(counts, SCORE_CLASSES)):
+            y = top + i * row_pitch
+            percentage = count / total * 100
+            self._label(
+                class_name,
+                MARGIN,
+                y,
+                label_w,
+                bar_h,
+                current_page,
+                size=9.5,
+                color=CHARCOAL,
+                halign=Qt.AlignmentFlag.AlignRight,
+            )
+            bar_w = max(0.6, bar_max_w * count / total)
+            self._rect(bar_x, y, bar_w, bar_h, QColor(colour), current_page)
+            self._label(f"{percentage:.0f}%", bar_x + bar_w + 2, y, 24, bar_h, current_page, size=9, color=GREY)
+        return top + len(counts) * row_pitch
+
+    def make_low_score_drivers_page(self, current_page: int) -> bool:
+        """Add a page pairing two "where to intervene first" views: what
+        most often limits the lowest-scoring cells, and where existing
+        economic opportunity isn't yet matched by enabling conditions.
+        """
+        limiting = self._limiting_dimension_counts()
+        opportunities = self._opportunities_mask_score_histogram()
+        has_opportunities = sum(opportunities) > 0
+        if not limiting and not has_opportunities:
+            return False
+
+        self.page_descriptions["low_score_drivers"] = (
+            "Two views of where the biggest gains are available: which dimension "
+            "most often limits a low-scoring cell, and where existing economic "
+            "opportunity is not yet matched by enabling conditions."
+        )
+        self.make_page(
+            title="Where Low Scores Come From",
+            description_key="low_score_drivers",
+            current_page=current_page,
+            show_header_and_footer=True,
+        )
+        y = HEADER_H + 24
+        if limiting:
+            self._label(
+                "What's limiting the lowest-scoring cells",
+                MARGIN,
+                y,
+                CONTENT_W,
+                7,
+                current_page,
+                size=11.5,
+                color=NAVY,
+                bold=True,
+            )
+            self._label(
+                "Among cells scoring 2 or below, the dimension with the lowest value - "
+                "the single biggest lever for moving the most cells up a class.",
+                MARGIN,
+                y + 7,
+                CONTENT_W,
+                10,
+                current_page,
+                size=8.5,
+                color=GREY,
+            )
+            y = self._draw_limiting_dimension_chart(limiting, current_page, top=y + 18) + 14
+        if has_opportunities:
+            self._label(
+                "Economic opportunity vs enablement",
+                MARGIN,
+                y,
+                CONTENT_W,
+                7,
+                current_page,
+                size=11.5,
+                color=NAVY,
+                bold=True,
+            )
+            self._label(
+                "Among cells flagged as an economic opportunity, their enablement class - "
+                "opportunity cells that also score low are the highest-priority investment targets.",
+                MARGIN,
+                y + 7,
+                CONTENT_W,
+                10,
+                current_page,
+                size=8.5,
+                color=GREY,
+            )
+            self._draw_opportunities_overlap_chart(opportunities, current_page, top=y + 18)
+        return True
+
+    def _draw_ghsl_gap_block(self, stats: dict, current_page: int, top: float) -> float:
+        """Two stat cards side by side: average score across the whole
+        study area vs within GHSL-identified settlements only.
+
+        Returns:
+            Y position (mm) just below the block.
+        """
+        card_w = (CONTENT_W - 8) / 2
+        card_h = 28.0
+        cards = [("Average score, whole study area", f"{stats['avg_all']:.2f}")]
+        if stats["avg_settlement"] is not None:
+            cards.append(("Average score, GHSL settlements only", f"{stats['avg_settlement']:.2f}"))
+        for i, (label, value) in enumerate(cards):
+            x = MARGIN + i * (card_w + 8)
+            self._rect(x, top, card_w, card_h, MIST, current_page)
+            self._rect(x, top, 2.2, card_h, CYAN, current_page)
+            self._label(label, x + 8, top + 5, card_w - 16, 10, current_page, size=9, color=GREY)
+            self._label(value, x + 8, top + 14, card_w - 16, 12, current_page, size=18, color=NAVY, bold=True)
+        bottom = top + card_h
+        if stats["avg_settlement"] is not None:
+            self._label(
+                f"GHSL-identified settlements cover {stats['settlement_share'] * 100:.0f}% "
+                "of the scored study area.",
+                MARGIN,
+                bottom + 4,
+                CONTENT_W,
+                6,
+                current_page,
+                size=8.5,
+                color=GREY,
+            )
+            bottom += 10
+        return bottom
+
+    def _draw_hazard_exposure_chart(self, bins: list, current_page: int, top: float) -> None:
+        """Vertical bar chart: average GeoE3 score for cells in each
+        hazard-exposure tercile, low exposure to high, left to right.
+        """
+        ordered = list(reversed(bins))  # low -> medium -> high exposure
+        colours = [QColor("#2c7bb6"), QColor("#ffffbf"), QColor("#d7191c")]
+        values = [value for _, value in ordered if value is not None]
+        if not values:
+            return
+        peak = max(values) or 1.0
+        n = len(ordered)
+        gap = 8.0
+        bar_w = (CONTENT_W - (n - 1) * gap) / n
+        bar_area_h = 40.0
+        for i, (label, value) in enumerate(ordered):
+            x = MARGIN + i * (bar_w + gap)
+            if value is None:
+                continue
+            bar_h = bar_area_h * (value / peak)
+            y = top + (bar_area_h - bar_h)
+            self._rect(x, y, bar_w, bar_h, colours[i], current_page)
+            self._label(
+                f"{value:.2f}",
+                x,
+                y - 6,
+                bar_w,
+                5,
+                current_page,
+                size=9,
+                color=NAVY,
+                bold=True,
+                halign=Qt.AlignmentFlag.AlignHCenter,
+            )
+            self._label(
+                label,
+                x,
+                top + bar_area_h + 2,
+                bar_w,
+                10,
+                current_page,
+                size=8,
+                color=GREY,
+                halign=Qt.AlignmentFlag.AlignHCenter,
+            )
+
+    def make_settlement_hazard_page(self, current_page: int) -> bool:
+        """Add a page showing how much of the score comes from areas
+        people actually live in, and whether hazard-exposed areas also
+        tend to be less enabling.
+        """
+        ghsl_stats = self._ghsl_settlement_gap_stats()
+        hazard_bins = self._hazard_exposure_tercile_scores()
+        if ghsl_stats is None and not hazard_bins:
+            return False
+
+        self.page_descriptions["settlement_hazard"] = (
+            "How much of the overall score comes from areas people actually live "
+            "in, and whether hazard-exposed areas also tend to be less enabling."
+        )
+        self.make_page(
+            title="Settlement and Hazard Patterns",
+            description_key="settlement_hazard",
+            current_page=current_page,
+            show_header_and_footer=True,
+        )
+        y = HEADER_H + 24
+        if ghsl_stats is not None:
+            self._label("Settlement coverage", MARGIN, y, CONTENT_W, 7, current_page, size=11.5, color=NAVY, bold=True)
+            y = self._draw_ghsl_gap_block(ghsl_stats, current_page, top=y + 10) + 10
+        if hazard_bins:
+            self._label(
+                "Hazard exposure vs enablement",
+                MARGIN,
+                y,
+                CONTENT_W,
+                7,
+                current_page,
+                size=11.5,
+                color=NAVY,
+                bold=True,
+            )
+            self._label(
+                "Average GeoE3 score for cells grouped by environmental hazard exposure "
+                "(fire, flood, landslide, cyclone, drought).",
+                MARGIN,
+                y + 7,
+                CONTENT_W,
+                10,
+                current_page,
+                size=8.5,
+                color=GREY,
+            )
+            self._draw_hazard_exposure_chart(hazard_bins, current_page, top=y + 24)
+        return True
+
+    def _draw_correlation_heatmap(self, names: list, matrix, current_page: int, top: float) -> None:
+        """NxN heatmap of factor-score correlations - NAVY for strong
+        positive correlation, off-red for strong negative, white for
+        none. Factors that move together signal a shared root cause; a
+        bundled intervention might address both at once.
+        """
+        n = len(names)
+        cell = min(9.0, CONTENT_W / n)
+        grid_x = MARGIN + 10
+        for row in range(n):
+            y = top + row * cell
+            self._label(
+                str(row + 1),
+                MARGIN,
+                y,
+                8,
+                cell,
+                current_page,
+                size=6,
+                color=GREY,
+                halign=Qt.AlignmentFlag.AlignRight,
+                valign=Qt.AlignmentFlag.AlignVCenter,
+            )
+            for col in range(n):
+                x = grid_x + col * cell
+                value = matrix[row][col]
+                colour = WHITE if numpy.isnan(value) else AnalysisReport._diverging_color(value)
+                self._rect(x, y, cell - 0.3, cell - 0.3, colour, current_page)
+
+        label_y = top + n * cell + 1
+        for col in range(n):
+            x = grid_x + col * cell
+            self._label(
+                str(col + 1),
+                x,
+                label_y,
+                cell,
+                5,
+                current_page,
+                size=6,
+                color=GREY,
+                halign=Qt.AlignmentFlag.AlignHCenter,
+            )
+
+        legend_y = label_y + 8
+        legend_rows = (n + 1) // 2
+        legend_col_w = CONTENT_W / 2
+        for i, name in enumerate(names):
+            col, row = divmod(i, legend_rows)
+            x = MARGIN + col * legend_col_w
+            y = legend_y + row * 4.2
+            self._label(f"{i + 1}. {name}", x, y, legend_col_w - 4, 4.2, current_page, size=6.5, color=CHARCOAL)
+
+    def make_factor_correlation_page(self, current_page: int) -> bool:
+        """Add a page showing which factors tend to move together -
+        strongly correlated factors suggest a shared root cause, where a
+        bundled intervention might address more than one at once.
+        """
+        result = self._factor_correlation_matrix()
+        if result is None:
+            return False
+        names, matrix = result
+
+        self.page_descriptions["factor_correlation"] = (
+            "Which factors tend to move together across the analysis grid. A "
+            "strong correlation suggests a shared root cause - a single "
+            "intervention may move both factors at once."
+        )
+        self.make_page(
+            title="Factor Correlations",
+            description_key="factor_correlation",
+            current_page=current_page,
+            show_header_and_footer=True,
+        )
+        self._draw_correlation_heatmap(names, matrix, current_page, top=HEADER_H + 26)
+        return True
+
+    def create_insights_pages(self, current_page: int) -> int:
+        """Add every available insights page (see the module-level
+        comment above _limiting_dimension_counts()) in sequence, each
+        only if it has real data to show.
+        """
+        for page_builder in (
+            self.make_factor_distributions_page,
+            self.make_low_score_drivers_page,
+            self.make_settlement_hazard_page,
+            self.make_factor_correlation_page,
+        ):
+            if page_builder(current_page):
+                current_page += 1
+        return current_page
