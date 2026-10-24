@@ -631,9 +631,11 @@ class BaseReport:
         h: float,
         page: int,
         gap: float = 0.6,
+        show_percentages: bool = True,
     ) -> None:
         """Draw a tiny bar chart: one flat-filled bar per value, bottom-
-        aligned, height proportional to the tallest bar in the set.
+        aligned, height proportional to the tallest bar in the set, each
+        bar's share of the total labelled underneath it.
 
         Args:
             values: Bar heights (e.g. value counts) - any non-negative numbers.
@@ -642,21 +644,43 @@ class BaseReport:
             w, h: Total chart size in mm.
             page: Page number to draw on.
             gap: Horizontal gap between bars, in mm.
+            show_percentages: Reserve a thin strip under the bars for each
+                bar's share of the total, as "N%". Bars with a 0% share
+                (rounds to zero, not literally empty) are left unlabelled
+                to avoid a row of meaningless "0%"s on a long by-population
+                chart, where most of the 15 classes are usually empty.
         """
         n = len(values)
         if n == 0:
             return
         peak = max(values)
+        total = sum(values)
         if peak <= 0:
             return
+        label_h = 2.1 if show_percentages else 0.0
+        bar_area_h = h - label_h
         bar_w = (w - (n - 1) * gap) / n
         for index, (value, color) in enumerate(zip(values, colors)):
-            if value <= 0:
-                continue
-            bar_h = h * (value / peak)
             bar_x = x + index * (bar_w + gap)
-            bar_y = y + (h - bar_h)
-            self._rect(bar_x, bar_y, bar_w, bar_h, color, page)
+            if value > 0:
+                bar_h = bar_area_h * (value / peak)
+                bar_y = y + (bar_area_h - bar_h)
+                self._rect(bar_x, bar_y, bar_w, bar_h, color, page)
+            if show_percentages and total > 0:
+                percentage = round(value / total * 100)
+                if percentage > 0:
+                    self._label(
+                        f"{percentage}%",
+                        bar_x - gap,
+                        y + bar_area_h,
+                        bar_w + 2 * gap,
+                        label_h,
+                        page,
+                        size=3.3,
+                        color=GREY,
+                        halign=Qt.AlignmentFlag.AlignHCenter,
+                        valign=Qt.AlignmentFlag.AlignVCenter,
+                    )
 
     def _label(
         self,

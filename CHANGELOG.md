@@ -207,6 +207,49 @@ version per the policy above.
   study area. Benchmarked ~20-30x slower than reusing one for the same
   EPSG pair; now cached thread-locally (keyed by source/target EPSG),
   cutting H3 grid generation time roughly 4x in testing.
+- Every sparkline bar in the analysis report now labels itself with its
+  rounded share of the total (e.g. `52%`) directly beneath the bar - bars
+  rounding to 0% are left unlabelled, avoiding a wall of meaningless
+  labels on the 15-class by-population chart, where most classes are
+  usually empty. New `_draw_sparkline()` `show_percentages` parameter
+  (`base_report.py`, default `True`).
+- The analysis report's title now carries the project's admin0 (country)
+  name as a subtitle (e.g. "GeoE3 Analysis Report — Tunisia"), read from
+  `study_area/boundaries_dissolved.gpkg` - the field the user chose
+  during project setup to dissolve the study area boundary by. Picked out
+  by field TYPE (first String field) rather than name or position, since
+  GeoPackage surfaces its own integer `fid` primary key as field 0 ahead
+  of whatever name column the user picked. New
+  `AnalysisReport._admin0_name()`.
+- The analysis report now includes a page for each of the four
+  subnational aggregation vector products (GeoE3 score, GHSL-masked, by
+  population, by population GHSL-masked) - the majority score within
+  each administrative zone the user configured during project setup,
+  previously computed but never shown in the report. New
+  `AnalysisReport._add_vector_map_page()`/`_load_vector()`/
+  `_read_vector_field_values()`, reusing the existing sparkline machinery
+  against the layer's own `_majority` field instead of a
+  `study_area_grid` column (these products are per zone, not per cell).
+  The study area outline is deliberately not overlaid on these pages: the
+  zone polygons already tile the whole study area, and the aggregation
+  boundary can sit in a different CRS than the analysis grid - `make_map()`
+  combines layer extents without reprojecting, which silently collapses
+  the map to a near-empty page when the two CRSes differ.
+- A new closing "Study Area" page summarises the analysis grid: admin0
+  name, analysis scale, cell count, cell size, total analysis area, and
+  CRS, read directly from `study_area_grid` and `model.json`. New
+  `AnalysisReport.make_study_area_summary_page()`/`_study_area_stats()`.
+- The Processing Times page now shows a highlighted "Total analysis time"
+  block below the per-indicator chart - the wall-clock span from the
+  earliest to the latest recorded timestamp across every
+  dimension/factor/indicator, not a sum of each step's own duration,
+  which would overstate the real elapsed time for anything that ran
+  concurrently - styled like the legend page's "How the scores are
+  calculated" note. New
+  `AnalysisReport._total_analysis_duration_minutes()`/
+  `_draw_total_duration_block()`; `create_execution_time_layout()` now
+  returns the Y position it finished at so the block can be placed
+  without overlapping a variable-length chart.
 
 ### Fixed
 
