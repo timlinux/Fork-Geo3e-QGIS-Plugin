@@ -1537,7 +1537,20 @@ class TreePanel(QWidget):
             study_area_group = root.insertGroup(0, "GeoE3 Study Area")
 
         project.addMapLayer(layer, False)
-        study_area_group.addLayer(layer)
+        layer_tree_layer = study_area_group.addLayer(layer)
+
+        # Unlike add_to_map()/add_grid_layer_to_map(), this function never
+        # re-enabled visibility on the layer or its parent groups - if
+        # "GeoE3 Study Area" (or an ancestor) was ever unchecked for any
+        # reason, "Layer added to map" would fire while nothing actually
+        # rendered, with no self-healing re-check (worldbank/GeoE3 field
+        # report, 2026-10-24).
+        current_group = study_area_group
+        while current_group is not None:
+            current_group.setExpanded(True)
+            current_group.setItemVisibilityChecked(True)
+            current_group = current_group.parent()
+        layer_tree_layer.setItemVisibilityChecked(True)
 
         iface.messageBar().pushMessage(
             "GHSL Settlements",

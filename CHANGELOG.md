@@ -210,6 +210,13 @@ version per the policy above.
 
 ### Fixed
 
+- **"GHSL Settlements" reported "Layer added to map" but nothing ever
+  rendered.** Unlike `add_to_map()`/`add_grid_layer_to_map()`,
+  `add_ghsl_settlements_to_map()` never re-enabled visibility on the
+  layer or its parent groups after adding it - if "GeoE3 Study Area"
+  (or an ancestor) was ever unchecked for any reason, the layer stayed
+  invisible with no self-healing re-check, even though it loaded
+  successfully.
 - **"Clear Item" on the Analysis node silently deleted nothing.**
   `item.getPaths()` only knows how to build a path for
   indicator/factor/dimension hierarchies and returns `[]` for the
