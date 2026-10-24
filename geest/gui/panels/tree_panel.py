@@ -494,17 +494,68 @@ class TreePanel(QWidget):
 
         self.save_json_to_working_directory()
 
+    # The analysis item's own outputs are spread across several top-level
+    # directories (one per product) rather than a single directory
+    # matching its place in the tree hierarchy the way every other role
+    # gets from item.getPaths() - see _clear_single_item_outputs(). Names
+    # confirmed against each processor's own self.output_dir/
+    # self.workflow_directory (analysis_aggregation_workflow.py,
+    # wee_by_population_score_processor.py,
+    # opportunities_by_wee_score_processor.py,
+    # opportunities_by_wee_score_population_processor.py,
+    # opportunities_mask_processor.py, subnational_aggregation_processor.py).
+    ANALYSIS_OUTPUT_DIRECTORIES = (
+        "geoe3_score",
+        "geoe3_by_population_score",
+        "geoe3_score_ghsl_masked",
+        "geoe3_score_by_population_ghsl_masked",
+        "opportunity_masks",
+        "subnational_aggregation",
+    )
+    # Mirrors ANALYSIS_OUTPUT_DIRECTORIES - the study_area_grid columns the
+    # analysis item's own products write to (indicator/factor/dimension
+    # columns belong to those items, not the analysis item, and are left
+    # untouched here).
+    ANALYSIS_GRID_COLUMNS = (
+        "geoe3",
+        "geoe3_by_population",
+        "geoe3_masked",
+        "geoe3_by_population_masked",
+        "opportunities_mask",
+    )
+
     def _clear_single_item_outputs(self, item):
         """Clear one item's own outputs/attributes - see clear_item()."""
         from geest.core.grid_column_utils import clear_grid_column
         from geest.core.utilities import remove_from_map
 
         # Remove only the files directly inside this item's own workflow
-        # directory - never recurse into subdirectories, which belong to
-        # this item's children (e.g. a factor's indicators).
+        # director{y,ies} - never recurse into subdirectories, which
+        # belong to this item's children (e.g. a factor's indicators).
+        #
+        # item.getPaths() only knows how to build a path for
+        # indicator/factor/dimension hierarchies - it returns [] for the
+        # analysis item itself, which previously resolved the directory
+        # to clear down to self.working_directory (the whole project
+        # folder) rather than anywhere any of its outputs actually live,
+        # so "Clear Item" on the Analysis node silently deleted nothing.
+        # A later "Run Item Workflow" then found the stale per-area
+        # rasters from the earlier run still on disk and skipped
+        # reprocessing those areas as "already done", while areas without
+        # a leftover file got freshly (and correctly) regenerated -
+        # leaving an inconsistent mix of stale and fresh areas with no
+        # error ever raised (worldbank/GeoE3 field report, 2026-10-24).
         if self.working_directory:
-            item_directory = os.path.join(self.working_directory, *item.getPaths())
-            if os.path.isdir(item_directory):
+            if item.role == "analysis":
+                item_directories = [
+                    os.path.join(self.working_directory, name) for name in TreePanel.ANALYSIS_OUTPUT_DIRECTORIES
+                ]
+            else:
+                item_directories = [os.path.join(self.working_directory, *item.getPaths())]
+
+            for item_directory in item_directories:
+                if not os.path.isdir(item_directory):
+                    continue
                 for filename in os.listdir(item_directory):
                     file_path = os.path.join(item_directory, filename)
                     if os.path.isfile(file_path) or os.path.islink(file_path):
@@ -517,11 +568,21 @@ class TreePanel(QWidget):
                                 level=Qgis.Warning,
                             )
 
-        # Blank this item's own study_area_grid column (not its children's).
+        # Blank this item's own study_area_grid column(s) (not its
+        # children's). item.gridColumnName() falls through to
+        # item.attribute("id", "") for any role without its own prefix
+        # convention (dim_/fac_) - the analysis item has no "id"
+        # attribute at all, so that call always resolved to "", the same
+        # root cause as the directory bug above, and reached clear_grid_column()
+        # with a blank column name.
         if self.working_directory:
             gpkg_path = os.path.join(self.working_directory, "study_area", "study_area.gpkg")
             if os.path.exists(gpkg_path):
-                clear_grid_column(gpkg_path, item.gridColumnName())
+                if item.role == "analysis":
+                    for column_name in TreePanel.ANALYSIS_GRID_COLUMNS:
+                        clear_grid_column(gpkg_path, column_name)
+                else:
+                    clear_grid_column(gpkg_path, item.gridColumnName())
 
         # Remove this item's own layer(s) from the legend/registry, keeping
         # the group that holds its children's layers (if any) intact.
