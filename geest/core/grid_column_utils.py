@@ -1106,6 +1106,17 @@ def clear_grid_column(gpkg_path: str, column_name: str) -> bool:
         return False
 
     sanitized_column = _sanitize_column_name(column_name)
+    if not sanitized_column:
+        # _ensure_column_exists() already refuses to create a blank-named
+        # column and logs why, but its return value was ignored here -
+        # execution carried on regardless into a raw
+        # UPDATE study_area_grid SET "" = NULL, which SQLite rejects as
+        # "no such column" (worldbank/GeoE3 field report, 2026-10-24).
+        log_message(
+            f"Refusing to clear a grid column with a blank name (original column_name={column_name!r})",
+            level=Qgis.Critical,
+        )
+        return False
 
     # Ensure column exists — Windows can fail during add_model_columns_to_grid
     _ensure_column_exists(gpkg_path, sanitized_column)

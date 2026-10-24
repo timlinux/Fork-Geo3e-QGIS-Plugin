@@ -210,6 +210,25 @@ version per the policy above.
 
 ### Fixed
 
+- **"Clear Item" on the Analysis node silently deleted nothing.**
+  `item.getPaths()` only knows how to build a path for
+  indicator/factor/dimension hierarchies and returns `[]` for the
+  analysis item itself, so `_clear_single_item_outputs()` resolved its
+  output directory down to the whole project folder instead of
+  anywhere any of its outputs actually live. A later "Run Item
+  Workflow" then found stale per-area rasters from an earlier run
+  still on disk and skipped reprocessing those areas as "already
+  done", silently leaving an inconsistent mix of stale and freshly
+  regenerated areas with no error ever raised. Clearing the analysis
+  item now clears all six of its real output directories
+  (`geoe3_score`, `geoe3_by_population_score`,
+  `geoe3_score_ghsl_masked`, `geoe3_score_by_population_ghsl_masked`,
+  `opportunity_masks`, `subnational_aggregation`) and all five of its
+  own `study_area_grid` columns. `item.gridColumnName()` had the same
+  gap - the analysis item has no `id` attribute, so it fell through to
+  `""` and reached `clear_grid_column()` with a blank name, failing
+  with a SQLite "no such column" error; `clear_grid_column()` now also
+  refuses a blank column name outright as defense in depth.
 - **"GeoE3 x Opportunities Mask" (and its by-population variant) always
   showed blank in the tree and report, even on a fully successful run.**
   `OpportunitiesByWeeScoreProcessingTask`/`...PopulationProcessingTask`
