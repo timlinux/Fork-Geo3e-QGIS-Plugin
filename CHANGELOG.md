@@ -234,7 +234,17 @@ version per the policy above.
   zone polygons already tile the whole study area, and the aggregation
   boundary can sit in a different CRS than the analysis grid - `make_map()`
   combines layer extents without reprojecting, which silently collapses
-  the map to a near-empty page when the two CRSes differ.
+  the map to a near-empty page when the two CRSes differ. Each
+  subnational map's outline is also drawn much thinner than the style's
+  normal 0.26mm (`AnalysisReport._thin_vector_outlines()`, report
+  rendering only - the interactive map's own style is untouched): at
+  that width, hundreds of zones packed onto one page were obscuring
+  their own fill colour.
+- A second legend page explains the 15-class "by population" bivariate
+  scale (5 enablement classes x 3 population tercile classes) as a
+  colour matrix, inserted before any map that uses it - a different
+  scheme entirely from the plain 0-5 scale the first legend page covers.
+  New `AnalysisReport.make_by_population_legend_page()`.
 - A new closing "Study Area" page summarises the analysis grid: admin0
   name, analysis scale, cell count, cell size, total analysis area, and
   CRS, read directly from `study_area_grid` and `model.json`. New
