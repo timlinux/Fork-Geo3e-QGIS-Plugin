@@ -52,6 +52,14 @@ class JsonTreeItem:
         # Multiple threads can read simultaneously, but writes are exclusive
         self._lock = QReadWriteLock()
 
+        # Transient UI-only state (never serialized - see attributes()/
+        # itemData[3]): the current animation frame to show in place of
+        # this item's own status icon (column 1) while a workflow is
+        # running on it. Not a separate tree column/widget, which was a
+        # source of unwanted panel resizing (worldbank/GeoE3 field
+        # report, 2026-10-24).
+        self._spinner_pixmap = None
+
         if is_qgis_dark_theme_active():
             # Define icons for each role
             self.dimension_icon = QIcon(resources_path("resources", "icons", "dimension-light.svg"))
@@ -409,6 +417,18 @@ class JsonTreeItem:
             return self.indicator_icon
         return None
 
+    def set_spinner_pixmap(self, pixmap) -> None:
+        """Show this animation frame in place of this item's own status icon.
+
+        Args:
+            pixmap: The current QMovie frame (a QPixmap) to display.
+        """
+        self._spinner_pixmap = pixmap
+
+    def clear_spinner_pixmap(self) -> None:
+        """Restore this item's normal status icon once its workflow finishes."""
+        self._spinner_pixmap = None
+
     def getItemTooltip(self):
         """Retrieve the appropriate tooltip for the item based on its role."""
         data = self.attributes()
@@ -439,7 +459,15 @@ class JsonTreeItem:
         return ""
 
     def getStatusIcon(self):
-        """Retrieve the appropriate icon for the item based on its role."""
+        """Retrieve the appropriate icon for the item based on its role.
+
+        While a workflow is running on this item, the normal status icon
+        is replaced by the current spinner animation frame - see
+        set_spinner_pixmap()/clear_spinner_pixmap().
+        """
+        if self._spinner_pixmap is not None:
+            return QIcon(self._spinner_pixmap)
+
         status = self.getStatus()
 
         if status == "Excluded from analysis":

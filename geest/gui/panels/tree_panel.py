@@ -115,7 +115,7 @@ class TreePanel(QWidget):
         # silently stop a DIFFERENT, still-running item's spinner instead,
         # freezing it on its last rendered frame (worldbank/GeoE3 field
         # report, 2026-10-24).
-        self._item_spinners = {}  # guid -> (child_movie, parent_movie_or_None)
+        self._item_spinners = {}  # guid -> [QMovie, ...] (item's own, plus parent's if an indicator)
 
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 8)
@@ -2419,12 +2419,17 @@ class TreePanel(QWidget):
     def on_workflow_started(self, item):
         """
         Slot for handling when a workflow starts.
-        Update the tree item to indicate that the workflow is running.
+        Animate the tree item's own status icon (column 1, and its
+        parent's, for an indicator) in place of the normal icon to
+        indicate it's running - see
+        JsonTreeItem.set_spinner_pixmap()/getStatusIcon(). Replacing the
+        icon in place avoids a second tree column/widget, which was a
+        source of unwanted panel resizing (worldbank/GeoE3 field report,
+        2026-10-24).
 
         Args:
             item: The workflow item that was started.
         """
-        # Get the node index for the item
         item = TreePanel._resolve_display_item(item)
         node_index = self.model.itemIndex(item)
         if not node_index.isValid():
@@ -2435,75 +2440,45 @@ class TreePanel(QWidget):
             )
             return
 
-        # Ensure we work with QModelIndex instead of QPersistentModelIndex
-        child_index = QModelIndex(node_index)
+        model = self.model
 
-        # Get row height and prepare movies - kept local (not self.*) so two
-        # items' spinners can never clobber each other; see _item_spinners.
-        row_height = self.treeView.rowHeight(child_index)
-        child_movie = QMovie(resources_path("resources", "throbber.gif"))
-        parent_movie = None
+        def start_spinner(target_item):
+            """Animate target_item's own status (column 1) icon, one throbber frame at a time."""
+            movie = QMovie(resources_path("resources", "throbber.gif"))
 
-        # If this is an indicator, calculate height for parent in case the
-        # indicator is hidden (single-child factor, fused into its row).
-        # parent_index can be invalid even for a genuinely-running
+            def _on_frame_changed(_frame_number):
+                target_item.set_spinner_pixmap(movie.currentPixmap())
+                target_index = model.itemIndex(target_item)
+                if target_index.isValid():
+                    status_index = model.index(target_index.row(), 1, target_index.parent())
+                    model.dataChanged.emit(status_index, status_index, [Qt.ItemDataRole.DecorationRole])
+
+            movie.frameChanged.connect(_on_frame_changed)
+            movie.start()
+            # frameChanged only fires once the Qt event loop actually
+            # ticks - show the first frame immediately rather than
+            # leaving the normal icon in place until that happens.
+            _on_frame_changed(movie.currentFrameNumber())
+            return movie
+
+        # Kept local (not self.*) so two items' spinners can never clobber
+        # each other; see _item_spinners.
+        movies = [start_spinner(item)]
+
+        # Also animate the parent factor/dimension's own icon, so an
+        # ancestor visibly shows progress while a descendant indicator
+        # runs. parent_index can be invalid even for a genuinely-running
         # indicator: JsonTreeModel._findIndexByGuid() can locate a HIDDEN
         # item's own children but never the hidden item itself, so a
-        # single-child factor's own index is always unresolvable. Guard
-        # before using it - row_height from child_index above is already
-        # correct and must not be overwritten with rowHeight() on an
-        # invalid index (0/-1), which silently scaled the child spinner
-        # itself down to an invisible size (worldbank/GeoE3 field report,
-        # 2026-10-24: neither the child nor the parent spinner showed for
-        # "Access to Public Transport", a single-indicator factor).
+        # single-child factor's own index is always unresolvable - there's
+        # no separate row to animate there (its indicator's row already is
+        # that row, via _resolve_display_item() above).
         if item.role == "indicator":
             parent_item = item.parent()
-            parent_index = self.model.itemIndex(parent_item)
-            if parent_index.isValid():
-                row_height = self.treeView.rowHeight(parent_index)
+            if parent_item and model.itemIndex(parent_item).isValid():
+                movies.append(start_spinner(parent_item))
 
-        # Scale the child movie
-        child_movie.setScaledSize(
-            child_movie.currentPixmap().size().scaled(row_height, row_height, Qt.AspectRatioMode.KeepAspectRatio)
-        )
-
-        # Set animated icon for the child
-        child_label = QLabel()
-        child_label.setMovie(child_movie)
-        child_movie.start()
-
-        # Place child animation
-        second_column_index = self.model.index(child_index.row(), 1, child_index.parent())
-        self.treeView.setIndexWidget(second_column_index, child_label)
-
-        # Always show parent animation if this is an indicator
-        if item.role == "indicator":
-            parent_item = item.parent()
-            if parent_item:
-                parent_index = self.model.itemIndex(parent_item)
-                if parent_index.isValid():
-                    # Create parent animation
-                    parent_movie = QMovie(resources_path("resources", "throbber.gif"))
-                    parent_movie.setScaledSize(
-                        parent_movie.currentPixmap()
-                        .size()
-                        .scaled(row_height, row_height, Qt.AspectRatioMode.KeepAspectRatio)
-                    )
-                    parent_label = QLabel()
-                    parent_label.setMovie(parent_movie)
-                    parent_movie.start()
-
-                    # Get parent's second column index
-                    parent_second_column_index = self.model.index(parent_index.row(), 1, parent_index.parent())
-
-                    # Set parent animation and ensure it's visible
-                    self.treeView.setIndexWidget(parent_second_column_index, parent_label)
-                    parent_label.show()
-
-                    # Force immediate update
-                    self.treeView.viewport().update()
-
-        self._item_spinners[item.guid] = (child_movie, parent_movie)
+        self._item_spinners[item.guid] = movies
 
     def task_progress_updated(self, progress):
         """Slot to be called when the task progress is updated.
@@ -2627,11 +2602,13 @@ class TreePanel(QWidget):
         self._stop_item_spinner(item)
 
     def _stop_item_spinner(self, item) -> None:
-        """Stop and clear the animated throbber on_workflow_started() placed on item's row.
+        """Stop the animated throbber on_workflow_started() placed on
+        item's (and its parent's, for an indicator) own status icon
+        (column 1), and restore the normal icon.
 
         Shared by on_workflow_completed() and download_all_resources() - any
         caller that started the spinner via on_workflow_started() must pair
-        it with this to clear it, including the parent row's spinner for an
+        it with this to clear it, including the parent's icon for an
         indicator.
         """
         item = TreePanel._resolve_display_item(item)
@@ -2645,29 +2622,27 @@ class TreePanel(QWidget):
             )
             return
 
-        parent_second_column_index = None
-        if item.role == "indicator":
-            # Stop the animation on its parent too
-            parent_index = node_index.parent()
-            parent_second_column_index = self.model.index(parent_index.row(), 1, parent_index.parent())
-
         # Pop this item's OWN movies - never touch another item's, which a
         # single shared self.child_movie/self.parent_movie pair used to do
         # whenever two items' spinners overlapped (concurrent_tasks > 1, or
         # just two sequential items racing).
-        child_movie, parent_movie = self._item_spinners.pop(item.guid, (None, None))
-        if child_movie is not None:
-            child_movie.stop()
-        if parent_movie is not None:
-            parent_movie.stop()
+        for movie in self._item_spinners.pop(item.guid, []):
+            movie.stop()
 
-        second_column_index = self.model.index(node_index.row(), 1, node_index.parent())
-        self.treeView.setIndexWidget(second_column_index, None)
-        if parent_second_column_index:
-            self.treeView.setIndexWidget(parent_second_column_index, None)
+        item.clear_spinner_pixmap()
+        status_index = self.model.index(node_index.row(), 1, node_index.parent())
+        self.model.dataChanged.emit(status_index, status_index, [Qt.ItemDataRole.DecorationRole])
 
-        # Emit dataChanged to refresh the decoration
-        self.model.dataChanged.emit(second_column_index, second_column_index)
+        if item.role == "indicator":
+            parent_item = item.parent()
+            if parent_item:
+                parent_item.clear_spinner_pixmap()
+                parent_index = self.model.itemIndex(parent_item)
+                if parent_index.isValid():
+                    parent_status_index = self.model.index(parent_index.row(), 1, parent_index.parent())
+                    self.model.dataChanged.emit(
+                        parent_status_index, parent_status_index, [Qt.ItemDataRole.DecorationRole]
+                    )
 
     def download_all_resources(self):
         """Walk every indicator, download missing resources, and wire up cached ones.

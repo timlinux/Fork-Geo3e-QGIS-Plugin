@@ -210,6 +210,17 @@ version per the policy above.
 
 ### Fixed
 
+- **The running-item spinner now animates in place of the status icon
+  (column 1) instead of inserting a separate widget there.** Inserting/
+  removing a widget via `treeView.setIndexWidget()` every time a
+  workflow started or finished was a source of unwanted tree-panel
+  resizing. `JsonTreeItem.getStatusIcon()` now shows the current
+  animation frame (`set_spinner_pixmap()`/`clear_spinner_pixmap()`)
+  while a workflow runs, refreshed via `dataChanged` on that one cell -
+  the same self-sizing column, no widget insertion. As a side effect,
+  the spinner's size is no longer derived from `QTreeView.rowHeight()`,
+  removing the whole class of "invalid/unresolvable row height"
+  corruption this relied on working around.
 - **"GHSL Settlements" reported "Layer added to map" but nothing ever
   rendered.** Unlike `add_to_map()`/`add_grid_layer_to_map()`,
   `add_ghsl_settlements_to_map()` never re-enabled visibility on the
