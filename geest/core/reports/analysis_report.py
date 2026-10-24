@@ -18,6 +18,7 @@ from qgis.core import (
     QgsLayoutSize,
     QgsProject,
     QgsRasterLayer,
+    QgsRenderContext,
     QgsSingleSymbolRenderer,
     QgsUnitTypes,
     QgsVectorLayer,
@@ -32,6 +33,7 @@ from .base_report import (
     CHARCOAL,
     CONTENT_W,
     CYAN,
+    FOOTER_Y,
     GREY,
     HEADER_H,
     MARGIN,
@@ -85,7 +87,7 @@ class AnalysisReport(BaseReport):
 
     """
 
-    def __init__(self, model_path: str, working_directory: str = None, report_name="GeoE3 Analysis Report"):
+    def __init__(self, model_path: str, working_directory: Optional[str] = None, report_name="GeoE3 Analysis Report"):
         """
         Initialize the report.
 
@@ -95,6 +97,9 @@ class AnalysisReport(BaseReport):
             report_name: The title to use for the report.
         """
         template_path = resources_path("resources", "qpt", "analysis_summary_report_template.qpt")
+        admin0_name = self._admin0_name(working_directory)
+        if admin0_name:
+            report_name = f"{report_name} — {admin0_name}"
         super().__init__(template_path, report_name)
 
         self.report_name = report_name
@@ -124,6 +129,51 @@ class AnalysisReport(BaseReport):
         scores from 0 to 5. This page explains what the colours mean and how the
         values are derived.
         """
+
+    @staticmethod
+    def _admin0_name(working_directory: Optional[str]) -> str:
+        """Read the admin0 (country) name chosen during project setup.
+
+        Project creation lets the user pick which field of their study
+        area boundary layer holds the area's name (e.g. an "ADM0_EN"
+        column); study_area_processing_task.py dissolves the input
+        boundary by that field into
+        study_area/boundaries_dissolved.gpkg, one feature (and that one
+        field, plus GeoPackage's own integer "fid") per distinct value.
+        Reads it by field TYPE (the first String field) rather than by
+        name or position - the user could have picked any column name,
+        and QGIS's own field list (unlike raw OGR's) includes "fid" as
+        field 0, so position 0 is the row id, not the name.
+
+        Args:
+            working_directory: The project's working directory, or None.
+
+        Returns:
+            The admin0 name(s) found (joined with ", " if more than one
+            distinct value was dissolved), or "" if the file, layer, or a
+            usable field isn't there - callers should fall back to
+            whatever title they already have.
+        """
+        if not working_directory:
+            return ""
+        gpkg_path = os.path.join(working_directory, "study_area", "boundaries_dissolved.gpkg")
+        if not os.path.exists(gpkg_path):
+            return ""
+        layer = QgsVectorLayer(gpkg_path, "boundaries_dissolved", "ogr")
+        if not layer.isValid():
+            return ""
+        name_field_index = next(
+            (i for i, field in enumerate(layer.fields()) if field.typeName() == "String"),
+            None,
+        )
+        if name_field_index is None:
+            return ""
+        names = []
+        for feature in layer.getFeatures():
+            value = feature.attribute(name_field_index)
+            if value and str(value) not in names:
+                names.append(str(value))
+        return ", ".join(names)
 
     def cleanup(self):
         """
@@ -199,8 +249,13 @@ class AnalysisReport(BaseReport):
         # Explain the colour scheme before showing any maps.
         self.make_legend_page(current_page=2)
 
+        # The "by population" bivariate scale is a different scheme
+        # entirely - explain it on its own page, before any map that
+        # uses it.
+        self.make_by_population_legend_page(current_page=3)
+
         # Then the analysis overview and the dimension/factor pages.
-        current_page = self.create_detail_pages(current_page=3)
+        current_page = self.create_detail_pages(current_page=4)
 
         # Processing times live at the back of the report — they are
         # technical bookkeeping, not analysis content.
@@ -210,10 +265,18 @@ class AnalysisReport(BaseReport):
             current_page=current_page,
             show_header_and_footer=True,
         )
-        self.create_execution_time_layout(
+        bottom_y = self.create_execution_time_layout(
             entries=self.extract_execution_times_with_colors(),
             page=current_page,
         )
+        total_minutes = self._total_analysis_duration_minutes()
+        if total_minutes is not None:
+            self._draw_total_duration_block(total_minutes, bottom_y + 6, current_page)
+        current_page += 1
+
+        # The study area summary closes the report - readers who want to
+        # judge the analysis's resolution and scope land here last.
+        self.make_study_area_summary_page(current_page=current_page)
         current_page += 1
 
     def make_legend_page(self, current_page: int) -> None:
@@ -313,6 +376,136 @@ class AnalysisReport(BaseReport):
         )
         note_body.setHAlign(Qt.AlignmentFlag.AlignJustify)
 
+    def make_by_population_legend_page(self, current_page: int) -> None:
+        """Add a second legend page explaining the 15-class "by
+        population" bivariate scale (resources/qml/
+        geoe3_by_population_score.qml): every one of the 5 plain
+        enablement classes crossed with 3 population tercile classes -
+        a different scheme entirely from the 0-5 scale make_legend_page()
+        explains, used by every "By population" map in the report.
+        """
+        self.page_descriptions["by_population_legend"] = (
+            "An enablement score on its own can't show whether a low-scoring "
+            "place is home to a handful of people or a large underserved "
+            "population. This bivariate scale crosses each enablement class "
+            "with how many people live there, so the places most in need of "
+            "intervention AND home to the most people stand out at a glance."
+        )
+        self.make_page(
+            title="Reading the By-Population Maps",
+            description_key="by_population_legend",
+            current_page=current_page,
+            show_header_and_footer=True,
+        )
+
+        population_labels = ["Low", "Medium", "High"]
+        enablement_labels = [name for _, name, _, _ in SCORE_CLASSES]
+        n_cols = len(enablement_labels)
+        n_rows = len(population_labels)
+
+        grid_x = MARGIN + 24
+        grid_y = HEADER_H + 36
+        cell_w = (CONTENT_W - 24) / n_cols
+        cell_h = 16.0
+        gap = 0.6
+
+        for col in range(n_cols):
+            for row in range(n_rows):
+                # Classes run enablement-major, population-minor (see
+                # geoe3_by_population_vector_score.qml): value 1 is
+                # "very low enablement, low population", value 3 is
+                # "very low enablement, high population", value 4 moves
+                # to the next enablement class, and so on.
+                value = col * n_rows + row + 1
+                x = grid_x + col * cell_w
+                # Row 0 ("Low" population) sits at the BOTTOM of the grid.
+                y = grid_y + (n_rows - 1 - row) * cell_h
+                colour = QColor(GEOE3_BY_POPULATION_COLORS[value])
+                self._rect(x, y, cell_w - gap, cell_h - gap, colour, current_page)
+
+        for row, population_name in enumerate(population_labels):
+            y = grid_y + (n_rows - 1 - row) * cell_h
+            self._label(
+                population_name,
+                MARGIN,
+                y + (cell_h - gap) / 2 - 3,
+                22,
+                6,
+                current_page,
+                size=9,
+                color=GREY,
+                halign=Qt.AlignmentFlag.AlignRight,
+            )
+
+        label_y = grid_y + n_rows * cell_h + 2
+        for col, enablement_name in enumerate(enablement_labels):
+            self._label(
+                enablement_name,
+                grid_x + col * cell_w - 4,
+                label_y,
+                cell_w + 8,
+                10,
+                current_page,
+                size=7.5,
+                color=GREY,
+                halign=Qt.AlignmentFlag.AlignHCenter,
+            )
+
+        self._label(
+            "Population density",
+            MARGIN,
+            grid_y - 8,
+            CONTENT_W,
+            6,
+            current_page,
+            size=9,
+            color=NAVY,
+            bold=True,
+        )
+        self._label(
+            "Enablement",
+            grid_x,
+            label_y + 11,
+            CONTENT_W - 24,
+            6,
+            current_page,
+            size=9,
+            color=NAVY,
+            bold=True,
+        )
+
+        note_y = label_y + 21
+        note_h = 38
+        self._rect(MARGIN, note_y, CONTENT_W, note_h, MIST, current_page)
+        self._rect(MARGIN, note_y, 2.2, note_h, CYAN, current_page)
+        self._label(
+            "How the by-population score is calculated",
+            MARGIN + 8,
+            note_y + 4.5,
+            CONTENT_W - 16,
+            7,
+            current_page,
+            size=12,
+            color=NAVY,
+            bold=True,
+        )
+        note_body = self._label(
+            "<p>Each grid cell's plain 0-5 GeoE3 score is combined with its "
+            "population count, split into three tercile classes (low, medium, "
+            "high) computed across the whole study area, to produce one of 15 "
+            "classes. The colour ramp runs from deep red (low enablement, low "
+            "population) to light blue (high enablement, high population).</p>",
+            MARGIN + 8,
+            note_y + 13,
+            CONTENT_W - 16,
+            note_h - 17,
+            current_page,
+            size=9.5,
+            color=CHARCOAL,
+            html=True,
+        )
+        note_body.setHAlign(Qt.AlignmentFlag.AlignJustify)
+
     def _load_raster(self, layer_uri: str, title: str) -> Optional[QgsRasterLayer]:
         """Load (and cache) a raster result layer, or None when unavailable.
 
@@ -334,6 +527,84 @@ class AnalysisReport(BaseReport):
         self.temp_layers.append(layer)
         self._raster_cache[layer_uri] = layer
         return layer
+
+    def _load_vector(self, layer_uri: str, title: str) -> Optional[QgsVectorLayer]:
+        """Load (and cache) a vector result layer with its sibling .qml
+        style, or None when unavailable. Mirrors _load_raster() for the
+        subnational aggregation products: plain polygons with no
+        embedded symbology, whose categorized/graduated colour scheme
+        (matching every other product's score ramp) lives in a .qml file
+        sitting next to the GeoPackage (see
+        subnational_aggregation_processor.py).
+        """
+        if not layer_uri:
+            return None
+        if not hasattr(self, "_vector_cache"):
+            self._vector_cache = {}
+        if layer_uri in self._vector_cache:
+            return self._vector_cache[layer_uri]
+        layer = QgsVectorLayer(layer_uri, title, "ogr")
+        if not layer.isValid():
+            log_message(f"Layer {layer_uri} is invalid — omitted from report.", tag="GeoE3")
+            self._vector_cache[layer_uri] = None
+            return None
+        gpkg_path = layer_uri.split("|", 1)[0]
+        qml_path = os.path.splitext(gpkg_path)[0] + ".qml"
+        if os.path.exists(qml_path):
+            layer.loadNamedStyle(qml_path)
+            AnalysisReport._thin_vector_outlines(layer)
+        QgsProject.instance().addMapLayer(layer, False)
+        self.temp_layers.append(layer)
+        self._vector_cache[layer_uri] = layer
+        return layer
+
+    #: Outline width (mm) for subnational aggregation report maps - the
+    #: style's normal 0.26mm outline is sized for the interactive QGIS
+    #: canvas, where only a handful of zones are usually on screen at
+    #: once. A report page packs hundreds of zones into 180mm, where
+    #: that same width eats into a large share of each tiny zone's
+    #: visible area, obscuring the fill colour it's meant to show.
+    REPORT_VECTOR_OUTLINE_WIDTH_MM = 0.08
+
+    @staticmethod
+    def _thin_vector_outlines(layer: QgsVectorLayer, width_mm: float = REPORT_VECTOR_OUTLINE_WIDTH_MM) -> None:
+        """Thin every symbol's outline for report rendering only - the
+        layer's own .qml style file (used by the interactive map too) is
+        left untouched. See REPORT_VECTOR_OUTLINE_WIDTH_MM for why.
+        """
+        renderer = layer.renderer()
+        if renderer is None:
+            return
+        for symbol in renderer.symbols(QgsRenderContext()):
+            for i in range(symbol.symbolLayerCount()):
+                symbol_layer = symbol.symbolLayer(i)
+                if hasattr(symbol_layer, "setStrokeWidth"):
+                    symbol_layer.setStrokeWidth(width_mm)
+
+    @staticmethod
+    def _read_vector_field_values(layer: QgsVectorLayer, field_name: str):
+        """Read a vector layer's own attribute values directly - the
+        subnational aggregation products' authoritative per-zone score
+        (one administrative zone per feature), with no study_area_grid
+        column backing them the way per-cell products have.
+
+        Args:
+            layer: The vector layer to read.
+            field_name: Attribute holding the per-zone score (e.g.
+                "_majority").
+
+        Returns:
+            A 1-D numpy array of the field's non-null, non-zero values.
+        """
+        field_index = layer.fields().indexFromName(field_name)
+        if field_index < 0:
+            return numpy.array([])
+        values = [
+            value
+            for value in (feature.attribute(field_index) for feature in layer.getFeatures())
+            if value is not None and value > 0
+        ]
+        return numpy.array(values, dtype=float)
 
     def _map_layers(self, layer: QgsRasterLayer) -> list:
         """Raster plus the study area outline when available."""
@@ -414,6 +685,77 @@ class AnalysisReport(BaseReport):
             self._add_minimap_grid(minimaps, current_page, top=main_y + main_h + 12)
         return True
 
+    def _add_vector_map_page(
+        self,
+        title: str,
+        description_key: str,
+        layer_uri: str,
+        current_page: int,
+        score_field: str = "_majority",
+        palette: str = "likert",
+    ) -> bool:
+        """Add a page for a subnational-aggregation vector product: one
+        polygon per administrative zone (the boundary the user chose
+        during project setup), coloured by its majority score, with the
+        same inset sparkline treatment _add_map_page() gives raster
+        products.
+
+        Args:
+            title: The title for the page.
+            description_key: Key for the page description in self.page_descriptions.
+            layer_uri: Path to the vector GeoPackage layer, e.g.
+                "<path>.gpkg|layername=<name>".
+            current_page: The current page number.
+            score_field: Attribute holding the per-zone majority score.
+            palette: "likert" (plain 0-5 scale) or "by_population" (the
+                1-15 enablement x population bivariate scale) - which
+                colour scheme the inset sparkline should use.
+
+        Returns:
+            bool: True if the page was added, False otherwise.
+        """
+        layer = self._load_vector(layer_uri, title)
+        if layer is None:
+            log_message(f"No usable layer for '{title}', skipping page", tag="GeoE3")
+            return False
+
+        self.make_page(
+            title=title,
+            description_key=description_key,
+            current_page=current_page,
+            show_header_and_footer=True,
+        )
+
+        # Unlike the raster pages, the study area outline isn't overlaid
+        # here: the zone polygons already tile the whole study area, so
+        # it would be redundant, and it often sits in a different CRS
+        # than the aggregation layer (zones come from a user-chosen
+        # boundary layer, not the analysis grid) - make_map() combines
+        # layer extents without reprojecting, so mixing CRSes there
+        # silently produces a near-empty page.
+        main_x, main_y, main_w, main_h = 15, 52, 180, 200.0
+        self.make_map(
+            layers=[layer],
+            current_page=current_page,
+            crs=layer.crs(),
+            x=main_x,
+            y=main_y,
+            map_width_mm=main_w,
+            map_height_mm=main_h,
+        )
+        values = self._read_vector_field_values(layer, score_field)
+        if values.size:
+            self._draw_main_map_sparkline_for_values(
+                values=values,
+                palette=palette,
+                map_x=main_x,
+                map_y=main_y,
+                map_w=main_w,
+                map_h=main_h,
+                page=current_page,
+            )
+        return True
+
     @staticmethod
     def _grid_column_name(role: str, item_id: str) -> str:
         """Mirror JsonTreeItem.gridColumnName()'s sanitisation for report
@@ -487,12 +829,7 @@ class AnalysisReport(BaseReport):
         Returns:
             list: Five counts, one per QML class, in (0,1] .. (4,5] order.
         """
-        values = self._read_grid_column_values(column_name)
-        # right=True => bins[i-1] < value <= bins[i], matching the QML's
-        # own right-inclusive class boundaries; index 5 (value > 5) is
-        # out of range and dropped by only counting indices 0-4.
-        class_index = numpy.digitize(values, bins=[1, 2, 3, 4, 5], right=True)
-        return [int(numpy.count_nonzero(class_index == i)) for i in range(5)]
+        return AnalysisReport._score_histogram_from_values(self._read_grid_column_values(column_name))
 
     def _grid_column_palette_histogram(self, column_name: str, n_classes: int) -> list:
         """Count study_area_grid's own column values per EXACT integer
@@ -509,29 +846,86 @@ class AnalysisReport(BaseReport):
         Returns:
             list: n_classes counts, for values 1..n_classes in order.
         """
-        values = numpy.round(self._read_grid_column_values(column_name)).astype(int)
-        return [int(numpy.count_nonzero(values == v)) for v in range(1, n_classes + 1)]
+        return AnalysisReport._palette_histogram_from_values(self._read_grid_column_values(column_name), n_classes)
+
+    @staticmethod
+    def _score_histogram_from_values(values) -> list:
+        """Count values per QGIS's 5-class DISCRETE colour-ramp boundaries
+        (see resources/qml/analysis.qml): (0,1], (1,2], (2,3], (3,4], (4,5]
+        - matching the colours actually painted on the map exactly. Only
+        valid for values confirmed to be on the plain 0-5 scale - a
+        bivariate product like "by population" uses a completely
+        different scheme (see _palette_histogram_from_values()). Shared by
+        both study_area_grid columns (per-cell) and subnational
+        aggregation vector fields (per-zone), which carry the same 0-5
+        score but from different sources.
+
+        Returns:
+            list: Five counts, one per QML class, in (0,1] .. (4,5] order.
+        """
+        # right=True => bins[i-1] < value <= bins[i], matching the QML's
+        # own right-inclusive class boundaries; index 5 (value > 5) is
+        # out of range and dropped by only counting indices 0-4.
+        class_index = numpy.digitize(values, bins=[1, 2, 3, 4, 5], right=True)
+        return [int(numpy.count_nonzero(class_index == i)) for i in range(5)]
+
+    @staticmethod
+    def _palette_histogram_from_values(values, n_classes: int) -> list:
+        """Count values per EXACT integer class 1..n_classes, matching a
+        PalettedRasterRenderer's unique-value scheme (e.g.
+        geoe3_by_population_score.qml's 15-class enablement x population
+        bivariate palette) - unlike _score_histogram_from_values()'s
+        DISCRETE range bucketing, each class here is a single exact
+        value, not a (lower, upper] interval.
+
+        Returns:
+            list: n_classes counts, for values 1..n_classes in order.
+        """
+        rounded = numpy.round(values).astype(int)
+        return [int(numpy.count_nonzero(rounded == v)) for v in range(1, n_classes + 1)]
+
+    def _draw_sparkline_for_values(self, values, palette: str, x: float, y: float, w: float, h: float, page: int):
+        """Draw a score-distribution sparkline for an already-read array
+        of values, coloured with the same ramp the result map itself uses
+        for that product, so the bars read as "more of this colour"
+        rather than needing a separate legend.
+
+        Args:
+            palette: "likert" (plain 0-5 scale) or "by_population" (the
+                1-15 enablement x population bivariate scale).
+        """
+        if palette == "by_population":
+            counts = AnalysisReport._palette_histogram_from_values(values, len(GEOE3_BY_POPULATION_COLORS))
+            colors = [QColor(color) for color in GEOE3_BY_POPULATION_COLORS.values()]
+        else:
+            counts = AnalysisReport._score_histogram_from_values(values)
+            colors = [QColor(SCORE_LEGEND_COLORS[score]) for score in range(1, 6)]
+        self._draw_sparkline(counts, colors, x, y, w, h, page)
 
     def _draw_sparkline_for_column(
         self, column_name: str, palette: str, x: float, y: float, w: float, h: float, page: int
     ):
         """Draw a score-distribution sparkline for one study_area_grid
-        column, coloured with the same ramp the result map itself uses
-        for that product, so the bars read as "more of this colour"
-        rather than needing a separate legend.
+        column - see _draw_sparkline_for_values().
 
         Args:
             column_name: study_area_grid column to read.
             palette: "likert" (plain 0-5 scale) or "by_population" (the
                 1-15 enablement x population bivariate scale).
         """
-        if palette == "by_population":
-            counts = self._grid_column_palette_histogram(column_name, len(GEOE3_BY_POPULATION_COLORS))
-            colors = [QColor(color) for color in GEOE3_BY_POPULATION_COLORS.values()]
-        else:
-            counts = self._grid_column_score_histogram(column_name)
-            colors = [QColor(SCORE_LEGEND_COLORS[score]) for score in range(1, 6)]
-        self._draw_sparkline(counts, colors, x, y, w, h, page)
+        self._draw_sparkline_for_values(self._read_grid_column_values(column_name), palette, x, y, w, h, page)
+
+    @staticmethod
+    def _sparkline_inset_geometry(map_x: float, map_y: float, map_w: float, map_h: float) -> tuple:
+        """Position and size for a sparkline inset into a map's own
+        bottom-right corner, shared by both the grid-column and the
+        vector-field sparkline insets.
+        """
+        margin = 4.0
+        w, h = 36.0, 10.0
+        x = map_x + map_w - w - margin
+        y = map_y + map_h - h - margin
+        return x, y, w, h
 
     def _draw_main_map_sparkline(
         self,
@@ -547,13 +941,31 @@ class AnalysisReport(BaseReport):
         corner, backed by a translucent white panel so the bars stay
         legible over whatever colours the map itself shows underneath.
         """
-        margin = 4.0
-        w, h = 36.0, 10.0
-        x = map_x + map_w - w - margin
-        y = map_y + map_h - h - margin
+        x, y, w, h = self._sparkline_inset_geometry(map_x, map_y, map_w, map_h)
         pad = 1.5
         self._rect(x - pad, y - pad, w + 2 * pad, h + 2 * pad, WHITE, page, opacity=0.78)
         self._draw_sparkline_for_column(column_name, palette, x, y, w, h, page)
+
+    def _draw_main_map_sparkline_for_values(
+        self,
+        values,
+        palette: str,
+        map_x: float,
+        map_y: float,
+        map_w: float,
+        map_h: float,
+        page: int,
+    ) -> None:
+        """Inset a small sparkline into the main map's own bottom-right
+        corner for an already-read array of values - see
+        _draw_main_map_sparkline(), used for the subnational aggregation
+        vector products, which have no study_area_grid column backing
+        them.
+        """
+        x, y, w, h = self._sparkline_inset_geometry(map_x, map_y, map_w, map_h)
+        pad = 1.5
+        self._rect(x - pad, y - pad, w + 2 * pad, h + 2 * pad, WHITE, page, opacity=0.78)
+        self._draw_sparkline_for_values(values, palette, x, y, w, h, page)
 
     def _add_minimap_grid(
         self,
@@ -777,6 +1189,45 @@ class AnalysisReport(BaseReport):
                 ):
                     current_page += 1
 
+        # --- Subnational aggregation: one page per product, each a
+        # vector GeoPackage (one polygon per administrative zone the
+        # user chose during project setup) carrying the majority score
+        # within that zone - a different source (per-zone, not
+        # per-cell), so _add_map_page()'s raster loader can't show them.
+        subnational_product_keys = [
+            (
+                "geoe3_score_subnational_aggregation",
+                "GeoE3 Score — Subnational Aggregation",
+                "likert",
+            ),
+            (
+                "geoe3_score_ghsl_masked_subnational_aggregation",
+                "GHSL Masked — Subnational Aggregation",
+                "likert",
+            ),
+            (
+                "geoe3_by_population_subnational_aggregation",
+                "By Population — Subnational Aggregation",
+                "by_population",
+            ),
+            (
+                "geoe3_score_by_population_ghsl_masked_subnational_aggregation",
+                "By Population (GHSL Masked) — Subnational Aggregation",
+                "by_population",
+            ),
+        ]
+        for key, label, palette in subnational_product_keys:
+            layer_uri = model.get(key)
+            if not layer_uri:
+                continue
+            score_kind = "enablement x population" if palette == "by_population" else "GeoE3"
+            self.page_descriptions[label] = (
+                f"The majority {score_kind} score within each administrative zone, "
+                "aggregated from the analysis grid."
+            )
+            if self._add_vector_map_page(label, label, layer_uri, current_page, palette=palette):
+                current_page += 1
+
         return current_page
 
     def parse_iso_datetime(self, iso_str: str) -> Optional[datetime]:
@@ -883,7 +1334,7 @@ class AnalysisReport(BaseReport):
 
         return results
 
-    def create_execution_time_layout(self, entries: list, max_bar_width_mm: float = 78.0, page: int = 1):
+    def create_execution_time_layout(self, entries: list, max_bar_width_mm: float = 78.0, page: int = 1) -> float:
         """Add a clean horizontal bar chart of indicator execution times.
 
         Layout per row: indicator name right-aligned in a left column, a
@@ -895,6 +1346,11 @@ class AnalysisReport(BaseReport):
             entries: Output from `extract_execution_times_with_colors()`.
             max_bar_width_mm: Bar width for the slowest indicator, in mm.
             page: Page number to draw the chart on.
+
+        Returns:
+            float: Y position (mm) just below the last thing drawn, so a
+            caller can place more content on the same page without
+            overlapping it.
         """
         top = 44.0
         row_pitch = 7.0
@@ -947,14 +1403,176 @@ class AnalysisReport(BaseReport):
                 size=8,
                 color=GREY,
             )
+        rows_shown = min(len(entries), max_rows)
+        bottom_y = top + rows_shown * row_pitch
         if clipped:
             self._label(
                 f"Showing the {max_rows} slowest steps of {len(entries)}.",
                 label_x,
-                top + max_rows * row_pitch + 2,
+                bottom_y + 2,
                 180,
                 6,
                 page,
                 size=8,
                 color=GREY,
+            )
+            bottom_y += 8
+        return bottom_y
+
+    def _total_analysis_duration_minutes(self) -> Optional[float]:
+        """Wall-clock span of the whole analysis run: the earliest
+        execution_start_time to the latest execution_end_time found
+        anywhere in the model (dimensions, factors and indicators each
+        carry their own pair) - not a sum of every step's own duration,
+        which would overstate the real elapsed time for anything that
+        ran concurrently.
+
+        Returns:
+            Minutes elapsed, or None if the model has no usable
+            timestamps (e.g. nothing has been run yet).
+        """
+        with open(self.model_path, "r", encoding="utf-8") as f:
+            model = json.load(f)
+
+        timestamps = []
+
+        def collect(entry: dict) -> None:
+            for key in ("execution_start_time", "execution_end_time"):
+                parsed = self.parse_iso_datetime(entry.get(key, ""))
+                if parsed:
+                    timestamps.append(parsed)
+
+        for dimension in model.get("dimensions", []):
+            collect(dimension)
+            for factor in dimension.get("factors", []):
+                collect(factor)
+                for indicator in factor.get("indicators", []):
+                    collect(indicator)
+
+        if not timestamps:
+            return None
+        return round((max(timestamps) - min(timestamps)).total_seconds() / 60, 2)
+
+    def _draw_total_duration_block(self, total_minutes: float, y: float, page: int) -> None:
+        """A highlighted block stating the whole analysis run's
+        wall-clock duration, styled like make_legend_page()'s "How the
+        scores are calculated" note.
+        """
+        note_h = 24.0
+        if y + note_h > FOOTER_Y:
+            log_message("Not enough room for the total analysis time block - omitted", tag="GeoE3")
+            return
+        self._rect(MARGIN, y, CONTENT_W, note_h, MIST, page)
+        self._rect(MARGIN, y, 2.2, note_h, CYAN, page)
+        self._label(
+            "Total analysis time",
+            MARGIN + 8,
+            y + 4.5,
+            CONTENT_W - 16,
+            7,
+            page,
+            size=12,
+            color=NAVY,
+            bold=True,
+        )
+        hours, minutes = divmod(round(total_minutes), 60)
+        duration_text = f"{hours} h {minutes} min" if hours else f"{minutes} min"
+        self._label(
+            duration_text,
+            MARGIN + 8,
+            y + 13,
+            CONTENT_W - 16,
+            note_h - 17,
+            page,
+            size=11,
+            color=CHARCOAL,
+            bold=True,
+        )
+
+    def _study_area_stats(self) -> list:
+        """Key facts about the study area and analysis grid, for the
+        closing summary page.
+
+        Returns:
+            A list of (label, value) pairs, or [] if the grid
+            GeoPackage isn't available.
+        """
+        if not self.grid_gpkg_path or not os.path.exists(self.grid_gpkg_path):
+            return []
+
+        import sqlite3
+
+        try:
+            connection = sqlite3.connect(self.grid_gpkg_path)
+            try:
+                cell_count = connection.execute("SELECT COUNT(*) FROM study_area_grid").fetchone()[0]
+            finally:
+                connection.close()
+        except sqlite3.Error as error:
+            log_message(f"Could not read study_area_grid for the study area summary: {error}", tag="GeoE3")
+            return []
+
+        with open(self.model_path, "r", encoding="utf-8") as f:
+            model = json.load(f)
+        cell_size_m = model.get("analysis_cell_size_m")
+        analysis_scale = model.get("analysis_scale")
+
+        crs_label = ""
+        grid_layer = QgsVectorLayer(f"{self.grid_gpkg_path}|layername=study_area_grid", "study_area_grid", "ogr")
+        if grid_layer.isValid():
+            crs = grid_layer.crs()
+            crs_label = f"{crs.authid()} — {crs.description()}" if crs.authid() else crs.description()
+
+        stats = []
+        admin0_name = self._admin0_name(self.working_directory)
+        if admin0_name:
+            stats.append(("Study area", admin0_name))
+        if analysis_scale:
+            stats.append(("Analysis scale", str(analysis_scale).title()))
+        stats.append(("Number of grid cells", f"{cell_count:,}"))
+        if cell_size_m:
+            stats.append(("Grid cell size", f"{cell_size_m:g} m × {cell_size_m:g} m"))
+            total_area_km2 = cell_count * (float(cell_size_m) ** 2) / 1_000_000
+            stats.append(("Total analysis area", f"{total_area_km2:,.0f} km²"))
+        if crs_label:
+            stats.append(("Coordinate reference system", crs_label))
+        return stats
+
+    def make_study_area_summary_page(self, current_page: int) -> None:
+        """Add the closing page: key facts about the study area and the
+        analysis grid, so a reader can judge the analysis's resolution
+        and scope without opening the GeoPackage themselves.
+        """
+        stats = self._study_area_stats()
+        if not stats:
+            log_message("No study area stats available - summary page skipped", tag="GeoE3")
+            return
+
+        self.page_descriptions["study_area_summary"] = (
+            "Key facts about the study area and the analysis grid these results were computed on."
+        )
+        self.make_page(
+            title="Study Area",
+            description_key="study_area_summary",
+            current_page=current_page,
+            show_header_and_footer=True,
+        )
+
+        row_top = HEADER_H + 30
+        row_pitch = 14
+        for i, (label, value) in enumerate(stats):
+            y = row_top + i * row_pitch
+            if i % 2 == 0:
+                self._rect(MARGIN, y - 2, CONTENT_W, row_pitch - 2, MIST, current_page)
+            self._label(label, MARGIN + 6, y, 85, 8, current_page, size=10.5, color=GREY)
+            self._label(
+                value,
+                MARGIN + 95,
+                y,
+                CONTENT_W - 95 - 6,
+                8,
+                current_page,
+                size=11.5,
+                color=NAVY,
+                bold=True,
             )
