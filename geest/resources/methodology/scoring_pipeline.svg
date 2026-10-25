@@ -1,8 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 700">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 780">
   <!-- How scores trickle up: indicator -> factor -> dimension -> analysis
        total (each step a weighted sum), then the total is filtered two
        independent ways - by population tercile and by the opportunities
-       mask - producing the four published products. -->
+       mask - producing the four published products. The two filters sit
+       level with the GeoE3 Score box (not up near the funnel's top) so
+       the arrows feeding them run roughly horizontal instead of
+       diagonally crossing through the "every other used factor/
+       dimension" ghost notes above. -->
   <defs>
     <marker id="pl_arrow" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
       <path d="M0,0 L9,4.5 L0,9 Z" fill="#009FDA"/>
@@ -51,52 +55,63 @@
   <text x="407" y="267" font-family="sans-serif" font-size="13.5" fill="#8FA0AB" text-anchor="middle">used dimension</text>
   <path d="M330 246 L229 246" stroke="#C9D3D8" stroke-width="2" fill="none" stroke-dasharray="4,4"/>
 
-  <!-- ===== Right side: two independent filters on the GeoE3 Score ===== -->
-  <text x="690" y="40" font-family="sans-serif" font-size="16" font-weight="bold" fill="#333333" text-anchor="middle">Two independent filters</text>
-  <text x="690" y="60" font-family="sans-serif" font-size="13" fill="#6E7B85" text-anchor="middle">a project can apply either, both, or neither</text>
+  <!-- ===== Right side: two independent filters on the GeoE3 Score -
+       level with the GeoE3 Score box itself, not up near the funnel's
+       top, so the feed arrows run roughly horizontal instead of
+       crossing diagonally through the ghost notes above. ===== -->
+  <text x="690" y="300" font-family="sans-serif" font-size="16" font-weight="bold" fill="#333333" text-anchor="middle">Two independent filters</text>
+  <text x="690" y="320" font-family="sans-serif" font-size="13" fill="#6E7B85" text-anchor="middle">a project can apply either, both, or neither</text>
 
-  <rect x="555" y="90" width="270" height="68" rx="6" fill="#FFFFFF" stroke="#002244" stroke-width="3"/>
-  <text x="690" y="118" font-family="sans-serif" font-size="16" font-weight="bold" fill="#002244" text-anchor="middle">&#215; Population tercile</text>
-  <text x="690" y="140" font-family="sans-serif" font-size="12.5" fill="#6E7B85" text-anchor="middle">how many people live there</text>
+  <rect x="555" y="335" width="270" height="60" rx="6" fill="#FFFFFF" stroke="#002244" stroke-width="3"/>
+  <text x="690" y="361" font-family="sans-serif" font-size="16" font-weight="bold" fill="#002244" text-anchor="middle">&#215; Population tercile</text>
+  <text x="690" y="381" font-family="sans-serif" font-size="12.5" fill="#6E7B85" text-anchor="middle">how many people live there</text>
 
-  <rect x="555" y="188" width="270" height="68" rx="6" fill="#FFFFFF" stroke="#002244" stroke-width="3"/>
-  <text x="690" y="216" font-family="sans-serif" font-size="16" font-weight="bold" fill="#002244" text-anchor="middle">&#215; Opportunities mask</text>
-  <text x="690" y="238" font-family="sans-serif" font-size="12.5" fill="#6E7B85" text-anchor="middle">zeroes cells outside it</text>
+  <rect x="555" y="410" width="270" height="60" rx="6" fill="#FFFFFF" stroke="#002244" stroke-width="3"/>
+  <text x="690" y="436" font-family="sans-serif" font-size="16" font-weight="bold" fill="#002244" text-anchor="middle">&#215; Opportunities mask</text>
+  <text x="690" y="456" font-family="sans-serif" font-size="12.5" fill="#6E7B85" text-anchor="middle">zeroes cells outside it</text>
 
   <!-- GeoE3 Score fans out to: (a) straight through, (b) population
-       filter, (c) opportunities filter -->
-  <path d="M245 328 L555 124" stroke="#009FDA" stroke-width="2.5" fill="none" marker-end="url(#pl_arrow)"/>
-  <path d="M245 345 L555 222" stroke="#009FDA" stroke-width="2.5" fill="none" marker-end="url(#pl_arrow)"/>
+       filter, (c) opportunities filter - right-angle elbows, matching
+       the lanes below, rather than diagonals: Population tercile's
+       centre falls inside GeoE3 Score's own height so that one is a
+       single horizontal run; Opportunities mask's doesn't, so it gets
+       one vertical jog but still arrives horizontally. -->
+  <path d="M245 365 L555 365" stroke="#009FDA" stroke-width="2.5" fill="none" marker-end="url(#pl_arrow)"/>
+  <path d="M245 345 L290 345 L290 440 L555 440" stroke="#009FDA" stroke-width="2.5" fill="none" marker-end="url(#pl_arrow)"/>
 
   <!-- ===== Bottom: the four published products, each in its own lane ===== -->
-  <line x1="30" y1="420" x2="970" y2="420" stroke="#E3E8EB" stroke-width="2"/>
-  <text x="30" y="412" font-family="sans-serif" font-size="14" fill="#8FA0AB">Published products</text>
+  <line x1="30" y1="480" x2="970" y2="480" stroke="#E3E8EB" stroke-width="2"/>
+  <text x="30" y="472" font-family="sans-serif" font-size="14" fill="#8FA0AB">Published products</text>
 
   <g stroke="#002244" stroke-width="2.5" fill="#FFFFFF">
-    <rect x="30"  y="590" width="195" height="60" rx="6"/>
-    <rect x="270" y="590" width="195" height="60" rx="6"/>
-    <rect x="510" y="590" width="195" height="60" rx="6"/>
-    <rect x="750" y="590" width="220" height="60" rx="6"/>
+    <rect x="30"  y="650" width="195" height="60" rx="6"/>
+    <rect x="270" y="650" width="195" height="60" rx="6"/>
+    <rect x="510" y="650" width="195" height="60" rx="6"/>
+    <rect x="750" y="650" width="220" height="60" rx="6"/>
   </g>
-  <text x="127" y="626" font-family="sans-serif" font-size="15.5" font-weight="bold" fill="#002244" text-anchor="middle">GeoE3 score</text>
-  <text x="367" y="626" font-family="sans-serif" font-size="15.5" font-weight="bold" fill="#002244" text-anchor="middle">By population</text>
-  <text x="607" y="626" font-family="sans-serif" font-size="15.5" font-weight="bold" fill="#002244" text-anchor="middle">GHSL masked</text>
-  <text x="860" y="626" font-family="sans-serif" font-size="15.5" font-weight="bold" fill="#002244" text-anchor="middle">By population (GHSL)</text>
+  <text x="127" y="686" font-family="sans-serif" font-size="15.5" font-weight="bold" fill="#002244" text-anchor="middle">GeoE3 score</text>
+  <text x="367" y="686" font-family="sans-serif" font-size="15.5" font-weight="bold" fill="#002244" text-anchor="middle">By population</text>
+  <text x="607" y="686" font-family="sans-serif" font-size="15.5" font-weight="bold" fill="#002244" text-anchor="middle">GHSL masked</text>
+  <text x="860" y="686" font-family="sans-serif" font-size="15.5" font-weight="bold" fill="#002244" text-anchor="middle">By population (GHSL)</text>
 
   <!-- Lane 1: GeoE3 Score straight down, no filter -->
-  <path d="M145 370 L127 588" stroke="#6E7B85" stroke-width="2.5" fill="none" marker-end="url(#pl_arrow_grey)"/>
-  <text x="155" y="480" font-family="sans-serif" font-size="12" fill="#8FA0AB" text-anchor="start" transform="rotate(79 155 480)">no filter applied</text>
+  <path d="M145 370 L127 648" stroke="#6E7B85" stroke-width="2.5" fill="none" marker-end="url(#pl_arrow_grey)"/>
+  <text x="155" y="540" font-family="sans-serif" font-size="12" fill="#8FA0AB" text-anchor="start" transform="rotate(79 155 540)">no filter applied</text>
 
   <!-- Lane 2: Population filter only -->
-  <path d="M690 158 L690 480 L367 480 L367 588" stroke="#009FDA" stroke-width="2.5" fill="none" marker-end="url(#pl_arrow)"/>
+  <path d="M690 395 L690 540 L367 540 L367 648" stroke="#009FDA" stroke-width="2.5" fill="none" marker-end="url(#pl_arrow)"/>
 
   <!-- Lane 3: Opportunities filter only -->
-  <path d="M690 256 L690 520 L607 520 L607 588" stroke="#009FDA" stroke-width="2.5" fill="none" marker-end="url(#pl_arrow)"/>
+  <path d="M690 470 L690 580 L607 580 L607 648" stroke="#009FDA" stroke-width="2.5" fill="none" marker-end="url(#pl_arrow)"/>
 
-  <!-- Lane 4: both filters combined -->
-  <path d="M825 124 L900 124 L900 588" stroke="#009FDA" stroke-width="2.5" fill="none" marker-end="url(#pl_arrow)"/>
-  <path d="M825 222 L860 222 L860 588" stroke="#009FDA" stroke-width="2.5" fill="none" marker-end="url(#pl_arrow)"/>
-  <text x="900" y="400" font-family="sans-serif" font-size="12" fill="#8FA0AB" text-anchor="middle">both filters</text>
+  <!-- Lane 4: both filters combined - the two lines merge into a single
+       shared trunk just below the filter boxes, rather than running
+       the full page height as two parallel lines that never visually
+       join. -->
+  <path d="M825 365 L930 365 L930 500 L860 500" stroke="#009FDA" stroke-width="2.5" fill="none"/>
+  <path d="M825 440 L860 440 L860 648" stroke="#009FDA" stroke-width="2.5" fill="none" marker-end="url(#pl_arrow)"/>
+  <circle cx="860" cy="500" r="3.5" fill="#009FDA"/>
+  <text x="900" y="492" font-family="sans-serif" font-size="12" fill="#8FA0AB" text-anchor="middle">both filters</text>
 
-  <text x="500" y="680" font-family="sans-serif" font-size="13" fill="#8FA0AB" text-anchor="middle">Weight numbers for this analysis are on the following page.</text>
+  <text x="500" y="745" font-family="sans-serif" font-size="13" fill="#8FA0AB" text-anchor="middle">Weight numbers for this analysis are on the following page.</text>
 </svg>

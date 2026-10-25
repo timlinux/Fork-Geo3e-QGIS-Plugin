@@ -121,6 +121,11 @@ class TestMakeMethodologyPages(unittest.TestCase):
     _place_picture(), never one layout item per indicator (there's no
     cell-count blowup risk here, but the pattern should stay
     consistent with the rest of this report).
+
+    The "How Scores Combine" diagram augments the intro page (one more
+    _place_picture() call there) rather than claiming a page of its
+    own - it's the same "how was this calculated" answer as the intro
+    paragraph, just as a diagram instead of prose.
     """
 
     def setUp(self):
@@ -134,6 +139,7 @@ class TestMakeMethodologyPages(unittest.TestCase):
 
         self.assertEqual(result, 5)
         self.report.make_page.assert_not_called()
+        self.report._place_picture.assert_not_called()
 
     def test_one_page_per_technique_plus_an_intro_page(self):
         self.report._methodology_entries.return_value = [
@@ -143,9 +149,20 @@ class TestMakeMethodologyPages(unittest.TestCase):
 
         result = AnalysisReport.make_methodology_pages(self.report, current_page=5)
 
-        self.assertEqual(result, 8)  # intro + 2 techniques
+        self.assertEqual(result, 8)  # intro + 2 techniques, no separate page for the diagram
         self.assertEqual(self.report.make_page.call_count, 3)
-        self.assertEqual(self.report._place_picture.call_count, 2)
+        # 1 for the scoring-pipeline diagram (intro page) + 1 per technique
+        self.assertEqual(self.report._place_picture.call_count, 3)
+
+    def test_scoring_pipeline_diagram_is_placed_on_the_intro_page_itself(self):
+        self.report._methodology_entries.return_value = [("feature_count", [("Clinics nearby", "")])]
+
+        AnalysisReport.make_methodology_pages(self.report, current_page=5)
+
+        picture_calls = self.report._place_picture.call_args_list
+        diagram_calls = [c for c in picture_calls if c.args[0].endswith("scoring_pipeline.svg")]
+        self.assertEqual(len(diagram_calls), 1)
+        self.assertEqual(diagram_calls[0].kwargs["page"], 5)  # the intro page, not a later one
 
     def test_indicator_nuance_is_appended_to_its_list_entry(self):
         self.report._methodology_entries.return_value = [
@@ -156,36 +173,6 @@ class TestMakeMethodologyPages(unittest.TestCase):
 
         label_calls = [call_args.args[0] for call_args in self.report._label.call_args_list]
         self.assertTrue(any("Internet users" in text and "broadband" in text for text in label_calls))
-
-
-class TestMakeScoringPipelinePage(unittest.TestCase):
-    """make_scoring_pipeline_page() adds exactly one page - the
-    aggregation-flow diagram - and only when there's at least one
-    methodology technique to bridge from.
-    """
-
-    def setUp(self):
-        self.report = MagicMock()
-        self.report.page_descriptions = {}
-
-    def test_no_used_techniques_adds_no_page(self):
-        self.report._methodology_entries.return_value = []
-
-        result = AnalysisReport.make_scoring_pipeline_page(self.report, current_page=5)
-
-        self.assertEqual(result, 5)
-        self.report.make_page.assert_not_called()
-
-    def test_adds_exactly_one_page_via_place_picture(self):
-        self.report._methodology_entries.return_value = [("feature_count", [("Clinics nearby", "")])]
-
-        result = AnalysisReport.make_scoring_pipeline_page(self.report, current_page=5)
-
-        self.assertEqual(result, 6)
-        self.report.make_page.assert_called_once()
-        self.report._place_picture.assert_called_once()
-        picture_args = self.report._place_picture.call_args.args
-        self.assertTrue(picture_args[0].endswith("scoring_pipeline.svg"))
 
 
 class TestDimensionFactorWeightings(unittest.TestCase):
