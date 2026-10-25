@@ -107,6 +107,18 @@ version per the policy above.
   both are now scrollable read-only text areas (`QTextEdit`, not `QLabel`)
   showing the complete text, with a scrollbar appearing only when it's
   actually needed.
+- The status text and the two progress bars shown during an analysis
+  run, a resource download, or a report export now live inside that
+  same item info panel, on their own page, instead of a separate status
+  row and two fixed-width bars in the button row below - the panel
+  auto-expands and its header reads "Analysis in progress...",
+  "Downloading resources...", "Generating analysis report..." or
+  "Generating study area report..." (whichever started it) for the
+  duration, then returns to "Selected item" when it finishes. New
+  `ItemInfoPanel.show_progress()`/`hide_progress()`;
+  `TreePanel.overall_progress_bar`/`workflow_progress_bar`/`status_label`
+  are now aliases onto the panel's own widgets, so none of the ~30
+  existing call sites that update them needed to change.
 - Every map in the analysis report - the large main map (inset into its
   own bottom-right corner over a translucent backing panel) and every
   minimap (dimension/factor/indicator grids, plus the GeoE3 score/
