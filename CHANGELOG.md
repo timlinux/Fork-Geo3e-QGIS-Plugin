@@ -455,6 +455,17 @@ version per the policy above.
 
 ### Fixed
 
+- **"Clear Item" on the Analysis tree node was noticeably slower than on
+  any other role.** Its own outputs span 5 separate `study_area_grid`
+  columns (`geoe3`, `geoe3_by_population`, `geoe3_masked`,
+  `geoe3_by_population_masked`, `opportunities_mask`), and clearing them
+  one at a time paid a full GeoPackage open/transaction/WAL-TRUNCATE-
+  checkpoint round trip 5 times in a row, serialized under a process-wide
+  write lock - every other role only ever touches one column. New
+  `geest.core.grid_column_utils.clear_grid_columns()` clears several
+  columns in a single pass instead; `TreePanel._clear_single_item_outputs()`
+  uses it for the Analysis role. `clear_grid_column()` (singular) is
+  unchanged for its other ~10 existing single-column callers.
 - Tightened the wording of roughly twenty report headings/subtitles/body
   paragraphs across the legend, by-population, analysis overview,
   subnational, insights, subnational score matrix, methodology and

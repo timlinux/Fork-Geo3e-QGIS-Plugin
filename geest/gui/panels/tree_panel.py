@@ -511,7 +511,7 @@ class TreePanel(QWidget):
 
     def _clear_single_item_outputs(self, item):
         """Clear one item's own outputs/attributes - see clear_item()."""
-        from geest.core.grid_column_utils import clear_grid_column
+        from geest.core.grid_column_utils import clear_grid_column, clear_grid_columns
         from geest.core.utilities import remove_from_map
 
         # Remove only the files directly inside this item's own workflow
@@ -564,8 +564,11 @@ class TreePanel(QWidget):
             gpkg_path = os.path.join(self.working_directory, "study_area", "study_area.gpkg")
             if os.path.exists(gpkg_path):
                 if item.role == "analysis":
-                    for column_name in TreePanel.ANALYSIS_GRID_COLUMNS:
-                        clear_grid_column(gpkg_path, column_name)
+                    # One combined open/transaction/WAL-checkpoint for all
+                    # 5 columns instead of 5 separate ones - see
+                    # clear_grid_columns()'s own docstring for why that
+                    # mattered enough to be worth a dedicated function.
+                    clear_grid_columns(gpkg_path, list(TreePanel.ANALYSIS_GRID_COLUMNS))
                 else:
                     clear_grid_column(gpkg_path, item.gridColumnName())
 

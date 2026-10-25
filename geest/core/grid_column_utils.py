@@ -1147,6 +1147,80 @@ def clear_grid_column(gpkg_path: str, column_name: str) -> bool:
 
 
 @_serialize_grid_writes
+def clear_grid_columns(gpkg_path: str, column_names: List[str]) -> bool:
+    """Set all values in several grid columns to NULL, in one pass.
+
+    Equivalent to calling clear_grid_column() once per name, but opens
+    the GeoPackage, runs the UPDATE, commits and checkpoints the WAL
+    exactly once total instead of once per column. The Analysis tree
+    item's own outputs span 5 separate columns (geoe3, geoe3_by_population,
+    geoe3_masked, geoe3_by_population_masked, opportunities_mask) - clearing
+    it one column at a time under _GRID_WRITE_LOCK paid a full
+    open/transaction/WAL-TRUNCATE-checkpoint round trip 5 times in a row for
+    what is, underneath, a single UPDATE statement's worth of work, making
+    "Clear Item" on the Analysis node noticeably slower than on any other
+    role (which only ever touches one column).
+
+    Args:
+        gpkg_path: Path to the GeoPackage containing study_area_grid.
+        column_names: Names of the columns to clear.
+
+    Returns:
+        True if successful, False otherwise.
+    """
+    if not os.path.exists(gpkg_path):
+        log_message(f"GeoPackage not found: {gpkg_path}", level=Qgis.Warning)
+        return False
+
+    sanitized_columns = []
+    for column_name in column_names:
+        sanitized = _sanitize_column_name(column_name)
+        if not sanitized:
+            # Same reasoning as clear_grid_column()'s own guard - refuse a
+            # blank name rather than let it reach a raw SQL UPDATE that
+            # SQLite rejects, but skip just that one column instead of
+            # failing the whole batch.
+            log_message(
+                f"Refusing to clear a grid column with a blank name (original column_name={column_name!r})",
+                level=Qgis.Critical,
+            )
+            continue
+        sanitized_columns.append(sanitized)
+
+    if not sanitized_columns:
+        return False
+
+    # Ensure every column exists — Windows can fail during add_model_columns_to_grid
+    for sanitized in sanitized_columns:
+        _ensure_column_exists(gpkg_path, sanitized)
+
+    try:
+        ds = _open_gpkg_for_write(gpkg_path)
+        if not ds:
+            log_message(f"Could not open GeoPackage: {gpkg_path}", level=Qgis.Critical)
+            return False
+
+        set_clause = ", ".join(f'"{column}" = NULL' for column in sanitized_columns)
+        sql = f"UPDATE study_area_grid SET {set_clause}"  # nosec B608
+        log_message(f"Clearing columns: {sql}")
+        ds.StartTransaction()
+        try:
+            _execute_sql_with_retry(ds, sql)  # nosec B608
+        except Exception:
+            ds.RollbackTransaction()
+            raise
+        _commit_or_raise(ds, "clear_grid_columns")
+        _checkpoint_wal(ds)
+        ds.FlushCache()
+        ds = None
+        return True
+
+    except Exception as e:
+        log_message(f"Error clearing grid columns: {e}", level=Qgis.Critical)
+        return False
+
+
+@_serialize_grid_writes
 def fill_grid_column_zero_for_area(
     gpkg_path: str,
     column_name: str,
