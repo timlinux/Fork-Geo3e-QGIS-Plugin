@@ -126,6 +126,64 @@ class TestSettings(unittest.TestCase):
         mock_settings_instance.remove.assert_called_once()
         mock_settings_instance.sync.assert_called_once()
 
+    def test_bool_default_is_coerced_even_when_the_backend_returns_the_raw_ini_string(self):
+        # general_setting()'s own PyQt/Qt binding round-trips a bool fine
+        # in this environment - but a real QGIS 4 install was observed
+        # returning the literal string "false" from value() when no
+        # type= was passed, and every call site in geoe3_settings.py
+        # (e.g. `bool(setting(key="include_subnational_score_matrix",
+        # default=False))`) relies on exactly that implicit coercion.
+        # bool("false") is True in Python, so an unchecked/saved
+        # checkbox showed checked again on every reopen (worldbank/GeoE3
+        # field report, 2026-10-25). This fake backend reproduces that
+        # binding's behaviour deterministically, regardless of which Qt
+        # binding actually runs this test.
+        class _RawStringBackedQSettings:
+            def __init__(self, stored):
+                self._stored = stored
+
+            def value(self, key, default=None, type=None):
+                if key not in self._stored:
+                    return default
+                raw = self._stored[key]
+                if type is None:
+                    return raw
+                if type is bool:
+                    return raw.lower() == "true"
+                return type(raw)
+
+        backend = _RawStringBackedQSettings({"GeoE3/include_subnational_score_matrix": "false"})
+
+        result = general_setting("GeoE3/include_subnational_score_matrix", default=False, qsettings=backend)
+
+        self.assertIs(result, False)
+
+    def test_int_default_is_also_coerced_on_a_raw_string_backed_backend(self):
+        class _RawStringBackedQSettings:
+            def __init__(self, stored):
+                self._stored = stored
+
+            def value(self, key, default=None, type=None):
+                if key not in self._stored:
+                    return default
+                raw = self._stored[key]
+                return raw if type is None else type(raw)
+
+        backend = _RawStringBackedQSettings({"GeoE3/chunk_size": "25"})
+
+        result = general_setting("GeoE3/chunk_size", default=50, qsettings=backend)
+
+        self.assertEqual(result, 25)
+        self.assertIsInstance(result, int)
+
+    def test_explicit_expected_type_still_wins_over_the_inferred_one(self):
+        mock_settings_instance = MagicMock()
+        mock_settings_instance.value.side_effect = lambda key, default=None, type=None: type
+
+        result = general_setting("test_key", default=False, expected_type=str, qsettings=mock_settings_instance)
+
+        self.assertIs(result, str)
+
     def test_a_boolean_setting_survives_a_simulated_restart(self):
         # Two independent QSettings instances pointed at the same file,
         # never open at the same time - exactly how a setting toggled in
