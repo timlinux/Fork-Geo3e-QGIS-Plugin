@@ -44,6 +44,18 @@ version per the policy above.
   Scoring Weights page (the actual weight numbers), bridging the two.
   New `geest/resources/methodology/scoring_pipeline.svg` and
   `AnalysisReport.make_scoring_pipeline_page()`.
+- A new collapsible "item info" panel sits above the tree panel's
+  button row, explaining whatever dimension/factor/indicator is
+  currently selected: a heading, a short description and its tree
+  icon. For an indicator with a known scoring technique, a
+  "Methodology →" link slides over to a second page showing the real-
+  world technique behind its score - the same name, description and
+  icon used on the analysis report's own Methodology pages, so the
+  two stay in sync. Replaces the old map-canvas overlay
+  (`LayerDescriptionItem`, deleted - it had been disabled since May
+  2026 and a dock panel next to the controls the user is already
+  looking at beats a floating label on the map). New
+  `geest.gui.widgets.ItemInfoPanel`.
 - Every map in the analysis report - the large main map (inset into its
   own bottom-right corner over a translucent backing panel) and every
   minimap (dimension/factor/indicator grids, plus the GeoE3 score/
