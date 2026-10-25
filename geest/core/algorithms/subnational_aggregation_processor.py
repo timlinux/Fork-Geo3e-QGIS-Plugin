@@ -6,13 +6,24 @@ This module contains functionality for subnational aggregation processor.
 
 import os
 import shutil
+import sqlite3
 import traceback
 from typing import Optional
 
 from qgis import processing
-from qgis.core import QgsCoordinateReferenceSystem, QgsTask, QgsVectorLayer
+from qgis.core import (
+    QgsCoordinateReferenceSystem,
+    QgsCoordinateTransform,
+    QgsFeatureRequest,
+    QgsGeometry,
+    QgsProject,
+    QgsSpatialIndex,
+    QgsTask,
+    QgsVectorLayer,
+)
 
 from geest.core import JsonTreeItem
+from geest.core.grid_column_utils import _quote_sql_identifier
 from geest.utilities import log_message, resources_path
 
 
@@ -149,6 +160,10 @@ class SubnationalAggregationProcessingTask(QgsTask):
             )
             self.geoe3_score_by_population_ghsl_masked_folder = None
 
+        # Set by fix_geometries() - the best-guess zone name field
+        # detected on the aggregation boundary, if any.
+        self.zone_name_field: Optional[str] = None
+
         self.force_clear = force_clear
         if self.force_clear and os.path.exists(self.output_dir):
             for file in os.listdir(self.output_dir):
@@ -191,6 +206,14 @@ class SubnationalAggregationProcessingTask(QgsTask):
                     qml_path=os.path.join(self.output_dir, f"{layer_name}.qml"),
                 )
                 self.item.setAttribute(f"{layer_name}", f"{output}|layername={layer_name}")
+                try:
+                    self.aggregate_factor_dimension_totals(cleaned_aggregation_layer)
+                except Exception as e:
+                    # A failure here must not take down the 4 well-established
+                    # products above, which have already been written out
+                    # successfully by this point.
+                    log_message(f"Subnational factor/dimension averages failed: {e}", tag="GeoE3")
+                    log_message(traceback.format_exc(), tag="GeoE3")
             if self.geoe3_by_population_folder:
                 log_message("Calculating GeoE3 x Population Score Aggregation")
                 layer_name = "geoe3_by_population_subnational_aggregation"
@@ -250,9 +273,18 @@ class SubnationalAggregationProcessingTask(QgsTask):
         """
         Fix geometries in the aggregation layer.
 
+        Also detects and retains a best-guess zone name field (see
+        _detect_name_field()) alongside "fid" - the aggregation boundary
+        has no explicit "pick the name column" step the way the admin0
+        dissolve field does, so every other attribute is otherwise
+        dropped before zonal statistics run.
+
         Returns:
-            QgsVectorLayer: The layer with fixed geometries and retained fid field.
+            QgsVectorLayer: The layer with fixed geometries and retained
+            fid/name fields.
         """
+        self.zone_name_field = self._detect_name_field(self.aggregation_layer)
+        retained_fields = ["fid"] if self.zone_name_field is None else ["fid", self.zone_name_field]
 
         params = {
             "INPUT": self.aggregation_layer,
@@ -260,11 +292,24 @@ class SubnationalAggregationProcessingTask(QgsTask):
             "OUTPUT": "TEMPORARY_OUTPUT",
         }
         output = processing.run("native:fixgeometries", params)["OUTPUT"]
-        # Also drop all columns
-        params = {"INPUT": output, "FIELDS": ["fid"], "OUTPUT": "TEMPORARY_OUTPUT"}
+        # Also drop all columns except fid/the detected name field.
+        params = {"INPUT": output, "FIELDS": retained_fields, "OUTPUT": "TEMPORARY_OUTPUT"}
         output = processing.run("native:retainfields", params)["OUTPUT"]
 
         return output
+
+    @staticmethod
+    def _detect_name_field(layer: QgsVectorLayer) -> Optional[str]:
+        """Best-guess the aggregation boundary's own name field: the
+        first String-type field. There is no explicit "pick the name
+        column" step for this layer (unlike the admin0 dissolve field,
+        chosen during project setup) - mirrors
+        AnalysisReport._admin0_name()'s identical heuristic.
+        """
+        for field in layer.fields():
+            if field.typeName() == "String":
+                return field.name()
+        return None
 
     def aggregate(self, aggregation_layer: QgsVectorLayer, raster_layer_path: str, name: str) -> str:
         """
@@ -289,6 +334,271 @@ class SubnationalAggregationProcessingTask(QgsTask):
         }
         processing.run("native:zonalstatisticsfb", params)
         return output
+
+    def aggregate_factor_dimension_totals(self, cleaned_aggregation_layer: QgsVectorLayer) -> None:
+        """Add one column per used factor, used dimension, and the
+        overall GeoE3 total score to the plain GeoE3 score subnational
+        aggregation GeoPackage - the AVERAGE of every study_area_grid
+        cell that spatially intersects each subnational zone, not the
+        majority-class raster statistic aggregate() uses for the four
+        existing products. Those classify a continuous score into
+        discrete enablement classes for a map legend; factor/dimension/
+        total scores are better served by a true average over the
+        cells inside each zone.
+
+        Idempotent and legacy-safe: only columns not already present
+        are computed, so re-running the full analysis on a project
+        whose subnational_aggregation file predates this feature
+        backfills just the missing columns rather than redoing
+        everything (or being silently skipped forever).
+        """
+        output = os.path.join(self.output_dir, "geoe3_score_subnational_aggregation.gpkg")
+        if not os.path.exists(output):
+            log_message(
+                "geoe3_score_subnational_aggregation.gpkg not found - skipping factor/dimension averages.",
+                tag="GeoE3",
+            )
+            return
+
+        table_name = "geoe3_score_subnational_aggregation"
+        existing_columns = self._existing_sqlite_columns(output, table_name)
+        name_column_needed = self.zone_name_field is not None and "zone_name" not in existing_columns
+
+        columns = self._factor_dimension_total_columns()
+        missing_columns = [(name, col) for name, col in columns if f"avg_{col}" not in existing_columns]
+        if not missing_columns and not name_column_needed:
+            log_message("Subnational factor/dimension averages already present - nothing to backfill.", tag="GeoE3")
+            return
+
+        log_message(
+            f"Computing {len(missing_columns)} subnational factor/dimension/total average column(s) "
+            f"across {cleaned_aggregation_layer.featureCount()} zones...",
+            tag="GeoE3",
+        )
+        zone_to_cells = self._assign_grid_cells_to_zones(cleaned_aggregation_layer)
+        if not zone_to_cells:
+            log_message(
+                "No grid cells matched any subnational zone - skipping factor/dimension averages.",
+                tag="GeoE3",
+            )
+            return
+
+        zone_names = None
+        if name_column_needed:
+            zone_names = {
+                feature.id(): feature.attribute(self.zone_name_field)
+                for feature in cleaned_aggregation_layer.getFeatures()
+            }
+
+        averages_by_zone = {}
+        if missing_columns:
+            averages_by_zone = self._average_grid_columns_per_zone(zone_to_cells, [col for _, col in missing_columns])
+
+        self._write_zone_results(output, table_name, missing_columns, averages_by_zone, zone_names)
+        log_message("Subnational factor/dimension/total averages computed.", tag="GeoE3")
+
+    def _factor_dimension_total_columns(self) -> list:
+        """(display_name, grid_column_name) for every used dimension,
+        every used factor, and the overall GeoE3 total score - the
+        exact set of columns the report's subnational score table
+        shows, read from the live in-memory item tree rather than
+        model.json (which may not yet reflect this run's results -
+        model.json is only saved back to disk after this task returns).
+        """
+        columns = []
+        for dimension in self.item.childItems:
+            if not dimension.isDimension():
+                continue
+            used_factors = [
+                factor
+                for factor in dimension.childItems
+                if factor.isFactor()
+                and any(indicator.attribute("analysis_mode", "") != "Do Not Use" for indicator in factor.childItems)
+            ]
+            if not used_factors:
+                continue
+            columns.append((dimension.attribute("name", ""), dimension.gridColumnName()))
+            for factor in used_factors:
+                columns.append((factor.attribute("name", ""), factor.gridColumnName()))
+        columns.append(("GeoE3 Score", "geoe3"))
+        return columns
+
+    def _assign_grid_cells_to_zones(self, cleaned_aggregation_layer: QgsVectorLayer) -> dict:
+        """Spatially match every study_area_grid cell to the
+        subnational zone it falls within, via a spatial index over the
+        grid (built once) plus a precise geometry test per zone -
+        mirrors the established pattern in
+        features_per_cell_processor.select_grid_cells_and_count_features().
+        The aggregation boundary and the grid are commonly in different
+        CRSes (confirmed in the field: EPSG:32632 vs EPSG:32636 for one
+        real project) - explicitly reprojected here since neither
+        QgsSpatialIndex nor a manual geometry intersects() test does
+        this automatically.
+
+        Returns:
+            {zone_feature_id: [grid_cell_fid, ...], ...} - the grid
+            cell fid values are study_area_grid's own GeoPackage fid,
+            matching what the report later reads via plain SQL.
+        """
+        grid_layer = QgsVectorLayer(
+            f"{self.study_area_gpkg_path}|layername=study_area_grid",
+            "study_area_grid",
+            "ogr",
+        )
+        if not grid_layer.isValid():
+            log_message("Could not load study_area_grid for subnational averages.", tag="GeoE3")
+            return {}
+
+        transform = None
+        if cleaned_aggregation_layer.crs() != grid_layer.crs():
+            transform = QgsCoordinateTransform(cleaned_aggregation_layer.crs(), grid_layer.crs(), QgsProject.instance())
+
+        grid_index = QgsSpatialIndex(grid_layer.getFeatures())
+
+        zone_count = cleaned_aggregation_layer.featureCount()
+        log_interval = max(1, zone_count // 10)
+        zone_to_cells = {}
+        for counter, zone in enumerate(cleaned_aggregation_layer.getFeatures(), start=1):
+            zone_geom = QgsGeometry(zone.geometry())
+            if not zone_geom.isEmpty():
+                if transform is not None:
+                    zone_geom.transform(transform)
+                candidate_ids = grid_index.intersects(zone_geom.boundingBox())
+                if candidate_ids:
+                    prepared_geom = QgsGeometry.createGeometryEngine(zone_geom.constGet())
+                    prepared_geom.prepareGeometry()
+                    request = QgsFeatureRequest().setFilterFids(candidate_ids).setSubsetOfAttributes([])
+                    matching_fids = [
+                        grid_feature.id()
+                        for grid_feature in grid_layer.getFeatures(request)
+                        if prepared_geom.intersects(grid_feature.geometry().constGet())
+                    ]
+                    if matching_fids:
+                        zone_to_cells[zone.id()] = matching_fids
+
+            if counter % log_interval == 0 or counter == zone_count:
+                percent = counter / zone_count * 100.0
+                log_message(f"Subnational averages: matched {counter}/{zone_count} zones ({percent:.0f}%)", tag="GeoE3")
+                self.setProgress(percent * 0.8)  # the SQL averaging step below gets the rest
+
+        return zone_to_cells
+
+    def _average_grid_columns_per_zone(self, zone_to_cells: dict, columns: list) -> dict:
+        """SQL AVG() of each requested study_area_grid column, grouped
+        by zone - computed in ONE pass via a temporary cell->zone
+        mapping table, not one query per zone (there can be thousands).
+
+        0/NULL is excluded per column before averaging - the same
+        "excluded area" convention every study_area_grid read in this
+        codebase follows (see AnalysisReport._read_grid_column_values()).
+
+        A single grid cell commonly intersects MORE THAN ONE zone (a
+        1km cell routinely spans several small administrative zones -
+        confirmed against real data: ~22% of cell/zone matches were
+        shared by more than one zone for Tunisia's ADM4 boundary), so
+        the mapping table deliberately has no unique constraint on
+        fid - a cell contributes to the average of every zone it
+        intersects, not just one.
+
+        Returns:
+            {zone_feature_id: {grid_column_name: average_value, ...}, ...}
+        """
+        try:
+            quoted_columns = [_quote_sql_identifier(c) for c in columns]
+        except ValueError as error:
+            log_message(f"Refusing to average grid columns: {error}", tag="GeoE3")
+            return {}
+
+        connection = sqlite3.connect(self.study_area_gpkg_path)
+        try:
+            connection.execute("CREATE TEMP TABLE _zone_cell_map (fid INTEGER, zone_fid INTEGER)")
+            rows = [(cell_fid, zone_fid) for zone_fid, cell_fids in zone_to_cells.items() for cell_fid in cell_fids]
+            connection.executemany("INSERT INTO _zone_cell_map (fid, zone_fid) VALUES (?, ?)", rows)
+            connection.execute("CREATE INDEX _zone_cell_map_fid_idx ON _zone_cell_map (fid)")
+
+            select_clauses = ", ".join(f"AVG(CASE WHEN g.{c} > 0 THEN g.{c} END) AS {c}" for c in quoted_columns)
+            query = (
+                f"SELECT m.zone_fid, {select_clauses} "  # nosec B608
+                "FROM _zone_cell_map m JOIN study_area_grid g ON g.fid = m.fid "
+                "GROUP BY m.zone_fid"
+            )
+            self.setProgress(90.0)
+            results = connection.execute(query).fetchall()
+        finally:
+            connection.execute("DROP TABLE IF EXISTS _zone_cell_map")
+            connection.close()
+
+        return {row[0]: dict(zip(columns, row[1:])) for row in results}
+
+    @staticmethod
+    def _write_zone_results(
+        gpkg_path: str,
+        table_name: str,
+        missing_columns: list,
+        averages_by_zone: dict,
+        zone_names: Optional[dict],
+    ) -> None:
+        """Add any missing avg_<column>/zone_name columns to the
+        aggregates GeoPackage and populate them, keyed by each zone's
+        own fid - the same fid value the report reads back.
+
+        This GeoPackage carries RTree spatial-index triggers that fire
+        on ANY UPDATE to the table (not just the geometry column) and
+        reference SpatiaLite functions (e.g. ST_IsEmpty) in their WHEN
+        clause - a plain sqlite3 connection doesn't have those
+        registered, so even an UPDATE of an unrelated column fails with
+        "no such function: ST_IsEmpty" unless mod_spatialite is loaded
+        first (verified against the real Tunisia aggregates file).
+        """
+        connection = sqlite3.connect(gpkg_path)
+        try:
+            connection.enable_load_extension(True)
+            connection.load_extension("mod_spatialite")
+            existing_columns = {
+                row[1] for row in connection.execute(f'PRAGMA table_info("{table_name}")').fetchall()  # nosec B608
+            }
+            if zone_names is not None and "zone_name" not in existing_columns:
+                connection.execute(f'ALTER TABLE "{table_name}" ADD COLUMN zone_name TEXT')  # nosec B608
+            for _display_name, col in missing_columns:
+                column_name = f"avg_{col}"
+                if column_name not in existing_columns:
+                    connection.execute(f'ALTER TABLE "{table_name}" ADD COLUMN "{column_name}" REAL')  # nosec B608
+
+            if zone_names:
+                connection.executemany(
+                    f'UPDATE "{table_name}" SET zone_name = ? WHERE fid = ?',  # nosec B608
+                    [(name, fid) for fid, name in zone_names.items()],
+                )
+
+            value_columns = {col for values in averages_by_zone.values() for col in values}
+            for col in value_columns:
+                column_name = f"avg_{col}"
+                rows = [(values[col], zone_fid) for zone_fid, values in averages_by_zone.items() if col in values]
+                connection.executemany(
+                    f'UPDATE "{table_name}" SET "{column_name}" = ? WHERE fid = ?',  # nosec B608
+                    rows,
+                )
+            connection.commit()
+        finally:
+            connection.close()
+
+    @staticmethod
+    def _existing_sqlite_columns(gpkg_path: str, table_name: str) -> set:
+        """Field names already present on a GeoPackage table, read
+        directly via sqlite - used to decide which avg_<column>/
+        zone_name columns still need to be added (see
+        aggregate_factor_dimension_totals()'s idempotency/legacy note).
+        """
+        try:
+            connection = sqlite3.connect(gpkg_path)
+            try:
+                rows = connection.execute(f'PRAGMA table_info("{table_name}")').fetchall()  # nosec B608
+            finally:
+                connection.close()
+        except sqlite3.Error as error:
+            log_message(f"Could not read existing columns from {gpkg_path}: {error}", tag="GeoE3")
+            return set()
+        return {row[1] for row in rows}
 
     def apply_qml_style(self, source_qml: str, qml_path: str) -> None:
         """
