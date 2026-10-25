@@ -293,6 +293,44 @@ version per the policy above.
   `_factor_correlation_matrix()`/`_hazard_exposure_tercile_scores()`/
   `_read_grid_columns()`/`_read_grid_columns_with_gaps()`, plus the
   matching page/chart builders and `create_insights_pages()`.
+- `SubnationalAggregationProcessingTask` now also computes, for every
+  subnational zone, the AVERAGE of every used dimension/factor/the
+  overall GeoE3 total across the `study_area_grid` cells that fall
+  within that zone - not the majority-class raster statistic the
+  existing 4 products use (appropriate for a map legend's discrete
+  classes, not for a continuous per-zone score). Computed by spatially
+  matching every grid cell to the zone(s) it intersects (a cell
+  routinely intersects more than one zone against fine administrative
+  boundaries, regardless of the grid's configured cell size -
+  confirmed against real data: ~22% of cell/zone matches were shared),
+  then a single grouped SQL AVG()
+  per zone - not one zonal-statistics raster pass per factor/dimension.
+  Idempotent and legacy-safe: only backfills `avg_<column>` columns not
+  already present in `geoe3_score_subnational_aggregation.gpkg`, so a
+  project whose aggregates predate this feature gets them added on the
+  next full analysis run without redoing the existing 4 products. Also
+  retains a best-guess zone name field (the aggregation boundary's
+  first String-type field - there's no explicit "pick the name column"
+  step for it, unlike the admin0 dissolve field) as a new `zone_name`
+  column; previously every original attribute except an internal `fid`
+  was dropped before computing the existing products. New
+  `aggregate_factor_dimension_totals()`/`_detect_name_field()`/
+  `_factor_dimension_total_columns()`/`_assign_grid_cells_to_zones()`/
+  `_average_grid_columns_per_zone()`/`_write_zone_results()`/
+  `_existing_sqlite_columns()`.
+- The analysis report's new closing section shows this as a
+  "Subnational Score Matrix": one row per administrative zone, one
+  colour-coded cell per used dimension/factor/the overall total
+  (numbered columns, explained in a key at the end), paginated across
+  as many pages as the boundary has zones - there is no cap. Each
+  page is rendered as a single raster image rather than one layout
+  item per cell: a few thousand individual `QgsLayoutItem`s (routine
+  for a fine-grained boundary) brought QGIS's layout engine to a
+  crawl in testing against a real 2084-zone boundary; one embedded
+  picture per page does not. New
+  `AnalysisReport.make_subnational_score_matrix_pages()`/
+  `_subnational_score_matrix_columns()`/`_subnational_score_matrix_rows()`/
+  `_score_class_color()`/`_render_score_matrix_page_image()`.
 - A new "Methodology" section near the end of the report explains, in
   plain language for a non-GIS reader, how each indicator's score was
   actually worked out. The 18 `analysis_mode` values an indicator can be
@@ -689,6 +727,20 @@ version per the policy above.
   blanks the indicator's own `result`/`result_file`, so the normal
   skip-if-already-complete check correctly recognises it needs to run
   again, without the user needing to know to hold Shift.
+- **Writing the per-zone dimension/factor/total averages
+  (`SubnationalAggregationProcessingTask._write_zone_results()`) failed on a
+  real Nix-based QGIS install** with "mod_spatialite.so: cannot open shared
+  object file", even though it worked fine against the qgis/qgis Docker
+  image this was first verified against: a bare `sqlite3` connection needs
+  `mod_spatialite` loaded by name to satisfy the aggregates GeoPackage's own
+  RTree-trigger `WHEN` clauses, and Nix has no standard library search path
+  for a bare `.so` name to resolve against (hard-coding a nix store path
+  would be unique to the machine that built it). Now writes through
+  GDAL/OGR's `ExecuteSQL()` instead (`grid_column_utils.py`'s
+  `_open_gpkg_for_write()`/`_execute_sql_with_retry()`/`_commit_or_raise()`),
+  which already has those functions built in - the same reason every other
+  GeoPackage write in this codebase goes through OGR rather than a bare
+  `sqlite3` connection.
 
 ### Changed
 

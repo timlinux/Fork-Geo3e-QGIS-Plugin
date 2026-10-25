@@ -972,27 +972,80 @@ Score   Enablement             Population Class
 
 ---
 
-### 25. SubnationalAggregationProcessor
+### 25. SubnationalAggregationProcessingTask
 
 **File:** `/geest/core/algorithms/subnational_aggregation_processor.py`
 
-**Purpose:** Aggregate GeoE3 and derivative scores to subnational admin boundaries (country, province, district).
+**Purpose:** Aggregate GeoE3 and derivative scores to a user-supplied subnational
+boundary layer (`item.attribute("aggregation_layer_source")`), two different ways,
+into one GeoPackage per final score product.
 
 **Inputs:**
-- **GeoE3 Score raster**
-- **Admin boundary layer** (polygons with administrative hierarchy)
-- **Optional:** population weighting, gender weighting
+- Combined VRTs for whichever of the four final-score products exist:
+  GeoE3 Score, GeoE3 × Population, GHSL-masked, by-population GHSL-masked.
+- The aggregation boundary (any OGR vector; fixed with `native:fixgeometries`
+  before use, keeping only `fid` and a best-guess name field - see below).
+- `study_area_grid` (for the per-zone averages, see part B).
 
-**Algorithm:**
-1. For each admin boundary:
-   a. Mask GeoE3 raster to admin polygon
-   b. Compute zonal statistics: mean, weighted average
-   c. Write result to admin boundary attribute table
-2. Output boundary shapefile/GeoPackage with aggregated scores
+**Part A - the four majority-class products (`aggregate()`):**
+1. `native:zonalstatisticsfb` (STATISTICS=[9] Majority, COLUMN_PREFIX="_") against
+   each product's combined VRT, writing one `_majority` field per output GeoPackage.
+2. Copies the matching discrete-legend QML alongside.
+3. Every call always re-runs (no existence/`force_clear` guard), so the four
+   `.gpkg` files are fully rebuilt on every `run()`.
+
+**Part B - per-zone dimension/factor/total AVERAGES (`aggregate_factor_dimension_totals()`,
+only for the plain GeoE3 Score product, added after Part A):**
+Deliberately NOT a second zonal-statistics pass - averages the live `study_area_grid`
+cells spatially within each zone instead of a raster majority class, which is only
+meaningful for the final product's discrete legend classes, not a continuous
+per-dimension/factor score.
+1. `_detect_name_field()` - first String-type field on the boundary, retained
+   through `fix_geometries()` alongside `fid` (previously every original attribute
+   was dropped).
+2. `_factor_dimension_total_columns()` - walks the live `item` tree (not
+   `model.json`, which may lag this run) for every used dimension, every used
+   factor, and the overall `geoe3` total.
+3. `_assign_grid_cells_to_zones()` - a `QgsSpatialIndex` over `study_area_grid`
+   (built once), bbox pre-filter + precise `intersects()` per zone, with an
+   explicit CRS reprojection (the boundary and the grid commonly differ - no QGIS
+   API does this for you here). A single grid cell routinely intersects MORE
+   THAN ONE zone against fine administrative boundaries, regardless of the
+   grid's configured cell size (confirmed ~22% of matches, Tunisia's 1km grid
+   vs its ADM4 boundary) - it must count toward every zone it intersects, not
+   just one.
+4. `_average_grid_columns_per_zone()` - one grouped SQL `AVG(CASE WHEN col > 0
+   THEN col END)` per zone, via a temporary (fid, zone_fid) mapping table with NO
+   unique constraint on fid (a unique/PK constraint here silently drops a shared
+   cell from every zone but the last one inserted - the real bug this went
+   through before landing).
+5. `_write_zone_results()` - adds `avg_<column>`/`zone_name` columns to
+   `geoe3_score_subnational_aggregation.gpkg` and writes their values via
+   GDAL/OGR's `ExecuteSQL()` (`geest/core/grid_column_utils.py`'s
+   `_open_gpkg_for_write()`/`_execute_sql_with_retry()`/`_commit_or_raise()`),
+   idempotently (`_existing_sqlite_columns()` skips columns already present, so
+   re-running the full analysis on a project whose aggregates predate this
+   feature backfills just the missing columns). Not a bare `sqlite3` connection:
+   the GeoPackage's own RTree triggers reference SpatiaLite functions (e.g.
+   `ST_IsEmpty`) in their `WHEN` clause and fire on ANY `UPDATE` to the table,
+   not just the geometry column, and a bare `sqlite3` connection doesn't have
+   them registered. Loading `mod_spatialite` into a bare connection by name
+   worked against the qgis/qgis Docker image this was first verified against,
+   but failed on a real Nix-based QGIS install (no standard library search
+   path for a bare `.so` name to resolve against) - GDAL's own GeoPackage
+   driver already has these functions built in, which is why every other
+   GeoPackage write in this codebase goes through OGR instead.
 
 **Outputs:**
-- Admin layer with aggregated indicator/factor/dimension/analysis scores
-- Summary statistics table
+- `subnational_aggregation/geoe3_score_subnational_aggregation.gpkg` - `fid`,
+  `zone_name`, `_majority` (Part A), one `avg_dim_<id>`/`avg_fac_<id>` per used
+  dimension/factor, `avg_geoe3` (Part B).
+- `subnational_aggregation/geoe3_by_population_subnational_aggregation.gpkg`,
+  `..._ghsl_masked_subnational_aggregation.gpkg`,
+  `..._by_population_ghsl_masked_subnational_aggregation.gpkg` - `fid`,
+  `_majority` only (Part A, not extended with per-zone averages).
+- A matching `.qml` per GeoPackage (discrete 5-class legend, or the 5×3 bivariate
+  scheme for the by-population products).
 
 ---
 
