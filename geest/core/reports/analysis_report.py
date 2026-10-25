@@ -29,6 +29,7 @@ from qgis.PyQt.QtCore import QRectF, Qt
 from qgis.PyQt.QtGui import QColor, QImage, QPainter
 
 from geest.core.constants import GEOE3_BY_POPULATION_COLORS, SCORE_LEGEND_COLORS
+from geest.core.settings import setting
 from geest.utilities import log_message, resources_path
 
 from .base_report import (
@@ -1338,7 +1339,8 @@ class AnalysisReport(BaseReport):
             if self._add_vector_map_page(label, label, layer_uri, current_page, palette=palette):
                 current_page += 1
 
-        current_page = self.make_subnational_score_matrix_pages(current_page)
+        if self._subnational_score_matrix_enabled():
+            current_page = self.make_subnational_score_matrix_pages(current_page)
 
         return current_page
 
@@ -2463,7 +2465,7 @@ class AnalysisReport(BaseReport):
         painter = QPainter(image)
         try:
             font = painter.font()
-            font.setPointSizeF(7.5)
+            font.setPointSizeF(15.0)
             painter.setFont(font)
 
             painter.setPen(GREY)
@@ -2498,6 +2500,14 @@ class AnalysisReport(BaseReport):
         self._temp_matrix_image_paths.append(path)
         return path
 
+    @staticmethod
+    def _subnational_score_matrix_enabled() -> bool:
+        """Whether the user has opted in to the Subnational Score Matrix
+        section (Settings > GeoE3) - off by default, since it can add
+        many pages for a project with a large number of zones.
+        """
+        return bool(setting(key="include_subnational_score_matrix", default=False))
+
     def make_subnational_score_matrix_pages(self, current_page: int) -> int:
         """Add the subnational score matrix: one row per administrative
         zone, one colour-coded cell per used dimension/factor/the
@@ -2526,8 +2536,8 @@ class AnalysisReport(BaseReport):
         name_col_w = 48.0
         n_cols = len(columns)
         swatch_w = (CONTENT_W - name_col_w) / n_cols
-        row_h = 6.0
-        header_h = 8.0
+        row_h = 12.0
+        header_h = 16.0
         top = HEADER_H + 24
         rows_per_page = max(1, int((FOOTER_Y - top - header_h) // row_h))
 

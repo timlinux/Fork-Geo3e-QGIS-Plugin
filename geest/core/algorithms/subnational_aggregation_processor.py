@@ -25,6 +25,7 @@ from qgis.core import (
 
 from geest.core import JsonTreeItem
 from geest.core.grid_column_utils import _quote_sql_identifier
+from geest.core.settings import setting
 from geest.utilities import log_message, resources_path
 
 
@@ -207,14 +208,15 @@ class SubnationalAggregationProcessingTask(QgsTask):
                     qml_path=os.path.join(self.output_dir, f"{layer_name}.qml"),
                 )
                 self.item.setAttribute(f"{layer_name}", f"{output}|layername={layer_name}")
-                try:
-                    self.aggregate_factor_dimension_totals(cleaned_aggregation_layer)
-                except Exception as e:
-                    # A failure here must not take down the 4 well-established
-                    # products above, which have already been written out
-                    # successfully by this point.
-                    log_message(f"Subnational factor/dimension averages failed: {e}", tag="GeoE3")
-                    log_message(traceback.format_exc(), tag="GeoE3")
+                if bool(setting(key="include_subnational_score_matrix", default=False)):
+                    try:
+                        self.aggregate_factor_dimension_totals(cleaned_aggregation_layer)
+                    except Exception as e:
+                        # A failure here must not take down the 4 well-established
+                        # products above, which have already been written out
+                        # successfully by this point.
+                        log_message(f"Subnational factor/dimension averages failed: {e}", tag="GeoE3")
+                        log_message(traceback.format_exc(), tag="GeoE3")
             if self.geoe3_by_population_folder:
                 log_message("Calculating GeoE3 x Population Score Aggregation")
                 layer_name = "geoe3_by_population_subnational_aggregation"

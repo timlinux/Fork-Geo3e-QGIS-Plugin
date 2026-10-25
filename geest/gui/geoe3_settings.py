@@ -116,6 +116,9 @@ class GeoE3Settings(FORM_CLASS, QgsOptionsPageWidget):
         filter_study_areas_by_ghsl = bool(setting(key="filter_study_areas_by_ghsl", default=True))
         self.filter_study_areas_by_ghsl.setChecked(filter_study_areas_by_ghsl)
 
+        include_subnational_score_matrix = bool(setting(key="include_subnational_score_matrix", default=False))
+        self.include_subnational_score_matrix.setChecked(include_subnational_score_matrix)
+
     def apply(self):
         """Process the animation sequence.
 
@@ -148,6 +151,10 @@ class GeoE3Settings(FORM_CLASS, QgsOptionsPageWidget):
         set_setting(key="ookla_use_local_cache", value=self.ookla_use_local_cache.isChecked())
         set_setting(key="ookla_local_cache_dir", value=self.ookla_cache_dir.text())
         set_setting(key="filter_study_areas_by_ghsl", value=self.filter_study_areas_by_ghsl.isChecked())
+        set_setting(
+            key="include_subnational_score_matrix",
+            value=self.include_subnational_score_matrix.isChecked(),
+        )
 
     def _select_ookla_cache_dir(self):
         """Select local cache directory for Ookla parquet files."""
