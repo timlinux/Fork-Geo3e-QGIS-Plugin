@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 from qgis.PyQt.QtGui import QIcon
 
 from geest.gui.widgets.item_info_panel import ItemInfoPanel, _truncate
+from geest.utilities import resources_path
 
 
 class TestTruncate(unittest.TestCase):
@@ -40,7 +41,7 @@ class TestTruncate(unittest.TestCase):
         self.assertFalse(result.endswith(",…"))
 
 
-def make_fake_item(role, name, description="", analysis_mode="", tooltip=""):
+def make_fake_item(role, name, description="", analysis_mode="", tooltip="", item_id=""):
     """A duck-typed stand-in for JsonTreeItem carrying only what
     ItemInfoPanel.show_item() actually reads.
     """
@@ -49,7 +50,7 @@ def make_fake_item(role, name, description="", analysis_mode="", tooltip=""):
     item.data.return_value = name
     item.getIcon.return_value = QIcon()
     item.getItemTooltip.return_value = tooltip
-    attrs = {"description": description, "analysis_mode": analysis_mode}
+    attrs = {"description": description, "analysis_mode": analysis_mode, "id": item_id}
     item.attribute.side_effect = lambda key, default="": attrs.get(key, default)
     return item
 
@@ -115,6 +116,27 @@ class TestItemInfoPanelShowItem(unittest.TestCase):
 
         self.assertFalse(self.panel.more_link.isVisible())
 
+    def test_icon_label_is_a_square_tile(self):
+        self.assertEqual(self.panel.item_icon_label.objectName(), "iconTile")
+        self.assertEqual(self.panel.item_icon_label.size().width(), 36)
+        self.assertEqual(self.panel.item_icon_label.size().height(), 36)
+
+    def test_mapped_id_uses_the_topic_icon_not_the_generic_role_glyph(self):
+        item = make_fake_item("factor", "EPLEX Score", item_id="eplex")
+
+        self.panel.show_item(item)
+
+        self.assertFalse(self.panel.item_icon_label.pixmap().isNull())
+
+    def test_unmapped_id_falls_back_to_the_generic_role_icon(self):
+        generic_icon = QIcon(resources_path("resources", "icons", "factor.svg"))
+        item = make_fake_item("factor", "Mystery Factor", item_id="not_a_real_id")
+        item.getIcon.return_value = generic_icon
+
+        self.panel.show_item(item)
+
+        item.getIcon.assert_called()
+
     def test_showing_a_new_item_resets_to_the_item_page(self):
         item = make_fake_item("indicator", "Clinics nearby", analysis_mode="use_point_per_cell")
         self.panel.show_item(item)
@@ -148,6 +170,10 @@ class TestItemInfoPanelMethodologySlideOver(unittest.TestCase):
         self.panel.back_link.click()
 
         self.assertEqual(self.panel.stack.currentIndex(), 0)
+
+    def test_methodology_icon_label_is_also_a_square_tile(self):
+        self.assertEqual(self.panel.methodology_icon_label.objectName(), "iconTile")
+        self.assertEqual(self.panel.methodology_icon_label.size().width(), 36)
 
     def test_methodology_body_is_a_short_glanceable_summary(self):
         self.panel.more_link.click()

@@ -31,6 +31,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from geest.core.reports.methodology import TECHNIQUES, technique_for_analysis_mode
+from geest.core.topic_icons import topic_icon_filename
 from geest.utilities import resources_path
 
 NAVY = "#002244"
@@ -39,6 +40,7 @@ CHARCOAL = "#333333"
 GREY = "#6E7B85"
 MIST = "#EEF4F8"
 RULE = "#D6DEE4"
+ICON_TILE_BG = "#E3F3FB"
 
 _ROLE_LABELS = {
     "dimension": "Dimension",
@@ -118,6 +120,11 @@ class ItemInfoPanel(QWidget):
                 font-weight: bold;
                 font-size: 9pt;
             }}
+            QLabel#iconTile {{
+                background-color: {ICON_TILE_BG};
+                border: 1px solid {RULE};
+                border-radius: 8px;
+            }}
             """
         )
 
@@ -166,7 +173,8 @@ class ItemInfoPanel(QWidget):
         row.setContentsMargins(0, 0, 0, 0)
 
         self.item_icon_label = QLabel()
-        self.item_icon_label.setFixedSize(28, 28)
+        self.item_icon_label.setObjectName("iconTile")
+        self.item_icon_label.setFixedSize(36, 36)
         self.item_icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         row.addWidget(self.item_icon_label, 0, Qt.AlignmentFlag.AlignTop)
 
@@ -219,7 +227,8 @@ class ItemInfoPanel(QWidget):
 
         row = QHBoxLayout()
         self.methodology_icon_label = QLabel()
-        self.methodology_icon_label.setFixedSize(28, 28)
+        self.methodology_icon_label.setObjectName("iconTile")
+        self.methodology_icon_label.setFixedSize(36, 36)
         self.methodology_icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         row.addWidget(self.methodology_icon_label, 0, Qt.AlignmentFlag.AlignTop)
 
@@ -264,6 +273,22 @@ class ItemInfoPanel(QWidget):
         self.more_link.setVisible(False)
         self._show_item_page()
 
+    def _topic_icon(self, role: str, item_id: str):
+        """⚙️ Load the topic-relevant icon for a role/id, or None if unmapped.
+
+        Args:
+            role: "analysis", "dimension", "factor" or "indicator".
+            item_id: the item's ``id`` attribute.
+
+        Returns:
+            A QIcon, or None when no topic icon is mapped for this item.
+        """
+        filename = topic_icon_filename(role, item_id)
+        if not filename:
+            return None
+        icon = QIcon(resources_path("resources", "icons", "topics", filename))
+        return icon if not icon.isNull() else None
+
     def show_item(self, item) -> None:
         """⚙️ Update the panel for the given tree item.
 
@@ -271,9 +296,12 @@ class ItemInfoPanel(QWidget):
             item: The JsonTreeItem the user just clicked.
         """
         role = getattr(item, "role", "")
-        icon = item.getIcon() if hasattr(item, "getIcon") else None
+        item_id = item.attribute("id", "") if hasattr(item, "attribute") else ""
+        icon = self._topic_icon(role, item_id)
+        if icon is None and hasattr(item, "getIcon"):
+            icon = item.getIcon()
         if isinstance(icon, QIcon) and not icon.isNull():
-            self.item_icon_label.setPixmap(icon.pixmap(28, 28))
+            self.item_icon_label.setPixmap(icon.pixmap(24, 24))
         else:
             self.item_icon_label.clear()
 
@@ -309,7 +337,7 @@ class ItemInfoPanel(QWidget):
         technique = TECHNIQUES[self._current_technique_key]
         icon = QIcon(resources_path("resources", "methodology", technique["svg"]))
         if not icon.isNull():
-            self.methodology_icon_label.setPixmap(icon.pixmap(28, 28))
+            self.methodology_icon_label.setPixmap(icon.pixmap(24, 24))
         self.methodology_heading_label.setText(technique["name"])
         self.methodology_body_label.setText(_truncate(technique["description"]))
         self.stack.setCurrentIndex(1)
