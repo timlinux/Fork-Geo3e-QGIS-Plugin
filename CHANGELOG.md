@@ -70,7 +70,21 @@ version per the policy above.
   heading/description text, instead of a bare unframed glyph. New
   `geest/resources/icons/topics/` and `geest.core.topic_icons`
   (`topic_icon_filename()`), falling back to the existing generic role
-  icon for any item id that isn't mapped.
+  icon for any item id that isn't mapped. Two icons (the bus and the
+  bank) originally had one of a pair/trio of otherwise-identical shapes
+  (a wheel, a column) coloured cyan while its siblings stayed navy -
+  fixed so repeated shapes are always the same colour and the one cyan
+  accent per icon lands on a structurally distinct element instead.
+  The panel's description line also no longer falls back to
+  `getItemTooltip()`, which could surface a transient run warning/error
+  (e.g. "No service areas could be computed...") as if it were a
+  description of the indicator - that text still shows correctly on the
+  tree row's own hover tooltip, just not here. Since almost every
+  indicator's own `description` in model.json is blank, the panel now
+  borrows its parent factor's description instead (always populated)
+  rather than showing the bare word "Indicator" with nothing after it,
+  truncated the same way the methodology summary already is so a long
+  borrowed description doesn't overflow the card.
 - Every map in the analysis report - the large main map (inset into its
   own bottom-right corner over a translucent backing panel) and every
   minimap (dimension/factor/indicator grids, plus the GeoE3 score/

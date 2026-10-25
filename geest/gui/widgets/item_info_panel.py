@@ -289,6 +289,31 @@ class ItemInfoPanel(QWidget):
         icon = QIcon(resources_path("resources", "icons", "topics", filename))
         return icon if not icon.isNull() else None
 
+    def _inherited_description(self, item) -> str:
+        """⚙️ Borrow a parent's description when the item has none of its own.
+
+        model.json leaves most indicators' own "description" attribute
+        blank, while their parent factor almost always carries a real,
+        policy-reader-friendly sentence or two - that's a far more useful
+        thing to show here than `getItemTooltip()`'s fallbacks, which can
+        surface a transient run warning/error (not a description of what
+        the indicator measures) or just the bare role name a second time.
+        The tree row's own hover tooltip (treeview.py) still shows those
+        warnings/errors - nothing is lost by leaving them out of this panel.
+
+        Args:
+            item: The JsonTreeItem the user just clicked.
+
+        Returns:
+            The nearest ancestor's description, or "" if none has one.
+        """
+        parent = getattr(item, "parentItem", None)
+        if parent is not None and hasattr(parent, "attribute"):
+            parent_description = parent.attribute("description", "")
+            if parent_description:
+                return parent_description
+        return ""
+
     def show_item(self, item) -> None:
         """⚙️ Update the panel for the given tree item.
 
@@ -310,14 +335,14 @@ class ItemInfoPanel(QWidget):
 
         role_label = _ROLE_LABELS.get(role, role.title() if role else "")
         description = item.attribute("description", "") if hasattr(item, "attribute") else ""
-        if not description and hasattr(item, "getItemTooltip"):
-            tooltip = item.getItemTooltip()
-            # getItemTooltip() falls back to the bare role name itself
-            # ("Indicator", "Factor", ...) when there's nothing more
-            # specific to say - that's not a real description, just the
-            # same word the role label already shows.
-            if tooltip and tooltip != role_label:
-                description = tooltip
+        if not description:
+            description = self._inherited_description(item)
+        if description:
+            # A borrowed factor description can run well past what the
+            # card's fixed height has room for - truncate it the same way
+            # the methodology summary is, rather than letting Qt hard-clip
+            # mid-word with no ellipsis.
+            description = _truncate(description, limit=110)
         self.item_meta_label.setText(f"{role_label} · {description}" if description else role_label)
 
         analysis_mode = item.attribute("analysis_mode", "") if hasattr(item, "attribute") else ""
