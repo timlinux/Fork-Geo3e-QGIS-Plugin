@@ -293,6 +293,31 @@ version per the policy above.
   `_factor_correlation_matrix()`/`_hazard_exposure_tercile_scores()`/
   `_read_grid_columns()`/`_read_grid_columns_with_gaps()`, plus the
   matching page/chart builders and `create_insights_pages()`.
+- A new "Methodology" section near the end of the report explains, in
+  plain language for a non-GIS reader, how each indicator's score was
+  actually worked out. The 18 `analysis_mode` values an indicator can be
+  configured with mechanically reduce to 7 real-world techniques (e.g.
+  counting features in a cell, tracing road-network travel time,
+  reading a ready-made hazard map) - the report shows one page per
+  technique ACTUALLY used in this project (never the full list of 7
+  regardless of relevance), each with a small SVG illustration, a
+  descriptive explanation, and the list of this project's own indicators
+  that use it, with a one-sentence nuance where a mode differs from its
+  technique siblings (e.g. Ookla/GHSL-masked index scores, ACLED's
+  per-event-type buffers). A following "Scoring Weights" page lists
+  every used dimension's share of the overall analysis and every used
+  factor's share of its own dimension, read straight from `model.json` -
+  a factor contributing zero weight (e.g. a fallback-only factor) is
+  deliberately shown rather than hidden, since the point is transparency
+  about what was actually used, not a tidier-looking list. New
+  `geest/core/reports/methodology.py` reference module (technique
+  registry, `analysis_mode` -> technique mapping, nuance notes) and 7
+  versioned SVG illustrations under `geest/resources/methodology/`; new
+  `AnalysisReport._methodology_entries()`/`make_methodology_pages()`/
+  `_dimension_factor_weightings()`/`make_scoring_weights_page()`/
+  `_place_picture()` (a small picture-embedding primitive extracted
+  into its own method so tests can mock it instead of constructing a
+  real `QgsLayoutItemPicture`).
 
 ### Fixed
 

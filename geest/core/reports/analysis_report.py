@@ -13,6 +13,7 @@ import numpy
 from qgis.core import (
     QgsFillSymbol,
     QgsLayout,
+    QgsLayoutItemPicture,
     QgsLayoutItemShape,
     QgsLayoutPoint,
     QgsLayoutSize,
@@ -44,6 +45,7 @@ from .base_report import (
     BaseReport,
     _flat_fill,
 )
+from .methodology import TECHNIQUES, nuance_for_analysis_mode, technique_for_analysis_mode
 
 # The five score classes used by every result map in this report
 # (see resources/qml/analysis.qml): range, name, colour, significance.
@@ -261,6 +263,13 @@ class AnalysisReport(BaseReport):
         # itself - what's limiting low-scoring cells, settlement/hazard
         # effects, factor correlations.
         current_page = self.create_insights_pages(current_page)
+
+        # Methodology and weightings live near the end, after the maps
+        # and insights content but before the purely technical
+        # bookkeeping pages - the "how was this calculated" answer a
+        # reader looks for once they've seen the results.
+        current_page = self.make_methodology_pages(current_page)
+        current_page = self.make_scoring_weights_page(current_page)
 
         # Processing times live at the back of the report — they are
         # technical bookkeeping, not analysis content.
@@ -2291,4 +2300,251 @@ class AnalysisReport(BaseReport):
         ):
             if page_builder(current_page):
                 current_page += 1
+        return current_page
+
+    def _place_picture(self, image_path: str, x: float, y: float, w: float, h: float, page: int) -> None:
+        """Embed an image file at the given position/size - a drawing
+        primitive like _rect()/_label(), kept as its own method so it
+        can be mocked out in tests without needing a real QgsLayout
+        object.
+        """
+        picture = QgsLayoutItemPicture(self.layout)
+        picture.setPicturePath(image_path)
+        self.layout.addLayoutItem(picture)
+        picture.attemptMove(QgsLayoutPoint(x, y, QgsUnitTypes.LayoutUnit.LayoutMillimeters), page=page)
+        picture.attemptResize(QgsLayoutSize(w, h, QgsUnitTypes.LayoutUnit.LayoutMillimeters))
+
+    def _methodology_entries(self) -> list:
+        """Every used indicator in this analysis, grouped by the
+        computation technique behind its analysis_mode (see
+        geest.core.reports.methodology) - in TECHNIQUES' own order, and
+        only the techniques this project actually uses.
+
+        Returns:
+            [(technique_key, [(indicator_name, nuance), ...]), ...]
+        """
+        with open(self.model_path, "r", encoding="utf-8") as f:
+            model = json.load(f)
+
+        by_technique = {key: [] for key in TECHNIQUES}
+        for dimension in model.get("dimensions", []):
+            for factor in dimension.get("factors", []):
+                for indicator in factor.get("indicators", []):
+                    analysis_mode = indicator.get("analysis_mode", "")
+                    technique_key = technique_for_analysis_mode(analysis_mode)
+                    if technique_key is None:
+                        continue
+                    name = indicator.get("indicator", "")
+                    by_technique[technique_key].append((name, nuance_for_analysis_mode(analysis_mode)))
+
+        return [(key, entries) for key, entries in by_technique.items() if entries]
+
+    def make_methodology_pages(self, current_page: int) -> int:
+        """Add the "Methodology" section: one page per computation
+        technique actually used in this analysis, each with a plain-
+        language explanation, an illustration, and the list of this
+        project's own indicators that use it - grouped by technique
+        rather than repeated indicator by indicator, since several
+        indicators are collected the same way.
+        """
+        entries_by_technique = self._methodology_entries()
+        if not entries_by_technique:
+            return current_page
+
+        self.page_descriptions["methodology_intro"] = (
+            "Every grid cell in this analysis carries a score from 0 to 5 for each "
+            "indicator, combined into factor, dimension and overall scores. The pages "
+            "that follow explain, in plain terms, how each indicator actually used in "
+            "this analysis was measured - grouped by technique, since several "
+            "indicators are collected the same way."
+        )
+        self.make_page(
+            title="Methodology",
+            description_key="methodology_intro",
+            current_page=current_page,
+            show_header_and_footer=True,
+        )
+        current_page += 1
+
+        illustration_size = 46.0
+        text_x = MARGIN + illustration_size + 8
+        text_w = CONTENT_W - illustration_size - 8
+
+        for technique_key, indicator_entries in entries_by_technique:
+            technique = TECHNIQUES[technique_key]
+            description_key = f"methodology_{technique_key}"
+            self.page_descriptions[description_key] = ""
+            self.make_page(
+                title=technique["name"],
+                description_key=description_key,
+                current_page=current_page,
+                show_header_and_footer=True,
+            )
+
+            top = HEADER_H + 10
+            self._place_picture(
+                resources_path("resources", "methodology", technique["svg"]),
+                x=MARGIN,
+                y=top,
+                w=illustration_size,
+                h=illustration_size,
+                page=current_page,
+            )
+            description_label = self._label(
+                f"<p>{technique['description']}</p>",
+                text_x,
+                top,
+                text_w,
+                illustration_size,
+                current_page,
+                size=9.5,
+                color=CHARCOAL,
+                html=True,
+            )
+            description_label.setHAlign(Qt.AlignmentFlag.AlignJustify)
+
+            list_top = top + illustration_size + 10
+            self._label(
+                "Indicators in this analysis that use this technique:",
+                MARGIN,
+                list_top,
+                CONTENT_W,
+                6,
+                current_page,
+                size=9.5,
+                color=NAVY,
+                bold=True,
+            )
+            row_pitch = 6.0
+            for i, (indicator_name, nuance) in enumerate(indicator_entries):
+                y = list_top + 8 + i * row_pitch
+                text = f"•  {indicator_name}"
+                if nuance:
+                    text += f" — {nuance}"
+                self._label(text, MARGIN + 4, y, CONTENT_W - 4, row_pitch, current_page, size=8.5, color=CHARCOAL)
+            current_page += 1
+
+        return current_page
+
+    def _dimension_factor_weightings(self) -> list:
+        """The configured weight of every used dimension within the
+        overall analysis, and every used factor within its own
+        dimension - read straight from model.json's own
+        analysis_weighting/dimension_weighting attributes (the same
+        values FactorAggregationWorkflow/DimensionAggregationWorkflow/
+        AnalysisAggregationWorkflow use to blend scores together).
+
+        Returns:
+            [(dimension_name, dimension_weight_0_to_1,
+            [(factor_name, factor_weight_0_to_1), ...]), ...]
+        """
+        with open(self.model_path, "r", encoding="utf-8") as f:
+            model = json.load(f)
+
+        weightings = []
+        for dimension in model.get("dimensions", []):
+            if not self._has_used_factors(dimension):
+                continue
+            dimension_weight = float(dimension.get("analysis_weighting", 0.0) or 0.0)
+            factor_rows = [
+                (factor.get("name", ""), float(factor.get("dimension_weighting", 0.0) or 0.0))
+                for factor in dimension.get("factors", [])
+                if self._has_used_indicators(factor)
+            ]
+            weightings.append((dimension.get("name", ""), dimension_weight, factor_rows))
+        return weightings
+
+    def make_scoring_weights_page(self, current_page: int) -> int:
+        """Add the "Scoring Weights" page: how much each dimension
+        counts toward the overall score, and how much each factor
+        counts toward its own dimension - the weights this specific
+        analysis was configured with, made visible for transparency.
+        """
+        weightings = self._dimension_factor_weightings()
+        if not weightings:
+            return current_page
+
+        # Factor rows show a bare percentage, not "x% of <dimension>" - the
+        # dimension name is already the header band directly above them,
+        # and a long dimension name (e.g. "Place Characterization") made
+        # that phrasing wrap onto a second line and crowd the row below.
+        rows = []
+        for dimension_name, dimension_weight, factor_rows in weightings:
+            rows.append((True, dimension_name, f"{dimension_weight * 100:.0f}% of analysis"))
+            for factor_name, factor_weight in factor_rows:
+                rows.append((False, factor_name, f"{factor_weight * 100:.0f}% of this dimension"))
+
+        self.page_descriptions["scoring_weights"] = (
+            "How much each dimension counts toward the overall GeoE3 score, and how "
+            "much each factor counts toward its own dimension's score - the weights "
+            "configured for this analysis."
+        )
+
+        row_h = 7.0
+        top = HEADER_H + 26
+        rows_per_page = max(1, int((FOOTER_Y - top) // row_h))
+
+        for page_start in range(0, len(rows), rows_per_page):
+            page_rows = rows[page_start : page_start + rows_per_page]
+            self.make_page(
+                title="Scoring Weights",
+                description_key="scoring_weights",
+                current_page=current_page,
+                show_header_and_footer=True,
+            )
+            y = top
+            for is_dimension, label, weight_text in page_rows:
+                if is_dimension:
+                    self._rect(MARGIN, y, CONTENT_W, row_h, NAVY, current_page)
+                    self._label(
+                        label,
+                        MARGIN + 4,
+                        y,
+                        CONTENT_W - 50,
+                        row_h,
+                        current_page,
+                        size=10,
+                        color=WHITE,
+                        bold=True,
+                        valign=Qt.AlignmentFlag.AlignVCenter,
+                    )
+                    self._label(
+                        weight_text,
+                        MARGIN + CONTENT_W - 48,
+                        y,
+                        44,
+                        row_h,
+                        current_page,
+                        size=9,
+                        color=WHITE,
+                        halign=Qt.AlignmentFlag.AlignRight,
+                        valign=Qt.AlignmentFlag.AlignVCenter,
+                    )
+                else:
+                    self._label(
+                        label,
+                        MARGIN + 10,
+                        y,
+                        CONTENT_W - 50,
+                        row_h,
+                        current_page,
+                        size=9,
+                        color=CHARCOAL,
+                        valign=Qt.AlignmentFlag.AlignVCenter,
+                    )
+                    self._label(
+                        weight_text,
+                        MARGIN + CONTENT_W - 48,
+                        y,
+                        44,
+                        row_h,
+                        current_page,
+                        size=8.5,
+                        color=GREY,
+                        halign=Qt.AlignmentFlag.AlignRight,
+                        valign=Qt.AlignmentFlag.AlignVCenter,
+                    )
+                y += row_h
+            current_page += 1
+
         return current_page
