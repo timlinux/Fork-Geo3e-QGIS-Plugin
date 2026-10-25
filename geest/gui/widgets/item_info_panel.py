@@ -48,6 +48,19 @@ _ROLE_LABELS = {
 }
 
 
+def _truncate(text: str, limit: int = 130) -> str:
+    """A one-glance summary, cut at a word boundary rather than a
+    sentence boundary - a technique's first sentence can itself run
+    well past a card-sized budget (e.g. "feature_count"'s, at an
+    em-dash clause), so splitting on ". " doesn't reliably bound the
+    length the way a flat character limit does.
+    """
+    text = text.strip()
+    if len(text) <= limit:
+        return text if text.endswith((".", "…")) else f"{text}."
+    return text[:limit].rsplit(" ", 1)[0].rstrip(",;: ") + "…"
+
+
 class ItemInfoPanel(QWidget):
     """Collapsible "what is this item" panel with a methodology slide-over."""
 
@@ -95,9 +108,9 @@ class ItemInfoPanel(QWidget):
                 color: {CHARCOAL};
                 font-size: 9pt;
             }}
-            QLabel#roleBadge {{
+            QLabel#metaLabel {{
                 color: {GREY};
-                font-size: 8pt;
+                font-size: 8.5pt;
             }}
             QToolButton#moreLink, QToolButton#backLink {{
                 border: none;
@@ -134,7 +147,13 @@ class ItemInfoPanel(QWidget):
         card_layout.addWidget(self.stack)
 
         outer.addWidget(self.card)
-        self.card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        # A fixed cap, not just a Fixed size policy: without this the card
+        # still happily grows to fill whatever room the host layout hands
+        # it (Fixed only stops it growing to match its OWN size hint, not
+        # the hint of an empty/short-content hint being stretched by a
+        # parent that has nothing else competing for that space).
+        self.card.setMaximumHeight(112)
 
     def _build_item_page(self) -> QWidget:
         """⚙️ Build the "currently selected item" page.
@@ -147,8 +166,8 @@ class ItemInfoPanel(QWidget):
         row.setContentsMargins(0, 0, 0, 0)
 
         self.item_icon_label = QLabel()
-        self.item_icon_label.setFixedSize(32, 32)
-        self.item_icon_label.setScaledContents(True)
+        self.item_icon_label.setFixedSize(28, 28)
+        self.item_icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         row.addWidget(self.item_icon_label, 0, Qt.AlignmentFlag.AlignTop)
 
         text_col = QVBoxLayout()
@@ -158,14 +177,15 @@ class ItemInfoPanel(QWidget):
         self.item_heading_label.setWordWrap(True)
         text_col.addWidget(self.item_heading_label)
 
-        self.item_role_label = QLabel("")
-        self.item_role_label.setObjectName("roleBadge")
-        text_col.addWidget(self.item_role_label)
-
-        self.item_body_label = QLabel("")
-        self.item_body_label.setObjectName("bodyLabel")
-        self.item_body_label.setWordWrap(True)
-        text_col.addWidget(self.item_body_label)
+        # One combined "Role · description" line instead of two separate
+        # labels - a bare item with no custom description has nothing to
+        # say beyond its own role, so showing the role twice (once as a
+        # badge, once as getItemTooltip()'s "Indicator"/"Factor"/...
+        # fallback body text) was pure redundant clutter.
+        self.item_meta_label = QLabel("")
+        self.item_meta_label.setObjectName("metaLabel")
+        self.item_meta_label.setWordWrap(True)
+        text_col.addWidget(self.item_meta_label)
 
         self.more_link = QToolButton()
         self.more_link.setObjectName("moreLink")
@@ -175,6 +195,7 @@ class ItemInfoPanel(QWidget):
         self.more_link.setVisible(False)
         text_col.addWidget(self.more_link, 0, Qt.AlignmentFlag.AlignLeft)
 
+        text_col.addStretch(1)
         row.addLayout(text_col, 1)
         return page
 
@@ -198,8 +219,8 @@ class ItemInfoPanel(QWidget):
 
         row = QHBoxLayout()
         self.methodology_icon_label = QLabel()
-        self.methodology_icon_label.setFixedSize(32, 32)
-        self.methodology_icon_label.setScaledContents(True)
+        self.methodology_icon_label.setFixedSize(28, 28)
+        self.methodology_icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         row.addWidget(self.methodology_icon_label, 0, Qt.AlignmentFlag.AlignTop)
 
         text_col = QVBoxLayout()
@@ -216,6 +237,7 @@ class ItemInfoPanel(QWidget):
 
         row.addLayout(text_col, 1)
         outer.addLayout(row)
+        outer.addStretch(1)
         return page
 
     def toggle_expanded(self):
@@ -238,8 +260,7 @@ class ItemInfoPanel(QWidget):
         self._current_technique_key = None
         self.item_icon_label.clear()
         self.item_heading_label.setText("No item selected")
-        self.item_role_label.setText("")
-        self.item_body_label.setText("Click a dimension, factor or indicator in the tree to see details here.")
+        self.item_meta_label.setText("Click a dimension, factor or indicator in the tree to see details here.")
         self.more_link.setVisible(False)
         self._show_item_page()
 
@@ -252,18 +273,24 @@ class ItemInfoPanel(QWidget):
         role = getattr(item, "role", "")
         icon = item.getIcon() if hasattr(item, "getIcon") else None
         if isinstance(icon, QIcon) and not icon.isNull():
-            self.item_icon_label.setPixmap(icon.pixmap(32, 32))
+            self.item_icon_label.setPixmap(icon.pixmap(28, 28))
         else:
             self.item_icon_label.clear()
 
         name = item.data(0) if hasattr(item, "data") else str(item)
         self.item_heading_label.setText(name or "")
-        self.item_role_label.setText(_ROLE_LABELS.get(role, role.title() if role else ""))
 
+        role_label = _ROLE_LABELS.get(role, role.title() if role else "")
         description = item.attribute("description", "") if hasattr(item, "attribute") else ""
         if not description and hasattr(item, "getItemTooltip"):
-            description = item.getItemTooltip()
-        self.item_body_label.setText(description or "No description available.")
+            tooltip = item.getItemTooltip()
+            # getItemTooltip() falls back to the bare role name itself
+            # ("Indicator", "Factor", ...) when there's nothing more
+            # specific to say - that's not a real description, just the
+            # same word the role label already shows.
+            if tooltip and tooltip != role_label:
+                description = tooltip
+        self.item_meta_label.setText(f"{role_label} · {description}" if description else role_label)
 
         analysis_mode = item.attribute("analysis_mode", "") if hasattr(item, "attribute") else ""
         technique_key = technique_for_analysis_mode(analysis_mode) if analysis_mode else None
@@ -282,10 +309,7 @@ class ItemInfoPanel(QWidget):
         technique = TECHNIQUES[self._current_technique_key]
         icon = QIcon(resources_path("resources", "methodology", technique["svg"]))
         if not icon.isNull():
-            self.methodology_icon_label.setPixmap(icon.pixmap(32, 32))
+            self.methodology_icon_label.setPixmap(icon.pixmap(28, 28))
         self.methodology_heading_label.setText(technique["name"])
-        short_description = technique["description"].split(". ")[0].strip()
-        if not short_description.endswith("."):
-            short_description += "."
-        self.methodology_body_label.setText(short_description)
+        self.methodology_body_label.setText(_truncate(technique["description"]))
         self.stack.setCurrentIndex(1)
