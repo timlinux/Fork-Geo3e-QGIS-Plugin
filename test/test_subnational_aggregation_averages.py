@@ -180,8 +180,9 @@ class GridFixtureTestCase(unittest.TestCase):
 class TestAverageGridColumnsPerZone(GridFixtureTestCase):
     """_average_grid_columns_per_zone() - regression coverage for the
     real bug found against Tunisia data: a cell shared by more than one
-    zone (routine at 1km grid resolution against small administrative
-    boundaries) must contribute to EVERY zone it intersects, not just
+    zone (routine against small administrative boundaries, regardless
+    of the grid's configured cell size) must contribute to EVERY zone
+    it intersects, not just
     whichever zone happened to be inserted last into the mapping table.
     """
 

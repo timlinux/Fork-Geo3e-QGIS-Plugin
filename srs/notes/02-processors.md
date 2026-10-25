@@ -1010,9 +1010,10 @@ per-dimension/factor score.
    (built once), bbox pre-filter + precise `intersects()` per zone, with an
    explicit CRS reprojection (the boundary and the grid commonly differ - no QGIS
    API does this for you here). A single grid cell routinely intersects MORE
-   THAN ONE zone at 1km resolution against fine administrative boundaries
-   (confirmed ~22% of matches, Tunisia ADM4) - it must count toward every zone it
-   intersects, not just one.
+   THAN ONE zone against fine administrative boundaries, regardless of the
+   grid's configured cell size (confirmed ~22% of matches, Tunisia's 1km grid
+   vs its ADM4 boundary) - it must count toward every zone it intersects, not
+   just one.
 4. `_average_grid_columns_per_zone()` - one grouped SQL `AVG(CASE WHEN col > 0
    THEN col END)` per zone, via a temporary (fid, zone_fid) mapping table with NO
    unique constraint on fid (a unique/PK constraint here silently drops a shared

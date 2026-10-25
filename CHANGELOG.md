@@ -300,9 +300,10 @@ version per the policy above.
   existing 4 products use (appropriate for a map legend's discrete
   classes, not for a continuous per-zone score). Computed by spatially
   matching every grid cell to the zone(s) it intersects (a cell
-  routinely intersects more than one zone at 1km resolution against
-  fine administrative boundaries - confirmed against real data: ~22%
-  of cell/zone matches were shared), then a single grouped SQL AVG()
+  routinely intersects more than one zone against fine administrative
+  boundaries, regardless of the grid's configured cell size -
+  confirmed against real data: ~22% of cell/zone matches were shared),
+  then a single grouped SQL AVG()
   per zone - not one zonal-statistics raster pass per factor/dimension.
   Idempotent and legacy-safe: only backfills `avg_<column>` columns not
   already present in `geoe3_score_subnational_aggregation.gpkg`, so a

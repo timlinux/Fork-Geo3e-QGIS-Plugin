@@ -493,10 +493,12 @@ class SubnationalAggregationProcessingTask(QgsTask):
         "excluded area" convention every study_area_grid read in this
         codebase follows (see AnalysisReport._read_grid_column_values()).
 
-        A single grid cell commonly intersects MORE THAN ONE zone (a
-        1km cell routinely spans several small administrative zones -
-        confirmed against real data: ~22% of cell/zone matches were
-        shared by more than one zone for Tunisia's ADM4 boundary), so
+        A single grid cell commonly intersects MORE THAN ONE zone (the
+        cell size is configurable per analysis, not fixed, but even at
+        a modest size a cell routinely spans several small
+        administrative zones - confirmed against real data: ~22% of
+        cell/zone matches were shared by more than one zone for
+        Tunisia's 1km-grid ADM4 boundary), so
         the mapping table deliberately has no unique constraint on
         fid - a cell contributes to the average of every zone it
         intersects, not just one.
