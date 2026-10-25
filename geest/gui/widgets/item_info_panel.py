@@ -4,7 +4,7 @@
 A collapsible panel shown above the tree panel's button row (the same
 space the progress bars occupy during a run - both are empty/visible
 at different times, never at once) explaining whatever tree item is
-currently selected: a heading, a short description and an icon. For
+currently selected: a heading, a scrollable description and an icon. For
 an indicator, a "Methodology" link slides over to a second page
 showing the real-world technique behind its score - the same name,
 description and icon used on the analysis report's own Methodology
@@ -25,6 +25,7 @@ from qgis.PyQt.QtWidgets import (
     QLabel,
     QSizePolicy,
     QStackedWidget,
+    QTextEdit,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -42,25 +43,39 @@ MIST = "#EEF4F8"
 RULE = "#D6DEE4"
 ICON_TILE_BG = "#E3F3FB"
 
+
+def _scrollable_text(object_name: str) -> QTextEdit:
+    """A read-only text area that scrolls instead of eliding.
+
+    Character-count truncation always leaves a reader hanging mid-
+    sentence with no way to see the rest - this shows the complete text
+    and lets the card's fixed height clip it behind a scrollbar instead,
+    exactly like any other "more content than fits" panel.
+
+    Args:
+        object_name: QSS object name for styling (see the panel's
+            stylesheet for the matching ``QTextEdit#<object_name>`` rule).
+
+    Returns:
+        A configured, empty QTextEdit ready to receive plain text.
+    """
+    widget = QTextEdit("")
+    widget.setObjectName(object_name)
+    widget.setReadOnly(True)
+    widget.setFrameShape(QFrame.Shape.NoFrame)
+    widget.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    widget.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    widget.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+    widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+    return widget
+
+
 _ROLE_LABELS = {
     "dimension": "Dimension",
     "factor": "Factor",
     "indicator": "Indicator",
     "analysis": "Analysis",
 }
-
-
-def _truncate(text: str, limit: int = 130) -> str:
-    """A one-glance summary, cut at a word boundary rather than a
-    sentence boundary - a technique's first sentence can itself run
-    well past a card-sized budget (e.g. "feature_count"'s, at an
-    em-dash clause), so splitting on ". " doesn't reliably bound the
-    length the way a flat character limit does.
-    """
-    text = text.strip()
-    if len(text) <= limit:
-        return text if text.endswith((".", "…")) else f"{text}."
-    return text[:limit].rsplit(" ", 1)[0].rstrip(",;: ") + "…"
 
 
 class ItemInfoPanel(QWidget):
@@ -106,19 +121,29 @@ class ItemInfoPanel(QWidget):
                 font-weight: bold;
                 font-size: 11pt;
             }}
-            QLabel#bodyLabel {{
+            QTextEdit#bodyLabel {{
                 color: {CHARCOAL};
                 font-size: 9pt;
+                background: transparent;
+                border: none;
             }}
-            QLabel#metaLabel {{
+            QTextEdit#metaLabel {{
                 color: {GREY};
                 font-size: 8.5pt;
+                background: transparent;
+                border: none;
             }}
-            QToolButton#moreLink, QToolButton#backLink {{
+            QToolButton#moreLink {{
                 border: none;
                 color: {CYAN};
                 font-weight: bold;
                 font-size: 9pt;
+            }}
+            QToolButton#headerNav {{
+                border: none;
+                background: transparent;
+                font-weight: bold;
+                font-size: 8pt;
             }}
             QLabel#iconTile {{
                 background-color: {ICON_TILE_BG};
@@ -129,10 +154,22 @@ class ItemInfoPanel(QWidget):
         )
 
         header = QWidget()
+        # Clicking anywhere on the bar itself (not a child button, which
+        # handles its own clicks) re-expands a collapsed panel, same as
+        # clicking the chevron would - a collapsed title bar shouldn't be
+        # a dead end just because the click landed between the label and
+        # the chevron rather than on either of them.
+        header.mousePressEvent = self._expand_on_header_bar_click
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(6, 2, 6, 2)
-        self.header_label = QLabel("Selected item")
-        self.header_label.setStyleSheet(f"color: {GREY}; font-size: 8pt; font-weight: bold;")
+        # A single carousel-style nav slot rather than a static label: it
+        # reads "Selected item" on the item page, and becomes a clickable
+        # "← Selected item" back-link on the methodology page - replacing
+        # what used to be a separate back_link row inside the card, which
+        # freed another line of the card's fixed height for content.
+        self.header_label = QToolButton()
+        self.header_label.setObjectName("headerNav")
+        self.header_label.clicked.connect(self._on_header_label_clicked)
         header_layout.addWidget(self.header_label)
         header_layout.addStretch(1)
         # Lives in the header rather than inside the card's text column -
@@ -142,7 +179,7 @@ class ItemInfoPanel(QWidget):
         self.more_link.setObjectName("moreLink")
         self.more_link.setText("Methodology  →")
         self.more_link.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.more_link.clicked.connect(self._show_methodology_page)
+        self.more_link.clicked.connect(self._on_more_link_clicked)
         self.more_link.setVisible(False)
         header_layout.addWidget(self.more_link)
         self.collapse_button = QToolButton()
@@ -199,13 +236,13 @@ class ItemInfoPanel(QWidget):
         # labels - a bare item with no custom description has nothing to
         # say beyond its own role, so showing the role twice (once as a
         # badge, once as getItemTooltip()'s "Indicator"/"Factor"/...
-        # fallback body text) was pure redundant clutter.
-        self.item_meta_label = QLabel("")
-        self.item_meta_label.setObjectName("metaLabel")
-        self.item_meta_label.setWordWrap(True)
-        text_col.addWidget(self.item_meta_label)
+        # fallback body text) was pure redundant clutter. Scrollable
+        # rather than truncated: fills whatever space is left under the
+        # heading and scrolls for the rest, instead of eliding text the
+        # reader has no way to finish reading.
+        self.item_meta_label = _scrollable_text("metaLabel")
+        text_col.addWidget(self.item_meta_label, 1)
 
-        text_col.addStretch(1)
         row.addLayout(text_col, 1)
         return page
 
@@ -219,13 +256,6 @@ class ItemInfoPanel(QWidget):
         outer = QVBoxLayout(page)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(2)
-
-        self.back_link = QToolButton()
-        self.back_link.setObjectName("backLink")
-        self.back_link.setText("←  Selected item")
-        self.back_link.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.back_link.clicked.connect(self._show_item_page)
-        outer.addWidget(self.back_link, 0, Qt.AlignmentFlag.AlignLeft)
 
         row = QHBoxLayout()
         self.methodology_icon_label = QLabel()
@@ -241,14 +271,11 @@ class ItemInfoPanel(QWidget):
         self.methodology_heading_label.setWordWrap(True)
         text_col.addWidget(self.methodology_heading_label)
 
-        self.methodology_body_label = QLabel("")
-        self.methodology_body_label.setObjectName("bodyLabel")
-        self.methodology_body_label.setWordWrap(True)
-        text_col.addWidget(self.methodology_body_label)
+        self.methodology_body_label = _scrollable_text("bodyLabel")
+        text_col.addWidget(self.methodology_body_label, 1)
 
         row.addLayout(text_col, 1)
-        outer.addLayout(row)
-        outer.addStretch(1)
+        outer.addLayout(row, 1)
         return page
 
     def toggle_expanded(self):
@@ -266,14 +293,48 @@ class ItemInfoPanel(QWidget):
         self.collapse_button.setText("▾" if expanded else "▸")
         self.toggled.emit(expanded)
 
+    def _expand_on_header_bar_click(self, _event):
+        """⚙️ Re-expand a collapsed panel when the header bar itself is clicked.
+
+        Args:
+            _event: The QMouseEvent (unused - any click on the bar's own
+                background, as opposed to a child button, counts).
+        """
+        if not self._expanded:
+            self.set_expanded(True)
+
+    def _on_header_label_clicked(self):
+        """⚙️ Carousel "previous" control: expand first, then go back."""
+        if not self._expanded:
+            self.set_expanded(True)
+        self._show_item_page()
+
+    def _on_more_link_clicked(self):
+        """⚙️ Carousel "next" control: expand first, then go to methodology."""
+        if not self._expanded:
+            self.set_expanded(True)
+        self._show_methodology_page()
+
     def clear(self):
         """⚙️ Show a neutral placeholder when nothing is selected."""
         self._current_technique_key = None
         self.item_icon_label.clear()
         self.item_heading_label.setText("No item selected")
-        self.item_meta_label.setText("Click a dimension, factor or indicator in the tree to see details here.")
+        self.item_meta_label.setPlainText("Click a dimension, factor or indicator in the tree to see details here.")
         self.more_link.setVisible(False)
         self._show_item_page()
+
+    def _set_header_as_label(self):
+        """⚙️ Passive carousel state: nothing to navigate back from."""
+        self.header_label.setText("Selected item")
+        self.header_label.setCursor(Qt.CursorShape.ArrowCursor)
+        self.header_label.setStyleSheet(f"color: {GREY};")
+
+    def _set_header_as_back_link(self):
+        """⚙️ Active carousel state: the "previous" control, back to the item page."""
+        self.header_label.setText("←  Selected item")
+        self.header_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.header_label.setStyleSheet(f"color: {CYAN};")
 
     def _topic_icon(self, role: str, item_id: str):
         """⚙️ Load the topic-relevant icon for a role/id, or None if unmapped.
@@ -339,16 +400,13 @@ class ItemInfoPanel(QWidget):
         description = item.attribute("description", "") if hasattr(item, "attribute") else ""
         if not description:
             description = self._inherited_description(item)
-        if description:
-            # A borrowed factor description can run well past what the
-            # card's fixed height has room for - truncate it the same way
-            # the methodology summary is, rather than letting Qt hard-clip
-            # mid-word with no ellipsis. The budget is larger than the
-            # methodology summary's own: moving the Methodology link into
-            # the header (see _build_ui()) freed a whole line, and the
-            # card itself is taller than it used to be.
-            description = _truncate(description, limit=190)
-        self.item_meta_label.setText(f"{role_label} · {description}" if description else role_label)
+        # No truncation: a borrowed factor description can run well past
+        # what the card's fixed height shows at once, but cutting it off
+        # mid-sentence just leaves the reader hanging with no way to
+        # finish it. The full text always goes in; item_meta_label is a
+        # scrollable text area (see _scrollable_text()), so whatever
+        # doesn't fit is a scroll away rather than lost.
+        self.item_meta_label.setPlainText(f"{role_label} · {description}" if description else role_label)
 
         analysis_mode = item.attribute("analysis_mode", "") if hasattr(item, "attribute") else ""
         technique_key = technique_for_analysis_mode(analysis_mode) if analysis_mode else None
@@ -358,6 +416,7 @@ class ItemInfoPanel(QWidget):
     def _show_item_page(self):
         """⚙️ Switch the stack to the "selected item" page."""
         self.more_link.setVisible(self._current_technique_key is not None)
+        self._set_header_as_label()
         self.stack.setCurrentIndex(0)
 
     def _show_methodology_page(self):
@@ -369,9 +428,13 @@ class ItemInfoPanel(QWidget):
         if not icon.isNull():
             self.methodology_icon_label.setPixmap(icon.pixmap(24, 24))
         self.methodology_heading_label.setText(technique["name"])
-        self.methodology_body_label.setText(_truncate(technique["description"]))
+        # Full text, no truncation - see item_meta_label's own comment in
+        # show_item(); methodology_body_label is the same kind of
+        # scrollable text area (_scrollable_text()).
+        self.methodology_body_label.setPlainText(technique["description"])
         # The header's Methodology link is for navigating TO this page -
-        # hide it while already here (the back_link inside the card does
-        # the reverse trip).
+        # hide it while already here; the header itself becomes the "go
+        # back" control instead (see _set_header_as_back_link()).
         self.more_link.setVisible(False)
+        self._set_header_as_back_link()
         self.stack.setCurrentIndex(1)
