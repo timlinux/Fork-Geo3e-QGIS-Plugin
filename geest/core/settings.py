@@ -64,6 +64,17 @@ def set_general_setting(key, value, qsettings=None):
         qsettings = QSettings()
 
     qsettings.setValue(key, deep_convert_dict(value))
+    # QSettings normally only flushes to disk when its destructor runs,
+    # which a short-lived local object like the one constructed above
+    # relies on garbage collection to trigger - not guaranteed to happen
+    # before QGIS's own shutdown sequence tears down the interpreter.
+    # Without an explicit sync() here, a value set right before closing
+    # QGIS (e.g. toggling an options checkbox and clicking OK) can be
+    # silently lost, reappearing as whatever was last durably on disk the
+    # next time QGIS starts (worldbank/GeoE3 field report, 2026-10-25 -
+    # "Include Subnational Score Matrix" reverting to checked after every
+    # restart despite being unchecked and OK'd every time).
+    qsettings.sync()
 
 
 def general_setting(key, default=None, expected_type=None, qsettings=None):
@@ -110,6 +121,10 @@ def delete_general_setting(key, qsettings=None):
         qsettings = QSettings()
 
     qsettings.remove(key)
+    # Same reasoning as set_general_setting()'s own sync() call - a
+    # deletion right before QGIS closes must not depend on GC timing to
+    # actually reach disk.
+    qsettings.sync()
 
 
 def set_setting(key, value, qsettings=None, store_in_project=False):
