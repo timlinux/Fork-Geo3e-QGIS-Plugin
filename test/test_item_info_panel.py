@@ -41,7 +41,7 @@ class TestTruncate(unittest.TestCase):
         self.assertFalse(result.endswith(",…"))
 
 
-def make_fake_item(role, name, description="", analysis_mode="", tooltip="", item_id=""):
+def make_fake_item(role, name, description="", analysis_mode="", tooltip="", item_id="", parent=None):
     """A duck-typed stand-in for JsonTreeItem carrying only what
     ItemInfoPanel.show_item() actually reads.
     """
@@ -50,6 +50,7 @@ def make_fake_item(role, name, description="", analysis_mode="", tooltip="", ite
     item.data.return_value = name
     item.getIcon.return_value = QIcon()
     item.getItemTooltip.return_value = tooltip
+    item.parentItem = parent
     attrs = {"description": description, "analysis_mode": analysis_mode, "id": item_id}
     item.attribute.side_effect = lambda key, default="": attrs.get(key, default)
     return item
@@ -78,22 +79,62 @@ class TestItemInfoPanelShowItem(unittest.TestCase):
         self.assertEqual(self.panel.item_heading_label.text(), "Accessibility")
         self.assertEqual(self.panel.item_meta_label.text(), "Dimension · How easy it is to reach services.")
 
-    def test_falls_back_to_tooltip_when_it_adds_real_information(self):
-        item = make_fake_item("factor", "Active Transport", description="", tooltip="Walking and cycling access.")
+    def test_indicator_with_no_description_borrows_its_parent_factors(self):
+        # model.json leaves almost every indicator's own "description"
+        # blank, while the parent factor's is always populated with real
+        # prose - that's a far more useful fallback than the bare word
+        # "Indicator" or a transient run warning/error.
+        factor = make_fake_item("factor", "Women's Travel Patterns", description="Multi-stop caregiving trips.")
+        item = make_fake_item("indicator", "Location of Kindergartens/Childcare", description="", parent=factor)
 
         self.panel.show_item(item)
 
-        self.assertEqual(self.panel.item_meta_label.text(), "Factor · Walking and cycling access.")
+        self.assertEqual(self.panel.item_meta_label.text(), "Indicator · Multi-stop caregiving trips.")
 
-    def test_bare_role_name_tooltip_is_not_shown_as_a_fake_description(self):
-        # getItemTooltip() falls back to the literal role name ("Factor")
-        # when there's nothing more specific to say - showing that next to
-        # the role label too would just repeat the same word twice.
-        item = make_fake_item("factor", "Active Transport", description="", tooltip="Factor")
+    def test_long_borrowed_description_is_truncated_not_hard_clipped(self):
+        # A factor description can run well past what the card's fixed
+        # height has room for - it should be cut with an ellipsis at a
+        # word boundary, the same way the methodology summary is, rather
+        # than silently overflowing/being hard-clipped by Qt mid-word.
+        long_description = (
+            "Women's Travel Patterns (WTP) refer to the unique travel behaviors of "
+            "women, often involving multiple stops for household or caregiving "
+            "tasks, making proximity to essential services like markets, "
+            "supermarkets, childcare centers, primary schools, pharmacies, and "
+            "green spaces crucial."
+        )
+        factor = make_fake_item("factor", "Women's Travel Patterns", description=long_description)
+        item = make_fake_item("indicator", "Location of Groceries", description="", parent=factor)
 
         self.panel.show_item(item)
 
-        self.assertEqual(self.panel.item_meta_label.text(), "Factor")
+        text = self.panel.item_meta_label.text()
+        self.assertLessEqual(len(text), 130)
+        self.assertTrue(text.endswith("…"))
+
+    def test_item_with_no_description_and_no_parent_description_shows_bare_role(self):
+        item = make_fake_item("dimension", "Accessibility", description="", parent=None)
+
+        self.panel.show_item(item)
+
+        self.assertEqual(self.panel.item_meta_label.text(), "Dimension")
+
+    def test_run_warning_text_is_never_shown_as_the_description(self):
+        # getItemTooltip() can surface a transient run warning/error (e.g.
+        # "No service areas could be computed...") - that belongs on the
+        # tree row's own hover tooltip (treeview.py), not in this panel,
+        # where it would be mistaken for a description of the indicator.
+        item = make_fake_item(
+            "indicator",
+            "Location of Pharmacies",
+            description="",
+            tooltip="Warning: No service areas could be computed for this indicator.",
+        )
+
+        self.panel.show_item(item)
+
+        self.assertNotIn("Warning", self.panel.item_meta_label.text())
+        self.assertEqual(self.panel.item_meta_label.text(), "Indicator")
 
     def test_methodology_link_hidden_for_items_without_a_technique(self):
         item = make_fake_item("dimension", "Accessibility")
