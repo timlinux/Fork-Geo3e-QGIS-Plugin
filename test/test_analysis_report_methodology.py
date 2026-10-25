@@ -17,6 +17,7 @@ from geest.core.reports.methodology import (
     TECHNIQUES,
     nuance_for_analysis_mode,
     technique_for_analysis_mode,
+    technique_for_indicator,
 )
 
 
@@ -49,6 +50,35 @@ class TestMethodologyReferenceData(unittest.TestCase):
         self.assertEqual(nuance_for_analysis_mode("use_point_per_cell"), "")
 
 
+class TestTechniqueForIndicator(unittest.TestCase):
+    """technique_for_indicator() - national-scale Active Transport uses a
+    different technique from the exact same analysis_mode at regional or
+    local scale (model.json's analysis_mode is shared across all three
+    scales; only the project's own analysis_scale tells them apart).
+    worldbank/GeoE3#397.
+    """
+
+    def test_national_scale_active_transport_uses_the_weighted_technique(self):
+        self.assertEqual(
+            technique_for_indicator("use_osm_transport_polyline_per_cell", "national"),
+            "weighted_feature_average",
+        )
+
+    def test_regional_and_local_scale_keep_the_feature_count_technique(self):
+        self.assertEqual(technique_for_indicator("use_osm_transport_polyline_per_cell", "regional"), "feature_count")
+        self.assertEqual(technique_for_indicator("use_osm_transport_polyline_per_cell", "local"), "feature_count")
+
+    def test_unknown_or_missing_scale_falls_back_to_the_analysis_mode_only_lookup(self):
+        self.assertEqual(technique_for_indicator("use_osm_transport_polyline_per_cell", None), "feature_count")
+        self.assertEqual(
+            technique_for_indicator("use_osm_transport_polyline_per_cell", "somewhere_else"), "feature_count"
+        )
+
+    def test_scale_has_no_effect_on_analysis_modes_that_arent_scale_dependent(self):
+        for scale in ("national", "regional", "local", None):
+            self.assertEqual(technique_for_indicator("use_index_score", scale), "index_score")
+
+
 class TestMethodologyEntries(unittest.TestCase):
     """_methodology_entries() groups used indicators by technique,
     skipping "Do Not Use" and aggregation-role indicators, in the same
@@ -66,7 +96,7 @@ class TestMethodologyEntries(unittest.TestCase):
 
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    def _write_model(self, indicators):
+    def _write_model(self, indicators, analysis_scale=None):
         model = {
             "dimensions": [
                 {
@@ -75,6 +105,8 @@ class TestMethodologyEntries(unittest.TestCase):
                 }
             ]
         }
+        if analysis_scale is not None:
+            model["analysis_scale"] = analysis_scale
         with open(self.model_path, "w", encoding="utf-8") as f:
             json.dump(model, f)
 
@@ -113,6 +145,32 @@ class TestMethodologyEntries(unittest.TestCase):
         entries = AnalysisReport._methodology_entries(self.report)
 
         self.assertEqual(entries, [])
+
+    def test_national_scale_active_transport_gets_its_own_technique(self):
+        self._write_model(
+            [{"indicator": "Active transport", "analysis_mode": "use_osm_transport_polyline_per_cell"}],
+            analysis_scale="national",
+        )
+
+        entries = dict(AnalysisReport._methodology_entries(self.report))
+
+        self.assertIn("weighted_feature_average", entries)
+        self.assertEqual(
+            entries["weighted_feature_average"],
+            [("Active transport", nuance_for_analysis_mode("use_osm_transport_polyline_per_cell"))],
+        )
+        self.assertNotIn("feature_count", entries)
+
+    def test_regional_scale_active_transport_keeps_the_feature_count_technique(self):
+        self._write_model(
+            [{"indicator": "Active transport", "analysis_mode": "use_osm_transport_polyline_per_cell"}],
+            analysis_scale="regional",
+        )
+
+        entries = dict(AnalysisReport._methodology_entries(self.report))
+
+        self.assertIn("feature_count", entries)
+        self.assertNotIn("weighted_feature_average", entries)
 
 
 class TestMakeMethodologyPages(unittest.TestCase):

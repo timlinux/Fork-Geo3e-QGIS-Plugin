@@ -34,7 +34,7 @@ from qgis.PyQt.QtWidgets import (
     QWidget,
 )
 
-from geest.core.reports.methodology import TECHNIQUES, technique_for_analysis_mode
+from geest.core.reports.methodology import TECHNIQUES, technique_for_indicator
 from geest.core.topic_icons import topic_icon_filename
 from geest.utilities import resources_path
 
@@ -493,6 +493,30 @@ class ItemInfoPanel(QWidget):
                 return parent_description
         return ""
 
+    def _analysis_scale_for_item(self, item) -> str:
+        """⚙️ Walk up to the root "analysis" item and read its analysis_scale.
+
+        A handful of techniques (national-scale Active Transport) depend
+        on the project's analysis_scale, not just the indicator's own
+        analysis_mode - see geest.core.reports.methodology.
+        technique_for_indicator(). Mirrors TreePanel.analysis_scale()'s
+        own default.
+
+        Args:
+            item: Any JsonTreeItem in the tree.
+
+        Returns:
+            The project's analysis_scale ("national" if unset).
+        """
+        current = item
+        seen = set()
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            if getattr(current, "role", "") == "analysis" and hasattr(current, "attribute"):
+                return current.attribute("analysis_scale", "national")
+            current = getattr(current, "parentItem", None)
+        return "national"
+
     def show_item(self, item) -> None:
         """⚙️ Update the panel for the given tree item.
 
@@ -525,7 +549,9 @@ class ItemInfoPanel(QWidget):
         self.item_meta_label.setPlainText(f"{role_label} · {description}" if description else role_label)
 
         analysis_mode = item.attribute("analysis_mode", "") if hasattr(item, "attribute") else ""
-        technique_key = technique_for_analysis_mode(analysis_mode) if analysis_mode else None
+        technique_key = (
+            technique_for_indicator(analysis_mode, self._analysis_scale_for_item(item)) if analysis_mode else None
+        )
         self._current_technique_key = technique_key
         # Content above is still updated (ready for when hide_progress()
         # eventually calls _show_item_page()) but the stack itself stays

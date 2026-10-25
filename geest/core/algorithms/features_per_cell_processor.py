@@ -630,6 +630,295 @@ def select_grid_cells_and_assign_transport_score(
     )
 
 
+def select_grid_cells_and_assign_weighted_transport_score(
+    osm_transport_type: OSMDownloadType,
+    grid_layer: QgsVectorLayer,
+    features_layer: QgsVectorLayer,
+    output_path: str,
+    feedback: Optional[QgsFeedback] = None,
+    analysis_scale: str = None,
+) -> QgsVectorLayer:
+    """
+    Select grid cells that intersect with features, and assign a value
+    based on a score-weighted average across every intersecting
+    feature - not the single highest-scoring feature (see
+    select_grid_cells_and_assign_transport_score() for that).
+
+    Every road/cycleway feature intersecting a cell contributes its own
+    type-based score, weighted BY that same score - a feature scoring 5
+    counts 5x as much toward the average as one scoring 1, so a cell's
+    character is still dominated by its best infrastructure, just not
+    to the point of ignoring everything else entirely the way "highest
+    score wins" does:
+
+        cell_score = sum(score_i ** 2 for each feature) / sum(score_i for each feature)
+
+    rounded to the nearest whole number to stay on the same 0-5 scale
+    every other indicator uses. A cell with mostly poor infrastructure
+    and one excellent segment passing through no longer scores as if it
+    were entirely excellent, but a cell genuinely dominated by good
+    infrastructure still scores close to the top - worldbank/GeoE3#397.
+    Regional and local scale keep the existing "highest score wins"
+    behaviour unchanged (geest.core.workflow_factory routes between the
+    two by analysis_scale).
+
+    Args:
+        osm_transport_type (OSMDownloadType): The type of OSM transport data (road or cycle).
+        grid_layer (QgsVectorLayer): The input grid layer containing polygon cells.
+        features_layer (QgsVectorLayer): The input OSM layer containing features with highway and/or cycleway attributes.
+        output_path (str): The output path for the new grid layer with transport scores.
+        feedback (QgsFeedback): Optional feedback object for progress reporting.
+
+    Returns:
+        QgsVectorLayer: A new layer with grid cells containing the score-weighted average of every intersecting feature.
+
+    Raises:
+        Exception: If there are issues creating spatial index or processing features.
+    """
+
+    log_message(
+        "Selecting grid cells that intersect with features and assigning a score-weighted average transport "
+        "score across every intersecting feature (highway or cycleway) - higher-scoring features count more.",
+        tag="GeoE3",
+        level=Qgis.Info,
+    )
+
+    # Create a spatial index for the grid layer to optimize intersection queries
+    grid_index = QgsSpatialIndex(grid_layer.getFeatures())
+
+    # Every intersecting feature counts, unlike the "highest score wins"
+    # version - so there is no equivalent of its "skip cells already at
+    # the max score" shortcut here; each new feature can still change
+    # the average even once a cell has seen a top-scoring one.
+    # grid_weighted_sums holds sum(score**2) per cell, grid_weight_sums
+    # holds sum(score) per cell - dividing the two gives the
+    # score-weighted average (each feature's own score IS its weight).
+    grid_weighted_sums = {}
+    grid_weight_sums = {}
+    grid_feature_counts = {}
+    counter = 0
+    feature_count = features_layer.featureCount()
+    verbose_mode = int(setting(key="verbose_mode", default=0))
+    log_interval = max(1, feature_count // 20)  # Log ~20 times during processing
+
+    # Build mapping table based on analysis scale (fallback to existing table if not set)
+    scale_key = analysis_scale or "national"
+    cycleway_config = CYCLEWAY_CLASSIFICATION.get(scale_key, CYCLEWAY_CLASSIFICATION["national"])
+    lookup_table = {}
+    for road_type, score in HIGHWAY_CLASSIFICATION.items():
+        lookup_table[f"highway_{road_type}"] = score
+        lookup_table[f"fclass_{road_type}"] = score
+    for cycle_type, score in cycleway_config.items():
+        lookup_table[f"cycleway_{cycle_type}"] = score
+
+    # Check which fields exist ONCE before the loop (for efficiency)
+    field_names = features_layer.fields().names()
+    has_highway_field = "highway" in field_names
+    has_cycleway_field = "cycleway" in field_names
+    has_fclass_field = "fclass" in field_names
+
+    # Iterate over each feature and use the spatial index to find the intersecting grid cells
+    for feature in features_layer.getFeatures():
+        feature_geom = feature.geometry()
+
+        if feature_geom.isEmpty():
+            continue
+
+        # Check for both highway and cycleway attributes and use the best
+        # score for THIS feature (a feature can legitimately have both
+        # tags - e.g. a cycleway alongside a residential road - so this
+        # part is unchanged from the "highest score wins" version: it is
+        # only the aggregation ACROSS features that differs).
+        road_score = 0
+        road_type = None
+
+        if has_highway_field:
+            highway_type = feature.attribute("highway")
+            if highway_type:
+                lookup_key = f"highway_{highway_type}"
+                highway_score = lookup_table.get(lookup_key, 0)
+                if highway_score > road_score:
+                    road_score = highway_score
+                    road_type = lookup_key
+
+        if has_fclass_field:
+            fclass_type = feature.attribute("fclass")
+            if fclass_type:
+                lookup_key = f"fclass_{fclass_type}"
+                fclass_score = lookup_table.get(lookup_key, 0)
+                if fclass_score > road_score:
+                    road_score = fclass_score
+                    road_type = lookup_key
+
+        if has_cycleway_field:
+            cycleway_type = feature.attribute("cycleway")
+            if cycleway_type:
+                lookup_key = f"cycleway_{cycleway_type}"
+                cycleway_score = lookup_table.get(lookup_key, 0)
+                if cycleway_score > road_score:
+                    road_score = cycleway_score
+                    road_type = lookup_key
+
+        # Skip features with no valid score
+        if road_score == 0 or road_type is None:
+            continue
+
+        # Segment-based spatial index query for linestrings - see
+        # select_grid_cells_and_assign_transport_score()'s own comment
+        # for why this beats one bbox for the whole line.
+        abstract_geom = feature_geom.constGet()
+        if feature_geom.type() == QgsWkbTypes.GeometryType.LineGeometry and abstract_geom is not None:
+            vertices = list(abstract_geom.vertices())
+            candidate_set = set()
+            for i in range(len(vertices) - 1):
+                v1, v2 = vertices[i], vertices[i + 1]
+                segment_bbox = QgsRectangle(
+                    min(v1.x(), v2.x()), min(v1.y(), v2.y()), max(v1.x(), v2.x()), max(v1.y(), v2.y())
+                )
+                candidate_set.update(grid_index.intersects(segment_bbox))
+            candidate_ids = list(candidate_set)
+        else:
+            candidate_ids = grid_index.intersects(feature_geom.boundingBox())
+
+        if not candidate_ids:
+            counter += 1
+            if feedback:
+                feedback.setProgress((counter / feature_count) * 100.0)
+            continue
+
+        # Use prepared geometry for faster intersection tests
+        prepared_geom = QgsGeometry.createGeometryEngine(feature_geom.constGet())
+        prepared_geom.prepareGeometry()
+
+        request = QgsFeatureRequest().setFilterFids(candidate_ids)
+        intersecting_ids = [
+            grid_feature.id()
+            for grid_feature in grid_layer.getFeatures(request)
+            if prepared_geom.intersects(grid_feature.geometry().constGet())
+        ]
+
+        if counter % log_interval == 0 or verbose_mode:
+            log_message(
+                f"Feature {counter}/{feature_count}: {len(intersecting_ids)} intersecting cells ({road_type}, score {road_score})",
+                tag="GeoE3",
+                level=Qgis.Info,
+            )
+
+        # Every intersecting cell's running score-weighted average absorbs
+        # this feature's score, weighted by itself.
+        for grid_id in intersecting_ids:
+            grid_weighted_sums[grid_id] = grid_weighted_sums.get(grid_id, 0) + road_score * road_score
+            grid_weight_sums[grid_id] = grid_weight_sums.get(grid_id, 0) + road_score
+            grid_feature_counts[grid_id] = grid_feature_counts.get(grid_id, 0) + 1
+
+        counter += 1
+        if feedback:
+            feedback.setProgress((counter / feature_count) * 100.0)
+
+    # Score-weighted average per cell (each feature's own score IS its
+    # weight), rounded to stay on the same 0-5 integer scale every other
+    # indicator (and the downstream rasterizer/legend/aggregation code)
+    # expects. grid_weight_sums[grid_id] is never 0 here - a feature only
+    # reaches this dict after the road_score == 0 features were already
+    # skipped above.
+    grid_average_scores = {
+        grid_id: max(0, min(5, round(weighted_sum / grid_weight_sums[grid_id])))
+        for grid_id, weighted_sum in grid_weighted_sums.items()
+    }
+
+    # Summary statistics
+    total_cells = len(grid_average_scores)
+    score_counts = {}
+    for score in grid_average_scores.values():
+        score_counts[score] = score_counts.get(score, 0) + 1
+
+    log_message(f"{total_cells} grid cells scored. Distribution: {score_counts}", tag="GeoE3", level=Qgis.Info)
+
+    # OPTIMIZATION: Use batch writing for much faster GeoPackage creation
+    len_grid_ids = len(grid_average_scores)
+    log_message(
+        f"Writing {len_grid_ids} grid polygons to GeoPackage (batched)...",
+        tag="GeoE3",
+        level=Qgis.Info,
+    )
+
+    options = QgsVectorFileWriter.SaveVectorOptions()
+    options.driverName = "GPKG"
+    options.fileEncoding = "UTF-8"
+    options.layerName = "grid_with_feature_counts"
+
+    # Define fields for the new layer: 'id', 'value', and 'road_type'
+    fields = QgsFields()
+    fields.append(QgsField("id", QVariant.Int))
+    # Will be used to hold the scaled value from 0-5
+    fields.append(QgsField("value", QVariant.Int))
+    # Unlike the "highest score wins" layer, there is no single "the"
+    # type for an averaged cell - records how many features fed the
+    # average instead, for diagnostics.
+    fields.append(QgsField("road_type", QVariant.String))
+
+    writer = QgsVectorFileWriter.create(
+        fileName=output_path,
+        fields=fields,
+        geometryType=grid_layer.wkbType(),
+        srs=grid_layer.crs(),
+        transformContext=QgsCoordinateTransformContext(),
+        options=options,
+    )
+    if writer.hasError() != QgsVectorFileWriter.NoError:
+        raise Exception(f"Failed to create output layer: {writer.errorMessage()}")
+
+    grid_ids = list(grid_average_scores.keys())
+    batch_size = 10000
+    total_batches = (len_grid_ids + batch_size - 1) // batch_size
+
+    for batch_num in range(total_batches):
+        start_idx = batch_num * batch_size
+        end_idx = min(start_idx + batch_size, len_grid_ids)
+        batch_ids = grid_ids[start_idx:end_idx]
+
+        request = QgsFeatureRequest().setFilterFids(batch_ids)
+        feature_batch = []
+
+        for grid_feature in grid_layer.getFeatures(request):
+            new_feature = QgsFeature()
+            new_feature.setGeometry(grid_feature.geometry())
+            new_feature.setFields(fields)
+            grid_id = grid_feature.id()
+            new_feature.setAttribute("id", grid_id)
+            new_feature.setAttribute("value", grid_average_scores[grid_id])
+            new_feature.setAttribute("road_type", f"{grid_feature_counts[grid_id]} features")
+            feature_batch.append(new_feature)
+
+        writer.addFeatures(feature_batch)
+
+        progress = ((batch_num + 1) / total_batches) * 100
+        if feedback:
+            feedback.setProgress(progress)
+        if batch_num % 10 == 0 or batch_num == total_batches - 1:
+            log_message(
+                f"Writing batch {batch_num + 1}/{total_batches} ({progress:.1f}%)",
+                tag="GeoE3",
+                level=Qgis.Info,
+            )
+
+        feature_batch.clear()
+
+    del writer  # Finalize the writer and close the file
+
+    log_message(
+        f"Grid cells with averaged OSM feature scores saved to {output_path}",
+        tag="GeoE3",
+        level=Qgis.Info,
+    )
+
+    return QgsVectorLayer(
+        f"{output_path}",
+        "grid_with_feature_scores",
+        "ogr",
+    )
+
+
 def osm_mapping_table(osm_transport_type: OSMDownloadType) -> str:
     """
     Returns an HTML table as a string that maps OSM transport types to their scores.

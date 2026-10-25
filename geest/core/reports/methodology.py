@@ -126,6 +126,23 @@ TECHNIQUES = {
             "scale."
         ),
     },
+    "weighted_feature_average": {
+        "name": "A Score Weighted Toward the Best Infrastructure",
+        "svg": "weighted_feature_average.svg",
+        "description": (
+            "National-scale Active Transport scores a cell differently from every other "
+            "indicator on this page: rather than taking the single best road or cycle "
+            "path running through it, every road and cycle path intersecting the cell "
+            "contributes its own score, weighted by that same score — a well-rated "
+            "cycle lane counts several times more than a poorly-rated track. A cell "
+            "crossed by one excellent route and nothing else no longer scores as if it "
+            "were uniformly excellent, but a cell genuinely dominated by good "
+            "infrastructure still scores close to the top; a cell with only poor "
+            "infrastructure stays low even if a single short, better-rated segment "
+            "clips its edge. Regional and local scale still use the single-best-feature "
+            "technique described above."
+        ),
+    },
 }
 
 #: analysis_mode -> technique_key. Several modes share a technique -
@@ -172,12 +189,48 @@ ANALYSIS_MODE_NUANCE = {
 }
 
 
+#: analysis_mode values where the technique actually used also depends
+#: on the project's analysis_scale, not on analysis_mode alone - every
+#: scale shares the exact same analysis_mode string in model.json (scale
+#: is a project-level setting, not a per-indicator one), so
+#: ANALYSIS_MODE_TECHNIQUE can't tell them apart by itself.
+#: {analysis_mode: {analysis_scale: technique_key}}
+_SCALE_DEPENDENT_TECHNIQUE = {
+    "use_osm_transport_polyline_per_cell": {"national": "weighted_feature_average"},
+}
+
+
 def technique_for_analysis_mode(analysis_mode: str) -> Optional[str]:
     """The technique key for an indicator's analysis_mode, or None if
     it isn't a data-collection technique (aggregation roles, "Do Not
     Use", or an analysis_mode added since this reference was written).
     """
     return ANALYSIS_MODE_TECHNIQUE.get(analysis_mode)
+
+
+def technique_for_indicator(analysis_mode: str, analysis_scale: Optional[str] = None) -> Optional[str]:
+    """The technique key actually used for an indicator in THIS project,
+    accounting for the handful of analysis_mode values whose real
+    technique depends on the project's analysis_scale too (see
+    _SCALE_DEPENDENT_TECHNIQUE) - e.g. national-scale Active Transport
+    uses a different technique from the same analysis_mode at regional
+    or local scale. Prefer this over technique_for_analysis_mode()
+    wherever the project's analysis_scale is known; falls back to the
+    plain analysis_mode-only lookup otherwise.
+
+    Args:
+        analysis_mode: The indicator's own analysis_mode attribute.
+        analysis_scale: The project's analysis_scale ("national",
+            "regional", "local"), or None if unknown.
+
+    Returns:
+        The technique key, or None if analysis_mode isn't a
+        data-collection technique.
+    """
+    scale_overrides = _SCALE_DEPENDENT_TECHNIQUE.get(analysis_mode)
+    if scale_overrides and analysis_scale in scale_overrides:
+        return scale_overrides[analysis_scale]
+    return technique_for_analysis_mode(analysis_mode)
 
 
 def nuance_for_analysis_mode(analysis_mode: str) -> str:

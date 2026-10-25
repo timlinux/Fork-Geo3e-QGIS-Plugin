@@ -452,6 +452,28 @@ version per the policy above.
   `_place_picture()` (a small picture-embedding primitive extracted
   into its own method so tests can mock it instead of constructing a
   real `QgsLayoutItemPicture`).
+- **National-scale Active Transport now scores a cell with a score-
+  weighted average across every intersecting road/cycle path instead
+  of "highest score wins"** (worldbank/GeoE3#397): regional and local
+  scale were unaffected by the issue and remain completely unchanged.
+  Each feature's own score doubles as its weight
+  (`cell_score = sum(score^2) / sum(score)`), so a cell dominated by
+  good infrastructure still scores close to the top, a single
+  excellent route no longer carries a cell that's otherwise poor, and
+  a cell with only poor infrastructure stays low even if one short,
+  better-rated segment clips its edge. New
+  `select_grid_cells_and_assign_weighted_transport_score()` in
+  `geest/core/algorithms/features_per_cell_processor.py` and
+  `OsmTransportPolylineWeightedPerCellWorkflow`, dispatched instead of
+  the existing max-based workflow only when `analysis_scale ==
+  "national"`. Described in both the analysis report's Methodology
+  section and the live item info panel's methodology slide-over via a
+  new "A Score Weighted Toward the Best Infrastructure" technique and
+  a scale-aware `technique_for_indicator()` (the technique lookup was
+  previously a pure function of `analysis_mode` alone, which can't
+  tell national/regional/local Active Transport apart since they share
+  the same `analysis_mode` string); new
+  `geest/resources/methodology/weighted_feature_average.svg`.
 
 ### Fixed
 

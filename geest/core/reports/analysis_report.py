@@ -47,7 +47,7 @@ from .base_report import (
     BaseReport,
     _flat_fill,
 )
-from .methodology import TECHNIQUES, nuance_for_analysis_mode, technique_for_analysis_mode
+from .methodology import TECHNIQUES, nuance_for_analysis_mode, technique_for_indicator
 
 # The five score classes used by every result map in this report
 # (see resources/qml/analysis.qml): range, name, colour, significance.
@@ -2680,12 +2680,17 @@ class AnalysisReport(BaseReport):
         with open(self.model_path, "r", encoding="utf-8") as f:
             model = json.load(f)
 
+        # A handful of analysis_mode values (national-scale Active
+        # Transport) use a different technique depending on the
+        # project's own analysis_scale - see technique_for_indicator().
+        analysis_scale = model.get("analysis_scale")
+
         by_technique = {key: [] for key in TECHNIQUES}
         for dimension in model.get("dimensions", []):
             for factor in dimension.get("factors", []):
                 for indicator in factor.get("indicators", []):
                     analysis_mode = indicator.get("analysis_mode", "")
-                    technique_key = technique_for_analysis_mode(analysis_mode)
+                    technique_key = technique_for_indicator(analysis_mode, analysis_scale)
                     if technique_key is None:
                         continue
                     name = indicator.get("indicator", "")
