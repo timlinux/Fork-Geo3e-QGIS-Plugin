@@ -56,6 +56,21 @@ version per the policy above.
   2026 and a dock panel next to the controls the user is already
   looking at beats a floating label on the map). New
   `geest.gui.widgets.ItemInfoPanel`.
+- That item info panel now shows a hand-drawn, topic-relevant icon for
+  the selected dimension/factor/indicator instead of the generic tree
+  role glyph (the same cube/folder/leaf icon regardless of whether the
+  item was "Accessibility" or "Fire risk"). 30 new brand-aligned SVGs
+  (navy `#002244` line art with one cyan `#009FDA` accent each, matching
+  the report's own colour constants) cover the analysis level, all 3
+  dimensions, all 16 factors and the 10 indicators that don't already
+  share their parent factor's icon (the other 14 factors have exactly
+  one indicator covering the same real-world topic, so factor and
+  indicator intentionally share a file rather than duplicating it).
+  The icon now sits inside a rounded square tile to the left of the
+  heading/description text, instead of a bare unframed glyph. New
+  `geest/resources/icons/topics/` and `geest.core.topic_icons`
+  (`topic_icon_filename()`), falling back to the existing generic role
+  icon for any item id that isn't mapped.
 - Every map in the analysis report - the large main map (inset into its
   own bottom-right corner over a translucent backing panel) and every
   minimap (dimension/factor/indicator grids, plus the GeoE3 score/
