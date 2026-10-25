@@ -2222,11 +2222,16 @@ class AnalysisReport(BaseReport):
             self._draw_hazard_exposure_chart(hazard_bins, current_page, top=y + 24)
         return True
 
-    def _draw_correlation_heatmap(self, names: list, matrix, current_page: int, top: float) -> None:
+    def _draw_correlation_heatmap(self, names: list, matrix, current_page: int, top: float) -> float:
         """NxN heatmap of factor-score correlations - NAVY for strong
         positive correlation, off-red for strong negative, white for
         none. Factors that move together signal a shared root cause; a
         bundled intervention might address both at once.
+
+        Returns:
+            The y-coordinate (mm) immediately below the last element
+            drawn, so a caller can place further content beneath it
+            without duplicating this layout's geometry.
         """
         n = len(names)
         cell = min(9.0, CONTENT_W / n)
@@ -2275,6 +2280,89 @@ class AnalysisReport(BaseReport):
             y = legend_y + row * 4.2
             self._label(f"{i + 1}. {name}", x, y, legend_col_w - 4, 4.2, current_page, size=6.5, color=CHARCOAL)
 
+        return legend_y + legend_rows * 4.2
+
+    def _draw_correlation_scale_bar(self, current_page: int, top: float) -> None:
+        """A diverging colour-scale strip (red -1 -> white 0 -> navy +1)
+        with tick labels, plus a short "how to read this" caption - the
+        heatmap's own colours alone don't explain which direction is
+        good or what the diagonal means.
+        """
+        self._label(
+            "How to read this grid",
+            MARGIN,
+            top,
+            CONTENT_W,
+            5,
+            current_page,
+            size=8.5,
+            color=NAVY,
+            bold=True,
+        )
+        caption_top = top + 5.5
+        caption = self._label(
+            "<p>Row and column numbers refer to the same factor, in the same order as the "
+            "key above - cell (3, 7) compares factor 3 against factor 7. The diagonal running "
+            "top-left to bottom-right is always deepest navy, since every factor correlates "
+            "perfectly with itself; it isn't a finding. Off the diagonal, deep navy means the "
+            "two factors tend to score high in the same places, deep red means one tends to "
+            "score high where the other scores low, and pale/white means no real relationship "
+            "either way.</p>",
+            MARGIN,
+            caption_top,
+            CONTENT_W,
+            14,
+            current_page,
+            size=8,
+            color=CHARCOAL,
+            html=True,
+        )
+        caption.setHAlign(Qt.AlignmentFlag.AlignJustify)
+
+        bar_top = caption_top + 16
+        bar_w = 100.0
+        bar_h = 5.0
+        bar_x = MARGIN + (CONTENT_W - bar_w) / 2
+        steps = 60
+        for i in range(steps):
+            value = -1.0 + 2.0 * i / (steps - 1)
+            segment_w = bar_w / steps
+            self._rect(
+                bar_x + i * segment_w,
+                bar_top,
+                segment_w + 0.3,
+                bar_h,
+                AnalysisReport._diverging_color(value),
+                current_page,
+            )
+
+        label_y = bar_top + bar_h + 1.5
+        self._label(
+            "-1  opposite", bar_x, label_y, 40, 4, current_page, size=6.5, color=GREY, halign=Qt.AlignmentFlag.AlignLeft
+        )
+        self._label(
+            "0  no relationship",
+            bar_x + bar_w / 2 - 30,
+            label_y,
+            60,
+            4,
+            current_page,
+            size=6.5,
+            color=GREY,
+            halign=Qt.AlignmentFlag.AlignHCenter,
+        )
+        self._label(
+            "+1  together",
+            bar_x + bar_w - 40,
+            label_y,
+            40,
+            4,
+            current_page,
+            size=6.5,
+            color=GREY,
+            halign=Qt.AlignmentFlag.AlignRight,
+        )
+
     def make_factor_correlation_page(self, current_page: int) -> bool:
         """Add a page showing which factors tend to move together -
         strongly correlated factors suggest a shared root cause, where a
@@ -2296,7 +2384,8 @@ class AnalysisReport(BaseReport):
             current_page=current_page,
             show_header_and_footer=True,
         )
-        self._draw_correlation_heatmap(names, matrix, current_page, top=HEADER_H + 26)
+        legend_bottom = self._draw_correlation_heatmap(names, matrix, current_page, top=HEADER_H + 26)
+        self._draw_correlation_scale_bar(current_page, top=legend_bottom + 6)
         return True
 
     def create_insights_pages(self, current_page: int) -> int:

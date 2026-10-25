@@ -23,6 +23,15 @@ version per the policy above.
 
 ### Added
 
+- The "Factor Correlations" insights page now explains how to read its
+  heatmap: a "How to read this grid" caption covering the numbered
+  row/column key and what the diagonal means, plus a diverging
+  colour-scale bar (red -1 / white 0 / navy +1) with tick labels -
+  the colours alone didn't say which direction was good or what the
+  diagonal represented. `AnalysisReport._draw_correlation_scale_bar()`;
+  `_draw_correlation_heatmap()` now returns its bottom y-coordinate so
+  the caller can place the new block directly beneath it without
+  duplicating the layout geometry.
 - Every map in the analysis report - the large main map (inset into its
   own bottom-right corner over a translucent backing panel) and every
   minimap (dimension/factor/indicator grids, plus the GeoE3 score/
