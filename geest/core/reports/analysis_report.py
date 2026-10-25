@@ -2463,7 +2463,7 @@ class AnalysisReport(BaseReport):
         painter = QPainter(image)
         try:
             font = painter.font()
-            font.setPointSizeF(5.5)
+            font.setPointSizeF(7.5)
             painter.setFont(font)
 
             painter.setPen(GREY)
@@ -2503,7 +2503,8 @@ class AnalysisReport(BaseReport):
         zone, one colour-coded cell per used dimension/factor/the
         overall total, paginated across as many pages as needed (there
         is no cap - a fine-grained boundary can mean hundreds of rows),
-        with a numbered key explaining each column at the end.
+        with a numbered key explaining each column up front, before the
+        table pages themselves.
 
         Returns:
             current_page, advanced past every page added (0 if the
@@ -2519,16 +2520,33 @@ class AnalysisReport(BaseReport):
         self.page_descriptions["subnational_score_matrix"] = (
             "Every administrative zone's own average score for each dimension, "
             "factor, and the overall total - column numbers are explained in "
-            "the key at the end of this table."
+            "the key on the preceding page."
         )
 
         name_col_w = 48.0
         n_cols = len(columns)
         swatch_w = (CONTENT_W - name_col_w) / n_cols
-        row_h = 5.0
-        header_h = 7.0
+        row_h = 6.0
+        header_h = 8.0
         top = HEADER_H + 24
         rows_per_page = max(1, int((FOOTER_Y - top - header_h) // row_h))
+
+        self.make_page(
+            title="Subnational Score Matrix — Key",
+            description_key="subnational_score_matrix",
+            current_page=current_page,
+            show_header_and_footer=True,
+        )
+        key_rows_per_col = (n_cols + 1) // 2
+        key_col_w = CONTENT_W / 2
+        key_row_h = 6.0
+        key_top = HEADER_H + 24
+        for i, (name, _col) in enumerate(columns):
+            col, row = divmod(i, key_rows_per_col)
+            x = MARGIN + col * key_col_w
+            y = key_top + row * key_row_h
+            self._label(f"{i + 1}. {name}", x, y, key_col_w - 4, key_row_h, current_page, size=7.5, color=CHARCOAL)
+        current_page += 1
 
         for page_start in range(0, len(rows), rows_per_page):
             page_rows = rows[page_start : page_start + rows_per_page]
@@ -2548,23 +2566,6 @@ class AnalysisReport(BaseReport):
                 page=current_page,
             )
             current_page += 1
-
-        self.make_page(
-            title="Subnational Score Matrix — Key",
-            description_key="subnational_score_matrix",
-            current_page=current_page,
-            show_header_and_footer=True,
-        )
-        key_rows_per_col = (n_cols + 1) // 2
-        key_col_w = CONTENT_W / 2
-        key_row_h = 6.0
-        key_top = HEADER_H + 24
-        for i, (name, _col) in enumerate(columns):
-            col, row = divmod(i, key_rows_per_col)
-            x = MARGIN + col * key_col_w
-            y = key_top + row * key_row_h
-            self._label(f"{i + 1}. {name}", x, y, key_col_w - 4, key_row_h, current_page, size=7.5, color=CHARCOAL)
-        current_page += 1
 
         return current_page
 
