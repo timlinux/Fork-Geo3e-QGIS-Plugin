@@ -279,6 +279,7 @@ class AnalysisReport(BaseReport):
         # bookkeeping pages - the "how was this calculated" answer a
         # reader looks for once they've seen the results.
         current_page = self.make_methodology_pages(current_page)
+        current_page = self.make_scoring_pipeline_page(current_page)
         current_page = self.make_scoring_weights_page(current_page)
 
         # Processing times live at the back of the report — they are
@@ -2778,6 +2779,44 @@ class AnalysisReport(BaseReport):
                 self._label(text, MARGIN + 4, y, CONTENT_W - 4, row_pitch, current_page, size=8.5, color=CHARCOAL)
             current_page += 1
 
+        return current_page
+
+    def make_scoring_pipeline_page(self, current_page: int) -> int:
+        """Add the "How Scores Combine" page: a single diagram tracing a
+        score from an individual indicator all the way up to the four
+        published products, bridging the per-technique pages above
+        (how ONE indicator is measured) and the Scoring Weights page
+        below (the actual weight numbers this project uses).
+
+        Only shown once there's at least one technique page to bridge
+        from (an empty model has nothing to diagram either).
+        """
+        if not self._methodology_entries():
+            return current_page
+
+        self.page_descriptions["scoring_pipeline"] = (
+            "Every indicator's score combines upward into its factor, dimension and "
+            "the overall GeoE3 score - each step a weighted average using the "
+            "weights on the following page. The total is then filtered two separate "
+            "ways to produce the four published products."
+        )
+        self.make_page(
+            title="How Scores Combine",
+            description_key="scoring_pipeline",
+            current_page=current_page,
+            show_header_and_footer=True,
+        )
+        diagram_w = CONTENT_W
+        diagram_h = diagram_w * 700.0 / 1000.0
+        self._place_picture(
+            resources_path("resources", "methodology", "scoring_pipeline.svg"),
+            x=MARGIN,
+            y=HEADER_H + 20,
+            w=diagram_w,
+            h=diagram_h,
+            page=current_page,
+        )
+        current_page += 1
         return current_page
 
     def _dimension_factor_weightings(self) -> list:
