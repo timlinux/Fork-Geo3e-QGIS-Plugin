@@ -1,15 +1,17 @@
 # -*- coding: utf-8 -*-
 """📦 Item info panel module.
 
-A collapsible panel shown above the tree panel's button row (the same
-space the progress bars occupy during a run - both are empty/visible
-at different times, never at once) explaining whatever tree item is
-currently selected: a heading, a scrollable description and an icon. For
-an indicator, a "Methodology" link slides over to a second page
-showing the real-world technique behind its score - the same name,
-description and icon used on the analysis report's own Methodology
-pages (geest/core/reports/methodology.py) - so the explanation stays
-in sync with what gets published.
+A collapsible panel shown above the tree panel's button row, explaining
+whatever tree item is currently selected: a heading, a scrollable
+description and an icon. For an indicator, a "Methodology" link slides
+over to a second page showing the real-world technique behind its
+score - the same name, description and icon used on the analysis
+report's own Methodology pages (geest/core/reports/methodology.py) -
+so the explanation stays in sync with what gets published. A third
+page takes over the same space while an analysis run, resource
+download, or report export is under way (show_progress()/
+hide_progress()), with the status text and the two progress bars that
+used to live in the host panel's own button row.
 
 Replaces the old `LayerDescriptionItem` map-canvas overlay, which had
 been disabled since May 2026 and, per user feedback, wasn't the right
@@ -23,6 +25,7 @@ from qgis.PyQt.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QProgressBar,
     QSizePolicy,
     QStackedWidget,
     QTextEdit,
@@ -150,6 +153,11 @@ class ItemInfoPanel(QWidget):
                 border: 1px solid {RULE};
                 border-radius: 8px;
             }}
+            QLabel#statusLabel {{
+                color: {GREY};
+                font-style: italic;
+                font-size: 9pt;
+            }}
             """
         )
 
@@ -198,6 +206,7 @@ class ItemInfoPanel(QWidget):
         self.stack = QStackedWidget()
         self.stack.addWidget(self._build_item_page())
         self.stack.addWidget(self._build_methodology_page())
+        self.stack.addWidget(self._build_progress_page())
         card_layout.addWidget(self.stack)
 
         outer.addWidget(self.card)
@@ -278,6 +287,46 @@ class ItemInfoPanel(QWidget):
         outer.addLayout(row, 1)
         return page
 
+    def _build_progress_page(self) -> QWidget:
+        """⚙️ Build the "a run is in progress" page: status text and
+        the two progress bars (overall item count, current task) shown
+        while an analysis run, resource download, or report export is
+        under way. Lives here rather than in the host panel's own
+        layout so it can share the card's space with "what is this
+        item" - the two are mutually exclusive, never shown at once.
+
+        Returns:
+            The page widget.
+        """
+        page = QWidget()
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(6)
+
+        self.status_label = QLabel("")
+        self.status_label.setObjectName("statusLabel")
+        self.status_label.setWordWrap(True)
+        outer.addWidget(self.status_label)
+
+        self.overall_progress_bar = QProgressBar()
+        self.overall_progress_bar.setRange(0, 100)
+        self.overall_progress_bar.setValue(0)
+        self.overall_progress_bar.setFormat("Overall Progress: %p%")
+        self.overall_progress_bar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.overall_progress_bar.setFixedHeight(20)
+        outer.addWidget(self.overall_progress_bar)
+
+        self.workflow_progress_bar = QProgressBar()
+        self.workflow_progress_bar.setRange(0, 100)
+        self.workflow_progress_bar.setValue(0)
+        self.workflow_progress_bar.setFormat("Task Progress: %p%")
+        self.workflow_progress_bar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.workflow_progress_bar.setFixedHeight(20)
+        outer.addWidget(self.workflow_progress_bar)
+
+        outer.addStretch(1)
+        return page
+
     def toggle_expanded(self):
         """⚙️ Toggle between expanded and collapsed."""
         self.set_expanded(not self._expanded)
@@ -335,6 +384,41 @@ class ItemInfoPanel(QWidget):
         self.header_label.setText("←  Selected item")
         self.header_label.setCursor(Qt.CursorShape.PointingHandCursor)
         self.header_label.setStyleSheet(f"color: {CYAN};")
+
+    def _set_header_as_progress(self, title: str):
+        """⚙️ Non-interactive carousel state: a run is under way.
+
+        Args:
+            title: Header text while running.
+        """
+        self.header_label.setText(title)
+        self.header_label.setCursor(Qt.CursorShape.ArrowCursor)
+        self.header_label.setStyleSheet(f"color: {NAVY};")
+
+    def show_progress(self, title: str = "Analysis in progress...") -> None:
+        """⚙️ Switch to the progress page and make sure it's visible.
+
+        Called when a run (analysis, resource download, report export)
+        starts - the panel takes over the space it normally uses for
+        "what is this item", since the two are mutually exclusive:
+        there's nothing useful to explain about a selection while a
+        run's progress is the more urgent thing on screen. Auto-expands
+        a collapsed panel rather than updating progress somewhere the
+        user can't see.
+
+        Args:
+            title: Header text while running - lets different run kinds
+                (an analysis, a resource download) say what's actually
+                happening instead of a generic "in progress".
+        """
+        self.more_link.setVisible(False)
+        self._set_header_as_progress(title)
+        self.set_expanded(True)
+        self.stack.setCurrentIndex(2)
+
+    def hide_progress(self) -> None:
+        """⚙️ Return to the normal "selected item" page once a run finishes."""
+        self._show_item_page()
 
     def _topic_icon(self, role: str, item_id: str):
         """⚙️ Load the topic-relevant icon for a role/id, or None if unmapped.

@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtWidgets import QTextEdit
+from qgis.PyQt.QtWidgets import QLabel, QProgressBar, QTextEdit
 
 from geest.core.reports.methodology import TECHNIQUES
 from geest.gui.widgets.item_info_panel import ItemInfoPanel
@@ -314,6 +314,82 @@ class TestItemInfoPanelCollapse(unittest.TestCase):
         self.panel.toggle_expanded()
 
         self.assertEqual(received, [False])
+
+
+class TestItemInfoPanelProgress(unittest.TestCase):
+    """show_progress()/hide_progress() - the panel takes over the same
+    card space it uses for "what is this item" while a run (analysis,
+    resource download, report export) is under way, since the two are
+    mutually exclusive. tree_panel.py aliases its own
+    overall_progress_bar/workflow_progress_bar/status_label onto the
+    panel's (geest/gui/panels/tree_panel.py), so the ~30 existing
+    setValue()/setFormat()/setVisible() call sites there keep working
+    unchanged against the widgets built here.
+    """
+
+    def setUp(self):
+        self.panel = ItemInfoPanel()
+        # isVisible() reflects the whole ancestor chain, not just this
+        # widget's own setVisible() flag - without an actual show(), every
+        # child reports isVisible() == False regardless of its own state.
+        self.panel.show()
+
+    def test_show_progress_switches_to_the_progress_page(self):
+        self.panel.show_progress()
+
+        self.assertEqual(self.panel.stack.currentIndex(), 2)
+
+    def test_show_progress_sets_the_header_title(self):
+        self.panel.show_progress("Downloading resources...")
+
+        self.assertEqual(self.panel.header_label.text(), "Downloading resources...")
+
+    def test_show_progress_defaults_to_analysis_in_progress(self):
+        self.panel.show_progress()
+
+        self.assertEqual(self.panel.header_label.text(), "Analysis in progress...")
+
+    def test_show_progress_hides_the_methodology_link(self):
+        item = make_fake_item("indicator", "Clinics nearby", analysis_mode="use_point_per_cell")
+        self.panel.show_item(item)
+        self.assertTrue(self.panel.more_link.isVisible())
+
+        self.panel.show_progress()
+
+        self.assertFalse(self.panel.more_link.isVisible())
+
+    def test_show_progress_re_expands_a_collapsed_panel(self):
+        self.panel.toggle_expanded()
+        self.assertFalse(self.panel.card.isVisible())
+
+        self.panel.show_progress()
+
+        self.assertTrue(self.panel.card.isVisible())
+
+    def test_hide_progress_returns_to_the_item_page(self):
+        self.panel.show_progress()
+
+        self.panel.hide_progress()
+
+        self.assertEqual(self.panel.stack.currentIndex(), 0)
+
+    def test_progress_bars_and_status_label_are_the_same_widgets_tree_panel_updates(self):
+        # tree_panel.py updates these via plain attribute access
+        # (self.overall_progress_bar.setValue(...) etc.) after aliasing
+        # them onto itself - this just confirms they exist with the
+        # expected types on the panel for that aliasing to find.
+        self.assertIsInstance(self.panel.overall_progress_bar, QProgressBar)
+        self.assertIsInstance(self.panel.workflow_progress_bar, QProgressBar)
+        self.assertIsInstance(self.panel.status_label, QLabel)
+
+    def test_progress_values_reflect_on_the_bars(self):
+        self.panel.show_progress()
+        self.panel.overall_progress_bar.setMaximum(16)
+        self.panel.overall_progress_bar.setValue(11)
+        self.panel.status_label.setText("Processing area 11/16")
+
+        self.assertEqual(self.panel.overall_progress_bar.value(), 11)
+        self.assertEqual(self.panel.status_label.text(), "Processing area 11/16")
 
 
 if __name__ == "__main__":

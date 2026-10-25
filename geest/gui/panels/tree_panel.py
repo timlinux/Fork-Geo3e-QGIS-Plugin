@@ -35,7 +35,6 @@ from qgis.PyQt.QtWidgets import (
     QHeaderView,
     QLabel,
     QMessageBox,
-    QProgressBar,
     QPushButton,
     QSizePolicy,
     QTableWidget,
@@ -262,26 +261,23 @@ class TreePanel(QWidget):
         # Set layout
         layout.addWidget(self.treeView)
 
-        # Status row sits on its own line, spanning the full panel width -
-        # kept out of button_bar below so its text never competes with the
-        # two fixed-width progress bars for horizontal space. button_bar
-        # previously carried status_label at a fixed 200px alongside two
-        # more 200px-fixed progress bars (plus buttons that hide during a
-        # run), so the row's required minimum width jumped between "idle"
-        # and "running" states as widgets toggled visibility, which is
-        # what made the whole panel keep resizing during analysis
-        # execution (worldbank/GeoE3 field report, 2026-10-24).
-        self.status_label = QLabel("")
-        self.status_label.setStyleSheet("color: #666; font-style: italic;")
-        self.status_label.setVisible(False)
-        layout.addWidget(self.status_label)
-
         # Explains whatever tree item is currently selected, with a
         # slide-over to the methodology behind an indicator's score -
         # replaces the old map-canvas overlay (removed; a dock panel
-        # next to the controls beats a floating label on the map).
+        # next to the controls beats a floating label on the map). Also
+        # hosts the status text and the two progress bars for an active
+        # run, on their own stack page - they used to live in button_bar
+        # below (status_label at a fixed 200px alongside two more
+        # 200px-fixed progress bars, plus buttons that hide during a
+        # run), where the row's required minimum width jumped between
+        # "idle" and "running" states as widgets toggled visibility,
+        # which is what made the whole panel keep resizing during
+        # analysis execution (worldbank/GeoE3 field report, 2026-10-24).
         self.item_info_panel = ItemInfoPanel()
         layout.addWidget(self.item_info_panel)
+        self.status_label = self.item_info_panel.status_label
+        self.overall_progress_bar = self.item_info_panel.overall_progress_bar
+        self.workflow_progress_bar = self.item_info_panel.workflow_progress_bar
 
         button_bar = QHBoxLayout()
 
@@ -324,25 +320,10 @@ class TreePanel(QWidget):
         self.help_button = QPushButton("Help")
         self.help_button.clicked.connect(self.switch_to_next_tab)
         button_bar.addWidget(self.help_button)
-        # Add two progress bars to monitor all workflow progress and individual progress
-        self.overall_progress_bar = QProgressBar()
-        self.overall_progress_bar.setRange(0, 100)
-        self.overall_progress_bar.setValue(0)
-        self.overall_progress_bar.setFormat("Overall Progress: %p%")
-        self.overall_progress_bar.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.overall_progress_bar.setVisible(False)
-        self.overall_progress_bar.setFixedHeight(20)
-        self.overall_progress_bar.setFixedWidth(200)
-        button_bar.addWidget(self.overall_progress_bar)
-        self.workflow_progress_bar = QProgressBar()
-        self.workflow_progress_bar.setRange(0, 100)
-        self.workflow_progress_bar.setValue(0)
-        self.workflow_progress_bar.setFormat("Task Progress: %p%")
-        self.workflow_progress_bar.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.workflow_progress_bar.setVisible(False)
-        self.workflow_progress_bar.setFixedHeight(20)
-        self.workflow_progress_bar.setFixedWidth(200)
-        button_bar.addWidget(self.workflow_progress_bar)
+        # The two progress bars live inside item_info_panel now (see
+        # above) - aliased onto self so the ~30 existing
+        # setValue()/setFormat()/setVisible() call sites throughout this
+        # file keep working unchanged.
 
         self.treeView.setEditTriggers(QTreeView.EditTrigger.NoEditTriggers)
 
@@ -1379,6 +1360,7 @@ class TreePanel(QWidget):
             return
 
         # Show progress bar in indeterminate mode
+        self.item_info_panel.show_progress("Generating analysis report...")
         self.overall_progress_bar.setVisible(True)
         self.overall_progress_bar.setMinimum(0)
         self.overall_progress_bar.setMaximum(0)  # Indeterminate/bouncing
@@ -1401,6 +1383,7 @@ class TreePanel(QWidget):
         self.overall_progress_bar.setValue(100)
         self.overall_progress_bar.setFormat("Report generated successfully!")
         self.overall_progress_bar.setVisible(False)
+        self.item_info_panel.hide_progress()
 
     def on_analysis_report_failed(self):
         """Slot called when analysis report generation fails."""
@@ -1417,10 +1400,12 @@ class TreePanel(QWidget):
         self.overall_progress_bar.setValue(0)
         self.overall_progress_bar.setFormat(f"Error: {error_msg}")
         self.overall_progress_bar.setVisible(False)
+        self.item_info_panel.hide_progress()
 
     def generate_study_area_report(self):
         """Add a report showing population information for the study area."""
         gpkg_path = os.path.join(self.working_directory, "study_area", "study_area.gpkg")
+        self.item_info_panel.show_progress("Generating study area report...")
         with StudyAreaReport(gpkg_path=gpkg_path, report_name="Study Area Summary") as report:
             self.overall_progress_bar.setVisible(True)
             self.overall_progress_bar.setValue(10)
@@ -1434,6 +1419,7 @@ class TreePanel(QWidget):
         open_with_system_handler(os.path.join(self.working_directory, "study_area_report.pdf"))
         self.overall_progress_bar.setValue(100)
         self.overall_progress_bar.setVisible(False)
+        self.item_info_panel.hide_progress()
 
     def add_masked_scores_to_map(self, item):
         """Add the masked scores to the map as grid layers.
@@ -2349,6 +2335,7 @@ class TreePanel(QWidget):
             workflow_queue = ["indicators", "factors", "dimensions"]
         elif item.role == "analysis":
             workflow_queue = ["indicators", "factors", "dimensions", "analysis"]
+        self.item_info_panel.show_progress("Analysis in progress...")
         self.overall_progress_bar.setVisible(True)
         self.workflow_progress_bar.setVisible(True)
         self.status_label.setVisible(True)
@@ -2700,6 +2687,7 @@ class TreePanel(QWidget):
         extent = bbox_layer.extent()
         extent_crs_authid = bbox_layer.crs().authid()
 
+        self.item_info_panel.show_progress("Downloading resources...")
         self.overall_progress_bar.setVisible(True)
         self.workflow_progress_bar.setVisible(True)
         self.status_label.setVisible(True)
@@ -2736,6 +2724,7 @@ class TreePanel(QWidget):
             self.workflow_progress_bar.setVisible(False)
             self.status_label.setVisible(False)
             self.status_label.setText("")
+            self.item_info_panel.hide_progress()
             self.prepare_analysis_button.setVisible(True)
             self.help_button.setVisible(True)
             self.project_button.setVisible(True)
@@ -2987,6 +2976,7 @@ class TreePanel(QWidget):
         logical order of indicators then factors then dimensions, then the whole analysis.
         """
         self.workflow_queue = ["indicators", "factors", "dimensions", "analysis"]
+        self.item_info_panel.show_progress("Analysis in progress...")
         self.overall_progress_bar.setVisible(True)
         self.workflow_progress_bar.setVisible(True)
         self.status_label.setVisible(True)
@@ -3009,6 +2999,7 @@ class TreePanel(QWidget):
             self.workflow_progress_bar.setVisible(False)
             self.status_label.setVisible(False)
             self.status_label.setText("")
+            self.item_info_panel.hide_progress()
             self.prepare_analysis_button.setVisible(True)
             self.help_button.setVisible(True)
             self.project_button.setVisible(True)
