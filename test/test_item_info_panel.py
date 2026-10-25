@@ -7,38 +7,13 @@ map-canvas overlay (LayerDescriptionItem, removed).
 import unittest
 from unittest.mock import MagicMock
 
+from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtGui import QIcon
+from qgis.PyQt.QtWidgets import QTextEdit
 
-from geest.gui.widgets.item_info_panel import ItemInfoPanel, _truncate
+from geest.core.reports.methodology import TECHNIQUES
+from geest.gui.widgets.item_info_panel import ItemInfoPanel
 from geest.utilities import resources_path
-
-
-class TestTruncate(unittest.TestCase):
-    """_truncate() - a word-boundary character budget, not a sentence
-    split: a technique's own first sentence can itself run well past
-    any reasonable card-sized budget (e.g. "feature_count"'s, which
-    runs to an em-dash clause before its first period).
-    """
-
-    def test_short_text_is_returned_unchanged_but_gets_a_full_stop(self):
-        self.assertEqual(_truncate("Short text"), "Short text.")
-
-    def test_text_already_ending_in_a_full_stop_is_untouched(self):
-        self.assertEqual(_truncate("Already punctuated."), "Already punctuated.")
-
-    def test_long_text_is_cut_at_a_word_boundary_with_an_ellipsis(self):
-        text = "word " * 50
-
-        result = _truncate(text, limit=20)
-
-        self.assertLessEqual(len(result), 21)
-        self.assertTrue(result.endswith("…"))
-        self.assertNotIn(" …", result)
-
-    def test_trailing_punctuation_before_the_cut_point_is_stripped(self):
-        result = _truncate("One, two, three, four, five, six, seven", limit=15)
-
-        self.assertFalse(result.endswith(",…"))
 
 
 def make_fake_item(role, name, description="", analysis_mode="", tooltip="", item_id="", parent=None):
@@ -77,7 +52,7 @@ class TestItemInfoPanelShowItem(unittest.TestCase):
         self.panel.show_item(item)
 
         self.assertEqual(self.panel.item_heading_label.text(), "Accessibility")
-        self.assertEqual(self.panel.item_meta_label.text(), "Dimension · How easy it is to reach services.")
+        self.assertEqual(self.panel.item_meta_label.toPlainText(), "Dimension · How easy it is to reach services.")
 
     def test_indicator_with_no_description_borrows_its_parent_factors(self):
         # model.json leaves almost every indicator's own "description"
@@ -89,36 +64,50 @@ class TestItemInfoPanelShowItem(unittest.TestCase):
 
         self.panel.show_item(item)
 
-        self.assertEqual(self.panel.item_meta_label.text(), "Indicator · Multi-stop caregiving trips.")
+        self.assertEqual(self.panel.item_meta_label.toPlainText(), "Indicator · Multi-stop caregiving trips.")
 
-    def test_long_borrowed_description_is_truncated_not_hard_clipped(self):
-        # A factor description can run well past what the card's fixed
-        # height has room for - it should be cut with an ellipsis at a
-        # word boundary, the same way the methodology summary is, rather
-        # than silently overflowing/being hard-clipped by Qt mid-word.
+    def test_long_borrowed_description_is_shown_in_full_not_truncated(self):
+        # Character-count truncation always left a reader hanging mid-
+        # sentence with no way to see the rest. The full description goes
+        # in regardless of length - item_meta_label is a scrollable text
+        # area (see test_meta_label_is_a_scrollable_read_only_text_area),
+        # so whatever doesn't fit the card's fixed height is a scroll
+        # away rather than cut off with an ellipsis.
         long_description = (
             "Women's Travel Patterns (WTP) refer to the unique travel behaviors of "
             "women, often involving multiple stops for household or caregiving "
             "tasks, making proximity to essential services like markets, "
             "supermarkets, childcare centers, primary schools, pharmacies, and "
-            "green spaces crucial."
+            "green spaces crucial. It also accounts for safety perceptions, "
+            "time-of-day constraints, and the extra planning burden these "
+            "combined trips place on women's daily schedules and available "
+            "leisure or rest time."
         )
         factor = make_fake_item("factor", "Women's Travel Patterns", description=long_description)
         item = make_fake_item("indicator", "Location of Groceries", description="", parent=factor)
 
         self.panel.show_item(item)
 
-        text = self.panel.item_meta_label.text()
-        self.assertLess(len(text), len("Indicator · ") + len(long_description))
-        self.assertLessEqual(len(text), 210)
-        self.assertTrue(text.endswith("…"))
+        self.assertEqual(self.panel.item_meta_label.toPlainText(), f"Indicator · {long_description}")
+
+    def test_meta_label_is_a_scrollable_read_only_text_area(self):
+        self.assertIsInstance(self.panel.item_meta_label, QTextEdit)
+        self.assertTrue(self.panel.item_meta_label.isReadOnly())
+        self.assertEqual(
+            self.panel.item_meta_label.verticalScrollBarPolicy(),
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded,
+        )
+        self.assertEqual(
+            self.panel.item_meta_label.horizontalScrollBarPolicy(),
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff,
+        )
 
     def test_item_with_no_description_and_no_parent_description_shows_bare_role(self):
         item = make_fake_item("dimension", "Accessibility", description="", parent=None)
 
         self.panel.show_item(item)
 
-        self.assertEqual(self.panel.item_meta_label.text(), "Dimension")
+        self.assertEqual(self.panel.item_meta_label.toPlainText(), "Dimension")
 
     def test_run_warning_text_is_never_shown_as_the_description(self):
         # getItemTooltip() can surface a transient run warning/error (e.g.
@@ -134,8 +123,8 @@ class TestItemInfoPanelShowItem(unittest.TestCase):
 
         self.panel.show_item(item)
 
-        self.assertNotIn("Warning", self.panel.item_meta_label.text())
-        self.assertEqual(self.panel.item_meta_label.text(), "Indicator")
+        self.assertNotIn("Warning", self.panel.item_meta_label.toPlainText())
+        self.assertEqual(self.panel.item_meta_label.toPlainText(), "Indicator")
 
     def test_methodology_link_hidden_for_items_without_a_technique(self):
         item = make_fake_item("dimension", "Accessibility")
@@ -206,12 +195,26 @@ class TestItemInfoPanelMethodologySlideOver(unittest.TestCase):
         self.assertEqual(self.panel.stack.currentIndex(), 1)
         self.assertEqual(self.panel.methodology_heading_label.text(), "Counting What's Nearby")
 
-    def test_back_link_returns_to_item_page(self):
+    def test_header_label_returns_to_item_page(self):
         self.panel.more_link.click()
 
-        self.panel.back_link.click()
+        self.panel.header_label.click()
 
         self.assertEqual(self.panel.stack.currentIndex(), 0)
+
+    def test_header_label_becomes_a_back_link_on_the_methodology_page(self):
+        # A single carousel-style nav slot rather than a separate in-card
+        # back_link row: "Selected item" (inert) on the item page becomes
+        # a clickable "← Selected item" on the methodology page.
+        self.assertEqual(self.panel.header_label.text(), "Selected item")
+
+        self.panel.more_link.click()
+
+        self.assertEqual(self.panel.header_label.text(), "←  Selected item")
+
+        self.panel.header_label.click()
+
+        self.assertEqual(self.panel.header_label.text(), "Selected item")
 
     def test_more_link_lives_in_the_header_not_the_card(self):
         # Moved out of the card's text column so the card's fixed height
@@ -229,7 +232,7 @@ class TestItemInfoPanelMethodologySlideOver(unittest.TestCase):
     def test_more_link_reappears_after_returning_to_the_item_page(self):
         self.panel.more_link.click()
 
-        self.panel.back_link.click()
+        self.panel.header_label.click()
 
         self.assertTrue(self.panel.more_link.isVisible())
 
@@ -237,12 +240,19 @@ class TestItemInfoPanelMethodologySlideOver(unittest.TestCase):
         self.assertEqual(self.panel.methodology_icon_label.objectName(), "iconTile")
         self.assertEqual(self.panel.methodology_icon_label.size().width(), 36)
 
-    def test_methodology_body_is_a_short_glanceable_summary(self):
+    def test_methodology_body_shows_the_complete_technique_description(self):
         self.panel.more_link.click()
 
-        body = self.panel.methodology_body_label.text()
-        self.assertLessEqual(len(body), 135)
-        self.assertTrue(body.endswith(".") or body.endswith("…"))
+        expected = TECHNIQUES[self.panel._current_technique_key]["description"]
+        self.assertEqual(self.panel.methodology_body_label.toPlainText(), expected)
+
+    def test_methodology_body_is_a_scrollable_read_only_text_area(self):
+        self.assertIsInstance(self.panel.methodology_body_label, QTextEdit)
+        self.assertTrue(self.panel.methodology_body_label.isReadOnly())
+        self.assertEqual(
+            self.panel.methodology_body_label.verticalScrollBarPolicy(),
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded,
+        )
 
 
 class TestItemInfoPanelCollapse(unittest.TestCase):
@@ -270,6 +280,30 @@ class TestItemInfoPanelCollapse(unittest.TestCase):
     def test_toggle_twice_re_expands(self):
         self.panel.toggle_expanded()
         self.panel.toggle_expanded()
+
+        self.assertTrue(self.panel.card.isVisible())
+
+    def test_clicking_header_label_while_collapsed_re_expands(self):
+        self.panel.toggle_expanded()
+
+        self.panel.header_label.click()
+
+        self.assertTrue(self.panel.card.isVisible())
+
+    def test_clicking_more_link_while_collapsed_re_expands(self):
+        item = make_fake_item("indicator", "Clinics nearby", analysis_mode="use_point_per_cell")
+        self.panel.show_item(item)
+        self.panel.toggle_expanded()
+
+        self.panel.more_link.click()
+
+        self.assertTrue(self.panel.card.isVisible())
+        self.assertEqual(self.panel.stack.currentIndex(), 1)
+
+    def test_clicking_the_header_bar_itself_while_collapsed_re_expands(self):
+        self.panel.toggle_expanded()
+
+        self.panel._expand_on_header_bar_click(None)
 
         self.assertTrue(self.panel.card.isVisible())
 

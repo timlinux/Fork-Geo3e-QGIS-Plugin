@@ -91,9 +91,18 @@ version per the policy above.
   accent moved well clear of either wheel. The "Methodology →" link
   moved out of the card into the header row, to the left of the
   collapse/expand chevron, freeing a full line of the card's height for
-  the description; the card itself grew (112px -> 140px) and the
-  description's truncation budget grew to match (previously the first
-  thing cut, now using the freed space instead of leaving it blank).
+  the description; the card itself grew (112px -> 140px). The header nav
+  is now a true carousel: "Selected item" itself becomes a clickable
+  "← Selected item" back-link on the methodology page, replacing the
+  separate in-card back-link row entirely and freeing another line.
+  Clicking the header bar, the header nav or the Methodology link while
+  the panel is collapsed now re-expands it first, rather than being a
+  dead end. The description and methodology summary are no longer
+  truncated with an ellipsis at all - character-count truncation always
+  left the reader hanging mid-sentence with no way to see the rest, so
+  both are now scrollable read-only text areas (`QTextEdit`, not `QLabel`)
+  showing the complete text, with a scrollbar appearing only when it's
+  actually needed.
 - Every map in the analysis report - the large main map (inset into its
   own bottom-right corner over a translucent backing panel) and every
   minimap (dimension/factor/indicator grids, plus the GeoE3 score/
