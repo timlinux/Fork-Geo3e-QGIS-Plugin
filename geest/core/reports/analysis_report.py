@@ -6,6 +6,7 @@ This module contains functionality for analysis report.
 
 import json
 import os
+import tempfile
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -13,6 +14,7 @@ import numpy
 from qgis.core import (
     QgsFillSymbol,
     QgsLayout,
+    QgsLayoutItemPicture,
     QgsLayoutItemShape,
     QgsLayoutPoint,
     QgsLayoutSize,
@@ -23,8 +25,8 @@ from qgis.core import (
     QgsUnitTypes,
     QgsVectorLayer,
 )
-from qgis.PyQt.QtCore import Qt
-from qgis.PyQt.QtGui import QColor
+from qgis.PyQt.QtCore import QRectF, Qt
+from qgis.PyQt.QtGui import QColor, QImage, QPainter
 
 from geest.core.constants import GEOE3_BY_POPULATION_COLORS, SCORE_LEGEND_COLORS
 from geest.utilities import log_message, resources_path
@@ -191,6 +193,15 @@ class AnalysisReport(BaseReport):
                 except Exception as e:
                     log_message(f"Could not remove temporary layer: {e}")
         self.temp_layers = []
+        # Rasterised subnational score matrix pages (see
+        # _render_score_matrix_page_image()) - temp PNG files on disk,
+        # not project layers.
+        for path in getattr(self, "_temp_matrix_image_paths", []):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        self._temp_matrix_image_paths = []
         super().cleanup()
 
     def _load_study_area_layer(self):
@@ -1319,6 +1330,8 @@ class AnalysisReport(BaseReport):
             if self._add_vector_map_page(label, label, layer_uri, current_page, palette=palette):
                 current_page += 1
 
+        current_page = self.make_subnational_score_matrix_pages(current_page)
+
         return current_page
 
     def parse_iso_datetime(self, iso_str: str) -> Optional[datetime]:
@@ -2291,4 +2304,258 @@ class AnalysisReport(BaseReport):
         ):
             if page_builder(current_page):
                 current_page += 1
+        return current_page
+
+    def _subnational_score_matrix_columns(self) -> list:
+        """(display_name, grid_column) for every used dimension, every
+        used factor, and the overall GeoE3 total - mirrors
+        SubnationalAggregationProcessingTask._factor_dimension_total_columns()'s
+        column set/order EXACTLY, so the Nth column shown here is the
+        Nth avg_<column> field actually written into the aggregates
+        GeoPackage. Read from model.json, not a live item tree (the
+        report has no item tree to walk).
+        """
+        with open(self.model_path, "r", encoding="utf-8") as f:
+            model = json.load(f)
+        columns = []
+        for dimension in model.get("dimensions", []):
+            if not self._has_used_factors(dimension):
+                continue
+            columns.append(
+                (dimension.get("name", ""), AnalysisReport._grid_column_name("dimension", dimension.get("id", "")))
+            )
+            for factor in dimension.get("factors", []):
+                if self._has_used_indicators(factor):
+                    columns.append(
+                        (factor.get("name", ""), AnalysisReport._grid_column_name("factor", factor.get("id", "")))
+                    )
+        columns.append(("GeoE3 Score", "geoe3"))
+        return columns
+
+    def _subnational_score_matrix_rows(self) -> Optional[tuple]:
+        """Read the subnational score matrix: every administrative
+        zone's own average score (not the single majority-class product
+        shown on the subnational map pages) for every used dimension,
+        factor, and the overall total - see
+        SubnationalAggregationProcessingTask.aggregate_factor_dimension_totals(),
+        which computes and writes these avg_<column>/zone_name fields.
+
+        Returns:
+            (columns, rows) where columns is [(display_name,
+            grid_column), ...] and rows is [(zone_name, [value_or_None,
+            ...]), ...] in the same column order, or None if the
+            project has no subnational boundary configured, or its
+            aggregates file predates these columns (an analysis that
+            hasn't been re-run since this feature was added).
+        """
+        if not self.working_directory:
+            return None
+        gpkg_path = os.path.join(
+            self.working_directory, "subnational_aggregation", "geoe3_score_subnational_aggregation.gpkg"
+        )
+        if not os.path.exists(gpkg_path):
+            return None
+
+        columns = self._subnational_score_matrix_columns()
+        if not columns:
+            return None
+
+        import sqlite3
+
+        from geest.core.grid_column_utils import _quote_sql_identifier
+
+        try:
+            quoted_columns = [_quote_sql_identifier(f"avg_{col}") for _, col in columns]
+        except ValueError as error:
+            log_message(f"Refusing to read subnational score matrix: {error}", tag="GeoE3")
+            return None
+
+        try:
+            connection = sqlite3.connect(gpkg_path)
+            try:
+                existing = {
+                    row[1]
+                    for row in connection.execute(  # nosec B608
+                        "PRAGMA table_info(geoe3_score_subnational_aggregation)"
+                    ).fetchall()
+                }
+                required = {f"avg_{col}" for _, col in columns} | {"zone_name"}
+                if not required.issubset(existing):
+                    log_message(
+                        "Subnational score matrix columns not found - re-run the full analysis to add them.",
+                        tag="GeoE3",
+                    )
+                    return None
+                select_columns = ", ".join(quoted_columns)
+                rows = connection.execute(
+                    f"SELECT zone_name, {select_columns} "  # nosec B608
+                    "FROM geoe3_score_subnational_aggregation ORDER BY fid"
+                ).fetchall()
+            finally:
+                connection.close()
+        except sqlite3.Error as error:
+            log_message(f"Could not read subnational score matrix: {error}", tag="GeoE3")
+            return None
+
+        result_rows = [(row[0] or "—", list(row[1:])) for row in rows]
+        return columns, result_rows
+
+    @staticmethod
+    def _score_class_color(value: Optional[float]) -> QColor:
+        """The same 5-class enablement colour a score of this value
+        would be painted on the map (see resources/qml/analysis.qml's
+        DISCRETE boundaries), or white for no data.
+        """
+        if value is None or value <= 0:
+            return WHITE
+        class_index = int(numpy.digitize([value], bins=[1, 2, 3, 4, 5], right=True)[0])
+        class_index = min(class_index, 4)
+        return QColor(SCORE_LEGEND_COLORS[class_index + 1])
+
+    def _place_picture(self, image_path: str, x: float, y: float, w: float, h: float, page: int) -> None:
+        """Embed an image file at the given position/size - a drawing
+        primitive like _rect()/_label(), kept separate from
+        _render_score_matrix_page_image() so it can be mocked out in
+        tests without needing a real QgsLayout object.
+        """
+        picture = QgsLayoutItemPicture(self.layout)
+        picture.setPicturePath(image_path)
+        self.layout.addLayoutItem(picture)
+        picture.attemptMove(QgsLayoutPoint(x, y, QgsUnitTypes.LayoutUnit.LayoutMillimeters), page=page)
+        picture.attemptResize(QgsLayoutSize(w, h, QgsUnitTypes.LayoutUnit.LayoutMillimeters))
+
+    def _render_score_matrix_page_image(
+        self,
+        page_rows: list,
+        n_cols: int,
+        name_col_w: float,
+        swatch_w: float,
+        row_h: float,
+        header_h: float,
+    ) -> str:
+        """Render one subnational score matrix page's zone-name column,
+        numbered column headers, and coloured swatches as a SINGLE
+        raster image, saved to a temp PNG (cleaned up in cleanup()) and
+        embedded via one QgsLayoutItemPicture.
+
+        A matrix page can hold dozens of columns x dozens of rows - one
+        QgsLayoutItem per cell (the same _label()/_rect() primitives
+        every other page in this report uses) adds up to thousands of
+        full graphics-scene items per page, which brings QGIS's layout
+        engine to a crawl (confirmed: report generation hung rather
+        than completing, against a real 2084-zone boundary). A single
+        rasterised image per page has none of that per-item overhead.
+        """
+        scale = 10  # px/mm - crisp at print resolution, plain and simple
+        width_mm = name_col_w + n_cols * swatch_w
+        height_mm = header_h + len(page_rows) * row_h
+        image = QImage(max(1, round(width_mm * scale)), max(1, round(height_mm * scale)), QImage.Format.Format_ARGB32)
+        image.fill(QColor(255, 255, 255, 0))
+
+        painter = QPainter(image)
+        try:
+            font = painter.font()
+            font.setPointSizeF(5.5)
+            painter.setFont(font)
+
+            painter.setPen(GREY)
+            for col_index in range(n_cols):
+                x = (name_col_w + col_index * swatch_w) * scale
+                painter.drawText(
+                    QRectF(x, 0, swatch_w * scale, header_h * scale),
+                    Qt.AlignmentFlag.AlignCenter,
+                    str(col_index + 1),
+                )
+
+            for row_index, (zone_name, values) in enumerate(page_rows):
+                y = (header_h + row_index * row_h) * scale
+                painter.setPen(CHARCOAL)
+                painter.drawText(
+                    QRectF(0, y, (name_col_w - 2) * scale, row_h * scale),
+                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                    str(zone_name),
+                )
+                for col_index, value in enumerate(values):
+                    x = (name_col_w + col_index * swatch_w) * scale
+                    colour = AnalysisReport._score_class_color(value)
+                    painter.fillRect(QRectF(x, y, (swatch_w - 0.4) * scale, (row_h - 0.4) * scale), colour)
+        finally:
+            painter.end()
+
+        if not hasattr(self, "_temp_matrix_image_paths"):
+            self._temp_matrix_image_paths = []
+        descriptor, path = tempfile.mkstemp(suffix=".png", prefix="geoe3_score_matrix_")
+        os.close(descriptor)
+        image.save(path, "PNG")
+        self._temp_matrix_image_paths.append(path)
+        return path
+
+    def make_subnational_score_matrix_pages(self, current_page: int) -> int:
+        """Add the subnational score matrix: one row per administrative
+        zone, one colour-coded cell per used dimension/factor/the
+        overall total, paginated across as many pages as needed (there
+        is no cap - a fine-grained boundary can mean hundreds of rows),
+        with a numbered key explaining each column at the end.
+
+        Returns:
+            current_page, advanced past every page added (0 if the
+            project has no subnational boundary / these columns yet).
+        """
+        result = self._subnational_score_matrix_rows()
+        if result is None:
+            return current_page
+        columns, rows = result
+        if not rows:
+            return current_page
+
+        self.page_descriptions["subnational_score_matrix"] = (
+            "Every administrative zone's own average score for each dimension, "
+            "factor, and the overall total - column numbers are explained in "
+            "the key at the end of this table."
+        )
+
+        name_col_w = 48.0
+        n_cols = len(columns)
+        swatch_w = (CONTENT_W - name_col_w) / n_cols
+        row_h = 5.0
+        header_h = 7.0
+        top = HEADER_H + 24
+        rows_per_page = max(1, int((FOOTER_Y - top - header_h) // row_h))
+
+        for page_start in range(0, len(rows), rows_per_page):
+            page_rows = rows[page_start : page_start + rows_per_page]
+            self.make_page(
+                title="Subnational Score Matrix",
+                description_key="subnational_score_matrix",
+                current_page=current_page,
+                show_header_and_footer=True,
+            )
+            image_path = self._render_score_matrix_page_image(page_rows, n_cols, name_col_w, swatch_w, row_h, header_h)
+            self._place_picture(
+                image_path,
+                x=MARGIN,
+                y=top,
+                w=name_col_w + n_cols * swatch_w,
+                h=header_h + len(page_rows) * row_h,
+                page=current_page,
+            )
+            current_page += 1
+
+        self.make_page(
+            title="Subnational Score Matrix — Key",
+            description_key="subnational_score_matrix",
+            current_page=current_page,
+            show_header_and_footer=True,
+        )
+        key_rows_per_col = (n_cols + 1) // 2
+        key_col_w = CONTENT_W / 2
+        key_row_h = 6.0
+        key_top = HEADER_H + 24
+        for i, (name, _col) in enumerate(columns):
+            col, row = divmod(i, key_rows_per_col)
+            x = MARGIN + col * key_col_w
+            y = key_top + row * key_row_h
+            self._label(f"{i + 1}. {name}", x, y, key_col_w - 4, key_row_h, current_page, size=7.5, color=CHARCOAL)
+        current_page += 1
+
         return current_page
