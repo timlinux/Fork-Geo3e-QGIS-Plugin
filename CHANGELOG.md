@@ -701,6 +701,20 @@ version per the policy above.
   blanks the indicator's own `result`/`result_file`, so the normal
   skip-if-already-complete check correctly recognises it needs to run
   again, without the user needing to know to hold Shift.
+- **Writing the per-zone dimension/factor/total averages
+  (`SubnationalAggregationProcessingTask._write_zone_results()`) failed on a
+  real Nix-based QGIS install** with "mod_spatialite.so: cannot open shared
+  object file", even though it worked fine against the qgis/qgis Docker
+  image this was first verified against: a bare `sqlite3` connection needs
+  `mod_spatialite` loaded by name to satisfy the aggregates GeoPackage's own
+  RTree-trigger `WHEN` clauses, and Nix has no standard library search path
+  for a bare `.so` name to resolve against (hard-coding a nix store path
+  would be unique to the machine that built it). Now writes through
+  GDAL/OGR's `ExecuteSQL()` instead (`grid_column_utils.py`'s
+  `_open_gpkg_for_write()`/`_execute_sql_with_retry()`/`_commit_or_raise()`),
+  which already has those functions built in - the same reason every other
+  GeoPackage write in this codebase goes through OGR rather than a bare
+  `sqlite3` connection.
 
 ### Changed
 

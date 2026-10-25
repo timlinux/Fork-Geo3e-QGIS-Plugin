@@ -118,16 +118,21 @@ class TestFactorDimensionTotalColumns(unittest.TestCase):
 
 class TestExistingSqliteColumns(unittest.TestCase):
     """_existing_sqlite_columns() is the idempotency/legacy-backfill
-    check: only columns not already present get computed.
+    check: only columns not already present get computed. Reads via
+    OGR, not a bare sqlite3 connection - see _write_zone_results()'s
+    docstring for why - so the fixture here must be a real GeoPackage,
+    not a plain sqlite file: OGR's GeoPackage driver won't open a
+    sqlite file lacking the GPKG spec's own metadata tables.
     """
 
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp(prefix="test_existing_columns_")
-        self.db_path = os.path.join(self.temp_dir, "test.sqlite")
-        connection = sqlite3.connect(self.db_path)
-        connection.execute("CREATE TABLE zones (fid INTEGER PRIMARY KEY, zone_name TEXT)")
-        connection.commit()
-        connection.close()
+        self.db_path = os.path.join(self.temp_dir, "test.gpkg")
+        driver = ogr.GetDriverByName("GPKG")
+        dataset = driver.CreateDataSource(self.db_path)
+        layer = dataset.CreateLayer("zones", geom_type=ogr.wkbPolygon)
+        layer.CreateField(ogr.FieldDefn("zone_name", ogr.OFTString))
+        dataset = None
 
     def tearDown(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
@@ -135,7 +140,7 @@ class TestExistingSqliteColumns(unittest.TestCase):
     def test_returns_existing_column_names(self):
         columns = SubnationalAggregationProcessingTask._existing_sqlite_columns(self.db_path, "zones")
 
-        self.assertEqual(columns, {"fid", "zone_name"})
+        self.assertEqual(columns, {"zone_name"})
 
     def test_missing_table_returns_empty_set(self):
         columns = SubnationalAggregationProcessingTask._existing_sqlite_columns(self.db_path, "does_not_exist")

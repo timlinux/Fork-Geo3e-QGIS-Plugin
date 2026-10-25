@@ -10,6 +10,7 @@ import sqlite3
 import traceback
 from typing import Optional
 
+from osgeo import ogr
 from qgis import processing
 from qgis.core import (
     QgsCoordinateReferenceSystem,
@@ -545,60 +546,85 @@ class SubnationalAggregationProcessingTask(QgsTask):
         This GeoPackage carries RTree spatial-index triggers that fire
         on ANY UPDATE to the table (not just the geometry column) and
         reference SpatiaLite functions (e.g. ST_IsEmpty) in their WHEN
-        clause - a plain sqlite3 connection doesn't have those
-        registered, so even an UPDATE of an unrelated column fails with
-        "no such function: ST_IsEmpty" unless mod_spatialite is loaded
-        first (verified against the real Tunisia aggregates file).
+        clause. A plain Python sqlite3 connection doesn't have those
+        registered - loading mod_spatialite into it by bare name worked
+        against the qgis/qgis Docker image this was first verified
+        against, but failed on a real Nix-based QGIS install with
+        "mod_spatialite.so: cannot open shared object file" (Nix has no
+        standard library search path a bare name can resolve against,
+        and hard-coding a nix store path is explicitly off the table -
+        it's unique to the machine that built it). Writing through
+        GDAL/OGR's own ExecuteSQL() instead avoids the problem
+        entirely: GDAL's GeoPackage driver already has these functions
+        built in, which is exactly why every OTHER GeoPackage write in
+        this codebase (see grid_column_utils.py) goes through OGR, not
+        a bare sqlite3 connection.
         """
-        connection = sqlite3.connect(gpkg_path)
+        from geest.core.grid_column_utils import _commit_or_raise, _execute_sql_with_retry, _open_gpkg_for_write
+
+        ds = _open_gpkg_for_write(gpkg_path)
+        if not ds:
+            log_message(f"Could not open GeoPackage for writing: {gpkg_path}", tag="GeoE3")
+            return
         try:
-            connection.enable_load_extension(True)
-            connection.load_extension("mod_spatialite")
-            existing_columns = {
-                row[1] for row in connection.execute(f'PRAGMA table_info("{table_name}")').fetchall()  # nosec B608
-            }
+            layer = ds.GetLayerByName(table_name)
+            if layer is None:
+                log_message(f"Table not found in {gpkg_path}: {table_name}", tag="GeoE3")
+                return
+            layer_defn = layer.GetLayerDefn()
+            existing_columns = {layer_defn.GetFieldDefn(i).GetName() for i in range(layer_defn.GetFieldCount())}
+
             if zone_names is not None and "zone_name" not in existing_columns:
-                connection.execute(f'ALTER TABLE "{table_name}" ADD COLUMN zone_name TEXT')  # nosec B608
+                layer.CreateField(ogr.FieldDefn("zone_name", ogr.OFTString))
             for _display_name, col in missing_columns:
                 column_name = f"avg_{col}"
                 if column_name not in existing_columns:
-                    connection.execute(f'ALTER TABLE "{table_name}" ADD COLUMN "{column_name}" REAL')  # nosec B608
+                    layer.CreateField(ogr.FieldDefn(column_name, ogr.OFTReal))
 
-            if zone_names:
-                connection.executemany(
-                    f'UPDATE "{table_name}" SET zone_name = ? WHERE fid = ?',  # nosec B608
-                    [(name, fid) for fid, name in zone_names.items()],
-                )
-
-            value_columns = {col for values in averages_by_zone.values() for col in values}
-            for col in value_columns:
-                column_name = f"avg_{col}"
-                rows = [(values[col], zone_fid) for zone_fid, values in averages_by_zone.items() if col in values]
-                connection.executemany(
-                    f'UPDATE "{table_name}" SET "{column_name}" = ? WHERE fid = ?',  # nosec B608
-                    rows,
-                )
-            connection.commit()
+            zone_fids = set(averages_by_zone) | set(zone_names or {})
+            ds.StartTransaction()
+            try:
+                for zone_fid in zone_fids:
+                    assignments = []
+                    if zone_names and zone_fid in zone_names:
+                        escaped = str(zone_names[zone_fid]).replace("'", "''")
+                        assignments.append(f"zone_name = '{escaped}'")
+                    for col, value in averages_by_zone.get(zone_fid, {}).items():
+                        value_sql = "NULL" if value is None else repr(float(value))
+                        assignments.append(f'"avg_{col}" = {value_sql}')
+                    if not assignments:
+                        continue
+                    sql = (
+                        f'UPDATE "{table_name}" SET {", ".join(assignments)} WHERE fid = {int(zone_fid)}'  # nosec B608
+                    )
+                    _execute_sql_with_retry(ds, sql)
+            except Exception:
+                ds.RollbackTransaction()
+                raise
+            _commit_or_raise(ds, "subnational zone results")
         finally:
-            connection.close()
+            ds = None
 
     @staticmethod
     def _existing_sqlite_columns(gpkg_path: str, table_name: str) -> set:
-        """Field names already present on a GeoPackage table, read
-        directly via sqlite - used to decide which avg_<column>/
-        zone_name columns still need to be added (see
+        """Field names already present on a GeoPackage table, read via
+        OGR (not a raw sqlite3 connection, for the same reason
+        _write_zone_results() doesn't use one) - used to decide which
+        avg_<column>/zone_name columns still need to be added (see
         aggregate_factor_dimension_totals()'s idempotency/legacy note).
         """
-        try:
-            connection = sqlite3.connect(gpkg_path)
-            try:
-                rows = connection.execute(f'PRAGMA table_info("{table_name}")').fetchall()  # nosec B608
-            finally:
-                connection.close()
-        except sqlite3.Error as error:
-            log_message(f"Could not read existing columns from {gpkg_path}: {error}", tag="GeoE3")
+        ds = ogr.Open(gpkg_path, 0)
+        if not ds:
+            log_message(f"Could not open GeoPackage: {gpkg_path}", tag="GeoE3")
             return set()
-        return {row[1] for row in rows}
+        try:
+            layer = ds.GetLayerByName(table_name)
+            if layer is None:
+                return set()
+            layer_defn = layer.GetLayerDefn()
+            return {layer_defn.GetFieldDefn(i).GetName() for i in range(layer_defn.GetFieldCount())}
+        finally:
+            ds = None
 
     def apply_qml_style(self, source_qml: str, qml_path: str) -> None:
         """
