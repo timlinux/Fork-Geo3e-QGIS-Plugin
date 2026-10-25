@@ -57,12 +57,12 @@ TECHNIQUES = {
         "name": "How Close the Nearest One Is",
         "svg": "distance_buffer.svg",
         "description": (
-            "Other indicators care less about density and more about proximity — can "
-            "a woman reach a water point without travelling far, or has a violent "
+            "Other indicators are less about density and more about proximity. Can a "
+            "woman reach a water point without travelling far, or has a violent "
             "incident happened nearby? This technique draws a fixed-radius circle around "
             "every relevant point and scores a grid cell by whether it falls inside that "
             "circle or outside it. Being inside the circle is good news for a water point "
-            "or a bank branch, and bad news for a reported violent event — whether "
+            "or a bank branch, and bad news for a reported violent event. Whether "
             "“inside” means a high score or a low one depends on what's being "
             "measured, not on the technique itself."
         ),
@@ -71,16 +71,16 @@ TECHNIQUES = {
         "name": "How Far By Road, Not By Air",
         "svg": "network_isochrone.svg",
         "description": (
-            "For indicators about reaching a service — a school, a hospital, a bus "
-            "stop — a straight-line circle overstates how accessible a place really "
+            "For indicators about reaching a service, such as a school, a hospital, or "
+            "a bus stop, a straight-line circle overstates how accessible a place really "
             "is: rivers, dead-end streets and missing roads all make a destination "
             "further away in practice than it looks on a map. This technique instead "
             "traces the actual road network outward from each facility in several steps "
             "(for example a 5-, 10- and 15-minute walk) and scores a grid cell by which "
             "travel-time ring it falls inside. The resulting shape hugs the street layout "
-            "rather than forming a tidy circle — a facility beside the only bridge "
-            "over a river reaches much further along the road than it does across the "
-            "water."
+            "rather than forming a tidy circle. For example, a facility beside the only "
+            "bridge over a river reaches much further along the road than it does across "
+            "the water."
         ),
     },
     "raster_lookup": {
@@ -163,8 +163,7 @@ ANALYSIS_MODE_NUANCE = {
     "use_index_score_with_ghsl": "Only scored inside built-up settlements.",
     "use_osm_transport_polyline_per_cell": ("Combines road and cycle-path data, keeping whichever scores higher."),
     "use_csv_to_point_layer": (
-        "Each event type gets its own buffer distance; where buffers overlap, "
-        "the higher-impact (closest) value wins."
+        "Each event type has its own buffer distance; where buffers overlap, " "the higher-impact (closest) value wins."
     ),
     "use_nighttime_lights": (
         "Night-time brightness is used as a proxy for how safe an area feels "

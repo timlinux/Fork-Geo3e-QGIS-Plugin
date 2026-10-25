@@ -129,9 +129,8 @@ class AnalysisReport(BaseReport):
         self.page_descriptions[
             "legend"
         ] = """
-        Every map in this report uses the same five-class colour scheme, applied to
-        scores from 0 to 5. This page explains what the colours mean and how the
-        values are derived.
+        Most maps in this report uses a colour scheme with classes ranging from 0 to
+        5. This page explains what the colours mean and how the values are derived.
         """
 
     @staticmethod
@@ -373,7 +372,7 @@ class AnalysisReport(BaseReport):
         self._rect(MARGIN, note_y, CONTENT_W, note_h, MIST, current_page)
         self._rect(MARGIN, note_y, 2.2, note_h, CYAN, current_page)
         self._label(
-            "How the scores are calculated",
+            "Score calculations",
             MARGIN + 8,
             note_y + 4.5,
             CONTENT_W - 16,
@@ -384,12 +383,14 @@ class AnalysisReport(BaseReport):
             bold=True,
         )
         note_body = self._label(
-            "<p>Each indicator scores every analysis grid cell from 0 to 5. Indicator "
-            "scores combine into factor scores, factor scores into dimension scores, "
-            "and dimension scores into the overall GeoE3 score, using the weights "
-            "configured in the model. Blank cells fall outside the study area or have "
-            "no data; a score of 0 can also mean the measured service is out of reach "
-            "— for example, locations with no road-network access.</p>",
+            "<p>For each indicator, we score each analysis grid cell from 0 to 5. "
+            "Indicator scores combine into factor scores. Factor scores combine into "
+            "dimension scores. The dimension scores are then combined into the overall "
+            "GeoE3 score. Each time we combine scores, they are weighted using the "
+            "weights configured in the model. Blank cells mean that cell is outside the "
+            "study area or has no data. A score of 0 can also mean the measured service "
+            "is out of reach. For example, locations with no road network access might "
+            "score 0.</p>",
             MARGIN + 8,
             note_y + 13,
             CONTENT_W - 16,
@@ -410,11 +411,11 @@ class AnalysisReport(BaseReport):
         explains, used by every "By population" map in the report.
         """
         self.page_descriptions["by_population_legend"] = (
-            "An enablement score on its own can't show whether a low-scoring "
-            "place is home to a handful of people or a large underserved "
-            "population. This bivariate scale crosses each enablement class "
-            "with how many people live there, so the places most in need of "
-            "intervention AND home to the most people stand out at a glance."
+            "An enablement score in isolation does not show whether a low scoring "
+            "place is home to only a few people or a large, underserved population. "
+            "We use a bivariate scale to cross reference each enablement class with "
+            "how many people live there. This allows places most in need of "
+            "intervention and that are home to the most people to stand out."
         )
         self.make_page(
             title="Reading the By-Population Maps",
@@ -504,7 +505,7 @@ class AnalysisReport(BaseReport):
         self._rect(MARGIN, note_y, CONTENT_W, note_h, MIST, current_page)
         self._rect(MARGIN, note_y, 2.2, note_h, CYAN, current_page)
         self._label(
-            "How the by-population score is calculated",
+            "Calculation of the by-population score",
             MARGIN + 8,
             note_y + 4.5,
             CONTENT_W - 16,
@@ -515,10 +516,10 @@ class AnalysisReport(BaseReport):
             bold=True,
         )
         note_body = self._label(
-            "<p>Each grid cell's plain 0-5 GeoE3 score is combined with its "
-            "population count, split into three tercile classes (low, medium, "
-            "high) computed across the whole study area, to produce one of 15 "
-            "classes. The colour ramp runs from deep red (low enablement, low "
+            "<p>For each grid cell, the plain 0-5 score is combined with its "
+            "population count, split into three classes (low, medium, high). We do "
+            "this across the whole study area to categorise each cell into one of 15 "
+            "classes. The colour ramp goes from deep red (low enablement, low "
             "population) to light blue (high enablement, high population).</p>",
             MARGIN + 8,
             note_y + 13,
@@ -1176,7 +1177,7 @@ class AnalysisReport(BaseReport):
         # dimension aggregates as minimaps, then any additional analysis
         # products (population/mask variants) as further minimaps.
         self.page_descriptions["analysis_overview"] = (
-            "The overall GeoE3 score, with the aggregated score for each "
+            "Overall GeoE3 score, with the aggregated score for each "
             "dimension and any derived analysis products shown below."
         )
         main_uri = model.get("geoe3_score_ghsl_masked_result_file") or model.get("result_file")
@@ -1333,8 +1334,7 @@ class AnalysisReport(BaseReport):
                 continue
             score_kind = "enablement x population" if palette == "by_population" else "GeoE3"
             self.page_descriptions[label] = (
-                f"The majority {score_kind} score within each administrative zone, "
-                "aggregated from the analysis grid."
+                f"Majority {score_kind} score within each administrative zone, " "aggregated from the analysis grid."
             )
             if self._add_vector_map_page(label, label, layer_uri, current_page, palette=palette):
                 current_page += 1
@@ -1943,9 +1943,9 @@ class AnalysisReport(BaseReport):
             return False
 
         self.page_descriptions["factor_distributions"] = (
-            "Every factor's own score distribution across the analysis grid, so a "
-            "spread or a heavy low tail hiding inside a single factor is visible "
-            "even when the blended score above looks fine."
+            "Each factor's score distribution across the analysis grid. The impact "
+            "of a single factor should be visible even when the blended score above "
+            "looks fine."
         )
         self.make_page(
             title="Factor Score Patterns",
@@ -2034,12 +2034,12 @@ class AnalysisReport(BaseReport):
             return False
 
         self.page_descriptions["low_score_drivers"] = (
-            "Two views of where the biggest gains are available: which dimension "
-            "most often limits a low-scoring cell, and where existing economic "
+            "The biggest gain availability can be discovered in two ways: which "
+            "dimension most often limits a low-scoring cell, and where economic "
             "opportunity is not yet matched by enabling conditions."
         )
         self.make_page(
-            title="Where Low Scores Come From",
+            title="Low Scores",
             description_key="low_score_drivers",
             current_page=current_page,
             show_header_and_footer=True,
@@ -2047,7 +2047,7 @@ class AnalysisReport(BaseReport):
         y = HEADER_H + 24
         if limiting:
             self._label(
-                "What's limiting the lowest-scoring cells",
+                "What limits the lowest scoring cells",
                 MARGIN,
                 y,
                 CONTENT_W,
@@ -2058,8 +2058,8 @@ class AnalysisReport(BaseReport):
                 bold=True,
             )
             self._label(
-                "Among cells scoring 2 or below, the dimension with the lowest value - "
-                "the single biggest lever for moving the most cells up a class.",
+                "In cells scoring 2 or below, the dimension with the lowest value is "
+                "the single biggest lever for moving the cell up a class.",
                 MARGIN,
                 y + 7,
                 CONTENT_W,
@@ -2617,9 +2617,9 @@ class AnalysisReport(BaseReport):
             return current_page
 
         self.page_descriptions["subnational_score_matrix"] = (
-            "Every administrative zone's own average score for each dimension, "
-            "factor, and the overall total - column numbers are explained in "
-            "the key on the preceding page."
+            "The average score for each admin zone for each dimension, factor and "
+            "the analysis total. Column numbers are explained in the key on the "
+            "preceding page."
         )
 
         name_col_w = 48.0
@@ -2706,11 +2706,11 @@ class AnalysisReport(BaseReport):
             return current_page
 
         self.page_descriptions["methodology_intro"] = (
-            "Every grid cell in this analysis carries a score from 0 to 5 for each "
+            "Every grid cell in this analysis has a score from 0 to 5 for each "
             "indicator, combined into factor, dimension and overall scores. The pages "
-            "that follow explain, in plain terms, how each indicator actually used in "
-            "this analysis was measured - grouped by technique, since several "
-            "indicators are collected the same way."
+            "that follow explain how each indicator actually used in this analysis "
+            "was measured - grouped by technique, since several indicators are "
+            "collected the same way."
         )
         self.make_page(
             title="Methodology",
@@ -2829,8 +2829,8 @@ class AnalysisReport(BaseReport):
                 rows.append((False, factor_name, f"{factor_weight * 100:.0f}% of this dimension"))
 
         self.page_descriptions["scoring_weights"] = (
-            "How much each dimension counts toward the overall GeoE3 score, and how "
-            "much each factor counts toward its own dimension's score - the weights "
+            "The amount each dimension counts toward the overall GeoE3 score, and the "
+            "amount each factor counts toward its own dimension's score - the weights "
             "configured for this analysis."
         )
 

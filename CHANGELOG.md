@@ -368,6 +368,12 @@ version per the policy above.
 
 ### Fixed
 
+- Tightened the wording of roughly twenty report headings/subtitles/body
+  paragraphs across the legend, by-population, analysis overview,
+  subnational, insights, subnational score matrix, methodology and
+  scoring weights pages - reviewed string by string against the live
+  report and rewritten for plainer, less repetitive phrasing. No
+  behaviour change.
 - **Subnational Score Matrix row/column labels were too small to read.**
   `_render_score_matrix_page_image()`'s font bumped from 5.5pt to
   15pt in two steps (row height 5mm->12mm, header height 7mm->16mm
