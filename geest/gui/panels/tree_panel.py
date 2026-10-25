@@ -70,7 +70,7 @@ from geest.gui.dialogs import (
     FactorAggregationDialog,
 )
 from geest.gui.views import JsonTreeModel, JsonTreeView
-from geest.gui.widgets import SolidMenu
+from geest.gui.widgets import ItemInfoPanel, SolidMenu
 from geest.utilities import log_message, open_with_system_handler, resources_path, theme_stylesheet
 
 
@@ -276,6 +276,13 @@ class TreePanel(QWidget):
         self.status_label.setVisible(False)
         layout.addWidget(self.status_label)
 
+        # Explains whatever tree item is currently selected, with a
+        # slide-over to the methodology behind an indicator's score -
+        # replaces the old map-canvas overlay (removed; a dock panel
+        # next to the controls beats a floating label on the map).
+        self.item_info_panel = ItemInfoPanel()
+        layout.addWidget(self.item_info_panel)
+
         button_bar = QHBoxLayout()
 
         # Create the split tool button
@@ -408,10 +415,7 @@ class TreePanel(QWidget):
                     add_to_map(item)
             else:
                 add_grid_layer_to_map(item, column_name, self.working_directory)
-        # TEMPORARY: Disable writing layer name into top-left overlay label.
-        # show_overlay = setting(key="show_overlay", default=False)
-        # if show_overlay:
-        #     QSettings().setValue("geoe3/overlay_label", item.data(0))
+        self.item_info_panel.show_item(item)
         show_pie = setting(key="show_pie_overlay", default=False)
         if show_pie:
             # TODO - calculate the pie data
@@ -440,13 +444,13 @@ class TreePanel(QWidget):
 
     def on_previous_button_clicked(self):
         """⚙️ On previous button clicked."""
-        QSettings().setValue("geoe3/overlay_label", "")
+        self.item_info_panel.clear()
         QSettings().setValue("geoe3/pie_data", "")
         self.switch_to_previous_tab.emit()
 
     def on_next_button_clicked(self):
         """⚙️ On next button clicked."""
-        QSettings().setValue("geoe3/overlay_label", "")
+        self.item_info_panel.clear()
         QSettings().setValue("geoe3/pie_data", "")
         self.switch_to_next_tab.emit()
 
@@ -853,7 +857,7 @@ class TreePanel(QWidget):
         """
         if working_directory:
             self.working_directory = working_directory
-            QSettings().setValue("geoe3/overlay_label", "")
+            self.item_info_panel.clear()
             QSettings().setValue("geoe3/pie_data", "")
             self.working_directory_changed(working_directory)
 

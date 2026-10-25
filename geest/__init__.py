@@ -64,7 +64,7 @@ from qgis.PyQt.QtWidgets import (
 # Import your plugin components here
 from .core import setting
 from .gui import GeoE3Dock, GeoE3OptionsFactory
-from .gui.overlays import LayerDescriptionItem, PieChartItem
+from .gui.overlays import PieChartItem
 from .utilities import log_message, resources_path, version
 
 # Set up logging - see utilites.py log_message for usage
@@ -110,10 +110,10 @@ log_message("QGIS Version: {}".format(Qgis.QGIS_VERSION), force=True)
 
 
 class CanvasOverlayFilter(QObject):
-    """Event filter to clear overlay label when clicking on map canvas."""
+    """Event filter to clear the pie chart overlay when clicking on map canvas."""
 
     def eventFilter(self, obj, event):
-        """Filter mouse press events on map canvas to clear overlay.
+        """Filter mouse press events on map canvas to clear the pie overlay.
 
         Args:
             obj: The object that received the event.
@@ -123,7 +123,6 @@ class CanvasOverlayFilter(QObject):
             False to let the event propagate normally.
         """
         if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
-            QSettings().setValue("geoe3/overlay_label", "")
             QSettings().setValue("geoe3/pie_data", "")
         return False
 
@@ -299,7 +298,6 @@ class GeoE3Plugin:
         self.run_action.triggered.connect(self.run)
         self.iface.addToolBarIcon(self.run_action)
         self.debug_running = False
-        self.label_overlay = None  # for rendering info over the canvas
         self.pie_overlay = None  # for rendering pie chart over the canvas
         # Remove any stale dock left behind by a previous load — a crashed
         # initGui, or a plugin reload racing a queued deleteLater — so
@@ -445,25 +443,12 @@ for module_name in list(sys.modules.keys()):
 
     def setup_map_canvas_items(self):
         """⚙️ Setup map canvas items."""
-        # TEMPORARY: Disable layer description overlay creation.
-        # self.label_overlay = LayerDescriptionItem(self.iface.mapCanvas())
-        self.label_overlay = None
         experimental_features = int(os.getenv("GEOE3_EXPERIMENTAL") or os.getenv("GEEST_EXPERIMENTAL", 0))
         if experimental_features:
             self.pie_overlay = PieChartItem(self.iface.mapCanvas())
 
     def remove_map_canvas_items(self):
         """Remove map canvas overlay items safely."""
-        try:
-            if self.label_overlay:
-                self.label_overlay.setCanvas(None)
-                self.label_overlay.deleteLater()
-                self.label_overlay = None
-        except (RuntimeError, AttributeError) as e:
-            # Handle cases where Qt objects may have been deleted
-            log_message(f"Warning during label overlay cleanup: {e}")
-            self.label_overlay = None
-
         try:
             if self.pie_overlay:
                 self.pie_overlay.setCanvas(None)

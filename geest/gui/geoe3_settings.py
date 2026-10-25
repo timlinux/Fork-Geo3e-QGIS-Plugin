@@ -71,9 +71,6 @@ class GeoE3Settings(FORM_CLASS, QgsOptionsPageWidget):
         show_layer_on_click = setting(key="show_layer_on_click", default=True)
         self.show_layer_on_click.setChecked(bool(show_layer_on_click))
 
-        show_overlay = setting(key="show_overlay", default=True)
-        self.show_overlay.setChecked(bool(show_overlay))
-
         show_pie_overlay = setting(key="show_pie_overlay", default=False)
         self.show_pie_overlay.setChecked(bool(show_pie_overlay))
         experimental_features = int(os.getenv("GEOE3_EXPERIMENTAL") or os.getenv("GEEST_EXPERIMENTAL", 0))
@@ -143,7 +140,6 @@ class GeoE3Settings(FORM_CLASS, QgsOptionsPageWidget):
         set_setting(key="grid_creation_workers", value=self.grid_creation_workers.value())
         set_setting(key="default_raster_to_0", value=self.default_raster_to_0.isChecked())
         set_setting(key="show_layer_on_click", value=self.show_layer_on_click.isChecked())
-        set_setting(key="show_overlay", value=self.show_overlay.isChecked())
         set_setting(key="show_pie_overlay", value=self.show_pie_overlay.isChecked())
         set_setting(key="ookla_use_thresholds", value=self.ookla_use_thresholds.isChecked())
         set_setting(key="ookla_mobile_threshold", value=self.ookla_mobile_threshold.value())
