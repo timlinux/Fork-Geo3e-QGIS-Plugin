@@ -115,6 +115,16 @@
           </property>
          </widget>
         </item>
+        <item row="2" column="0" colspan="2">
+         <widget class="QCheckBox" name="include_subnational_score_matrix">
+          <property name="text">
+           <string>Include Subnational Score Matrix in the analysis report (can add many pages for projects with a large number of zones)</string>
+          </property>
+          <property name="checked">
+           <bool>false</bool>
+          </property>
+         </widget>
+        </item>
        <item row="3" column="0" colspan="2">
         <widget class="QGroupBox" name="groupBox_ookla">
          <property name="title">

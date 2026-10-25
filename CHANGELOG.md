@@ -360,11 +360,18 @@ version per the policy above.
 ### Fixed
 
 - **Subnational Score Matrix row/column labels were too small to read.**
-  `_render_score_matrix_page_image()`'s font bumped from 5.5pt to 7.5pt
-  (row height 5mm->6mm, header height 7mm->8mm to match), and the
-  "Subnational Score Matrix — Key" page now comes BEFORE the table
-  pages instead of after them, so the column numbers are already known
-  by the time a reader reaches the first table page.
+  `_render_score_matrix_page_image()`'s font bumped from 5.5pt to
+  15pt in two steps (row height 5mm->12mm, header height 7mm->16mm
+  to match), and the "Subnational Score Matrix — Key" page now comes
+  BEFORE the table pages instead of after them, so the column numbers
+  are already known by the time a reader reaches the first table page.
+- The Subnational Score Matrix is now OFF by default - a new "Include
+  Subnational Score Matrix in the analysis report" checkbox under
+  Settings > GeoE3 > Analysis Options opts back in. It can add a very
+  large number of pages for a project with many administrative zones,
+  so it shouldn't appear unasked-for in every report. New
+  `include_subnational_score_matrix` setting (default `False`) and
+  `AnalysisReport._subnational_score_matrix_enabled()`.
 - **The running-item spinner now animates in place of the status icon
   (column 1) instead of inserting a separate widget there.** Inserting/
   removing a widget via `treeView.setIndexWidget()` every time a

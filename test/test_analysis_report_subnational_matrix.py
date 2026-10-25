@@ -10,12 +10,31 @@ import os
 import shutil
 import tempfile
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from osgeo import ogr
 from qgis.PyQt.QtGui import QColor
 
 from geest.core.reports.analysis_report import AnalysisReport
+
+
+class TestSubnationalScoreMatrixEnabled(unittest.TestCase):
+    """_subnational_score_matrix_enabled() gates the whole section
+    behind a Settings > GeoE3 opt-in, off by default - a project with
+    many zones can otherwise add a very large number of pages.
+    """
+
+    @patch("geest.core.reports.analysis_report.setting")
+    def test_disabled_by_default(self, mock_setting):
+        mock_setting.side_effect = lambda key, default=None: default
+
+        self.assertFalse(AnalysisReport._subnational_score_matrix_enabled())
+
+    @patch("geest.core.reports.analysis_report.setting")
+    def test_enabled_when_setting_is_true(self, mock_setting):
+        mock_setting.side_effect = lambda key, default=None: True
+
+        self.assertTrue(AnalysisReport._subnational_score_matrix_enabled())
 
 
 class TestScoreClassColor(unittest.TestCase):
