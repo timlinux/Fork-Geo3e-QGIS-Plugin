@@ -372,6 +372,10 @@ version per the policy above.
   so it shouldn't appear unasked-for in every report. New
   `include_subnational_score_matrix` setting (default `False`) and
   `AnalysisReport._subnational_score_matrix_enabled()`.
+  `SubnationalAggregationProcessingTask.run()` now also checks the same
+  setting before computing the underlying `avg_<column>` zone averages
+  at all - no point paying for the spatial join plus a SQL `AVG()` pass
+  per zone when the setting is off and no report will ever read them.
 - **The running-item spinner now animates in place of the status icon
   (column 1) instead of inserting a separate widget there.** Inserting/
   removing a widget via `treeView.setIndexWidget()` every time a

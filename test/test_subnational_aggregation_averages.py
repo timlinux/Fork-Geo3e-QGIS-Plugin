@@ -9,7 +9,7 @@ import shutil
 import sqlite3
 import tempfile
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from osgeo import ogr
 from qgis.core import QgsVectorLayer
@@ -26,6 +26,40 @@ def make_item(role, item_id="", name="", attributes=None):
     attrs.setdefault("name", name)
     item = JsonTreeItem([name, "", 0, attrs], role=role)
     return item
+
+
+class TestRunSkipsAveragesWhenDisabled(unittest.TestCase):
+    """run() only computes the factor/dimension/total averages when the
+    Subnational Score Matrix is actually going to be shown (Settings >
+    GeoE3 > Analysis Options) - no point paying for a spatial join plus
+    a SQL AVG() pass per zone that no report will ever read.
+    """
+
+    def _make_task(self):
+        task = MagicMock()
+        task.geoe3_score_folder = "/fake/geoe3_score"
+        task.geoe3_by_population_folder = None
+        task.geoe3_score_ghsl_masked_folder = None
+        task.geoe3_score_by_population_ghsl_masked_folder = None
+        return task
+
+    @patch("geest.core.algorithms.subnational_aggregation_processor.setting")
+    def test_skipped_when_setting_is_off(self, mock_setting):
+        mock_setting.side_effect = lambda key, default=None: default
+        task = self._make_task()
+
+        SubnationalAggregationProcessingTask.run(task)
+
+        task.aggregate_factor_dimension_totals.assert_not_called()
+
+    @patch("geest.core.algorithms.subnational_aggregation_processor.setting")
+    def test_computed_when_setting_is_on(self, mock_setting):
+        mock_setting.side_effect = lambda key, default=None: True
+        task = self._make_task()
+
+        SubnationalAggregationProcessingTask.run(task)
+
+        task.aggregate_factor_dimension_totals.assert_called_once()
 
 
 class TestDetectNameField(unittest.TestCase):
