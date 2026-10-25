@@ -32,18 +32,22 @@ version per the policy above.
   `_draw_correlation_heatmap()` now returns its bottom y-coordinate so
   the caller can place the new block directly beneath it without
   duplicating the layout geometry.
-- A new "How Scores Combine" diagram in the Methodology section traces
-  a score from a single indicator all the way up to the four published
-  products: indicator -> factor -> dimension -> GeoE3 Score (each step
-  a weighted sum, labelled with the actual `factor_weighting`/
-  `dimension_weighting`/`analysis_weighting` model.json attributes),
-  then the total filtered two independent ways - by population tercile
-  and by the opportunities mask - to produce "GeoE3 score", "By
-  population", "GHSL masked" and "By population (GHSL)". Sits between
-  the per-technique pages (how ONE indicator is measured) and the
-  Scoring Weights page (the actual weight numbers), bridging the two.
-  New `geest/resources/methodology/scoring_pipeline.svg` and
-  `AnalysisReport.make_scoring_pipeline_page()`.
+- A new "How Scores Combine" diagram augments the Methodology section's
+  own intro page (not a page of its own) and traces a score from a
+  single indicator all the way up to the four published products:
+  indicator -> factor -> dimension -> GeoE3 Score (each step a weighted
+  sum, labelled with the actual `factor_weighting`/`dimension_weighting`/
+  `analysis_weighting` model.json attributes), then the total filtered
+  two independent ways - by population tercile and by the opportunities
+  mask - to produce "GeoE3 score", "By population", "GHSL masked" and
+  "By population (GHSL)". The two filters sit level with the GeoE3
+  Score box rather than up near the funnel's top, so the two feed
+  arrows run as clean right angles instead of diagonals crossing
+  through the "every other used factor/dimension" ghost notes above;
+  the "both filters" lane merges into a single trunk just below the
+  filter boxes instead of running as two parallel lines the full page
+  height. New `geest/resources/methodology/scoring_pipeline.svg`,
+  folded into `AnalysisReport.make_methodology_pages()`.
 - A new collapsible "item info" panel sits above the tree panel's
   button row, explaining whatever dimension/factor/indicator is
   currently selected: a heading, a short description and its tree
