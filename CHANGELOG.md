@@ -32,6 +32,18 @@ version per the policy above.
   `_draw_correlation_heatmap()` now returns its bottom y-coordinate so
   the caller can place the new block directly beneath it without
   duplicating the layout geometry.
+- A new "How Scores Combine" diagram in the Methodology section traces
+  a score from a single indicator all the way up to the four published
+  products: indicator -> factor -> dimension -> GeoE3 Score (each step
+  a weighted sum, labelled with the actual `factor_weighting`/
+  `dimension_weighting`/`analysis_weighting` model.json attributes),
+  then the total filtered two independent ways - by population tercile
+  and by the opportunities mask - to produce "GeoE3 score", "By
+  population", "GHSL masked" and "By population (GHSL)". Sits between
+  the per-technique pages (how ONE indicator is measured) and the
+  Scoring Weights page (the actual weight numbers), bridging the two.
+  New `geest/resources/methodology/scoring_pipeline.svg` and
+  `AnalysisReport.make_scoring_pipeline_page()`.
 - Every map in the analysis report - the large main map (inset into its
   own bottom-right corner over a translucent backing panel) and every
   minimap (dimension/factor/indicator grids, plus the GeoE3 score/

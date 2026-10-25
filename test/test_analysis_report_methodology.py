@@ -36,6 +36,10 @@ class TestMethodologyReferenceData(unittest.TestCase):
             svg_path = os.path.join(methodology_dir, technique["svg"])
             self.assertTrue(os.path.exists(svg_path), f"{technique_key!r}'s svg {technique['svg']!r} is missing")
 
+    def test_scoring_pipeline_svg_exists_on_disk(self):
+        methodology_dir = os.path.join(os.path.dirname(methodology.__file__), "..", "..", "resources", "methodology")
+        self.assertTrue(os.path.exists(os.path.join(methodology_dir, "scoring_pipeline.svg")))
+
     def test_technique_for_unknown_analysis_mode_returns_none(self):
         self.assertIsNone(technique_for_analysis_mode("Do Not Use"))
         self.assertIsNone(technique_for_analysis_mode("factor_aggregation"))
@@ -152,6 +156,36 @@ class TestMakeMethodologyPages(unittest.TestCase):
 
         label_calls = [call_args.args[0] for call_args in self.report._label.call_args_list]
         self.assertTrue(any("Internet users" in text and "broadband" in text for text in label_calls))
+
+
+class TestMakeScoringPipelinePage(unittest.TestCase):
+    """make_scoring_pipeline_page() adds exactly one page - the
+    aggregation-flow diagram - and only when there's at least one
+    methodology technique to bridge from.
+    """
+
+    def setUp(self):
+        self.report = MagicMock()
+        self.report.page_descriptions = {}
+
+    def test_no_used_techniques_adds_no_page(self):
+        self.report._methodology_entries.return_value = []
+
+        result = AnalysisReport.make_scoring_pipeline_page(self.report, current_page=5)
+
+        self.assertEqual(result, 5)
+        self.report.make_page.assert_not_called()
+
+    def test_adds_exactly_one_page_via_place_picture(self):
+        self.report._methodology_entries.return_value = [("feature_count", [("Clinics nearby", "")])]
+
+        result = AnalysisReport.make_scoring_pipeline_page(self.report, current_page=5)
+
+        self.assertEqual(result, 6)
+        self.report.make_page.assert_called_once()
+        self.report._place_picture.assert_called_once()
+        picture_args = self.report._place_picture.call_args.args
+        self.assertTrue(picture_args[0].endswith("scoring_pipeline.svg"))
 
 
 class TestDimensionFactorWeightings(unittest.TestCase):
