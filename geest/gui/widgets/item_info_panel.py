@@ -135,6 +135,16 @@ class ItemInfoPanel(QWidget):
         self.header_label.setStyleSheet(f"color: {GREY}; font-size: 8pt; font-weight: bold;")
         header_layout.addWidget(self.header_label)
         header_layout.addStretch(1)
+        # Lives in the header rather than inside the card's text column -
+        # freeing up a whole line of the card's fixed height for the
+        # description, which was otherwise the first thing truncated.
+        self.more_link = QToolButton()
+        self.more_link.setObjectName("moreLink")
+        self.more_link.setText("Methodology  →")
+        self.more_link.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.more_link.clicked.connect(self._show_methodology_page)
+        self.more_link.setVisible(False)
+        header_layout.addWidget(self.more_link)
         self.collapse_button = QToolButton()
         self.collapse_button.setObjectName("collapseToggle")
         self.collapse_button.setText("▾")
@@ -160,7 +170,7 @@ class ItemInfoPanel(QWidget):
         # it (Fixed only stops it growing to match its OWN size hint, not
         # the hint of an empty/short-content hint being stretched by a
         # parent that has nothing else competing for that space).
-        self.card.setMaximumHeight(112)
+        self.card.setMaximumHeight(140)
 
     def _build_item_page(self) -> QWidget:
         """⚙️ Build the "currently selected item" page.
@@ -194,14 +204,6 @@ class ItemInfoPanel(QWidget):
         self.item_meta_label.setObjectName("metaLabel")
         self.item_meta_label.setWordWrap(True)
         text_col.addWidget(self.item_meta_label)
-
-        self.more_link = QToolButton()
-        self.more_link.setObjectName("moreLink")
-        self.more_link.setText("Methodology  →")
-        self.more_link.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.more_link.clicked.connect(self._show_methodology_page)
-        self.more_link.setVisible(False)
-        text_col.addWidget(self.more_link, 0, Qt.AlignmentFlag.AlignLeft)
 
         text_col.addStretch(1)
         row.addLayout(text_col, 1)
@@ -341,18 +343,21 @@ class ItemInfoPanel(QWidget):
             # A borrowed factor description can run well past what the
             # card's fixed height has room for - truncate it the same way
             # the methodology summary is, rather than letting Qt hard-clip
-            # mid-word with no ellipsis.
-            description = _truncate(description, limit=110)
+            # mid-word with no ellipsis. The budget is larger than the
+            # methodology summary's own: moving the Methodology link into
+            # the header (see _build_ui()) freed a whole line, and the
+            # card itself is taller than it used to be.
+            description = _truncate(description, limit=190)
         self.item_meta_label.setText(f"{role_label} · {description}" if description else role_label)
 
         analysis_mode = item.attribute("analysis_mode", "") if hasattr(item, "attribute") else ""
         technique_key = technique_for_analysis_mode(analysis_mode) if analysis_mode else None
         self._current_technique_key = technique_key
-        self.more_link.setVisible(technique_key is not None)
         self._show_item_page()
 
     def _show_item_page(self):
         """⚙️ Switch the stack to the "selected item" page."""
+        self.more_link.setVisible(self._current_technique_key is not None)
         self.stack.setCurrentIndex(0)
 
     def _show_methodology_page(self):
@@ -365,4 +370,8 @@ class ItemInfoPanel(QWidget):
             self.methodology_icon_label.setPixmap(icon.pixmap(24, 24))
         self.methodology_heading_label.setText(technique["name"])
         self.methodology_body_label.setText(_truncate(technique["description"]))
+        # The header's Methodology link is for navigating TO this page -
+        # hide it while already here (the back_link inside the card does
+        # the reverse trip).
+        self.more_link.setVisible(False)
         self.stack.setCurrentIndex(1)

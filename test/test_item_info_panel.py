@@ -109,7 +109,8 @@ class TestItemInfoPanelShowItem(unittest.TestCase):
         self.panel.show_item(item)
 
         text = self.panel.item_meta_label.text()
-        self.assertLessEqual(len(text), 130)
+        self.assertLess(len(text), len("Indicator · ") + len(long_description))
+        self.assertLessEqual(len(text), 210)
         self.assertTrue(text.endswith("…"))
 
     def test_item_with_no_description_and_no_parent_description_shows_bare_role(self):
@@ -212,6 +213,26 @@ class TestItemInfoPanelMethodologySlideOver(unittest.TestCase):
 
         self.assertEqual(self.panel.stack.currentIndex(), 0)
 
+    def test_more_link_lives_in_the_header_not_the_card(self):
+        # Moved out of the card's text column so the card's fixed height
+        # is spent entirely on the description, not shared with a link.
+        self.assertIsNot(self.panel.more_link.parentWidget(), self.panel.card)
+        self.assertFalse(self.panel.card.isAncestorOf(self.panel.more_link))
+
+    def test_more_link_hides_while_on_the_methodology_page(self):
+        self.assertTrue(self.panel.more_link.isVisible())
+
+        self.panel.more_link.click()
+
+        self.assertFalse(self.panel.more_link.isVisible())
+
+    def test_more_link_reappears_after_returning_to_the_item_page(self):
+        self.panel.more_link.click()
+
+        self.panel.back_link.click()
+
+        self.assertTrue(self.panel.more_link.isVisible())
+
     def test_methodology_icon_label_is_also_a_square_tile(self):
         self.assertEqual(self.panel.methodology_icon_label.objectName(), "iconTile")
         self.assertEqual(self.panel.methodology_icon_label.size().width(), 36)
@@ -234,6 +255,12 @@ class TestItemInfoPanelCollapse(unittest.TestCase):
 
     def test_starts_expanded(self):
         self.assertTrue(self.panel.card.isVisible())
+
+    def test_card_has_room_for_more_than_a_couple_lines_of_description(self):
+        # Grown from the original 112px cap so a borrowed factor
+        # description has somewhere to go instead of being truncated
+        # down to almost nothing.
+        self.assertGreaterEqual(self.panel.card.maximumHeight(), 130)
 
     def test_toggle_collapses_the_card(self):
         self.panel.toggle_expanded()
