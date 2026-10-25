@@ -391,6 +391,62 @@ class TestItemInfoPanelProgress(unittest.TestCase):
         self.assertEqual(self.panel.overall_progress_bar.value(), 11)
         self.assertEqual(self.panel.status_label.text(), "Processing area 11/16")
 
+    def test_collapsing_and_re_expanding_during_a_run_returns_to_the_progress_page(self):
+        self.panel.show_progress("Analysis in progress...")
+
+        self.panel.toggle_expanded()
+        self.panel.toggle_expanded()
+
+        self.assertEqual(self.panel.stack.currentIndex(), 2)
+        self.assertEqual(self.panel.header_label.text(), "Analysis in progress...")
+
+    def test_collapsing_after_a_run_finishes_returns_to_the_item_page(self):
+        self.panel.show_progress("Analysis in progress...")
+        self.panel.hide_progress()
+
+        self.panel.toggle_expanded()
+        self.panel.toggle_expanded()
+
+        self.assertEqual(self.panel.stack.currentIndex(), 0)
+
+    def test_selecting_a_tree_item_mid_run_does_not_interrupt_the_progress_page(self):
+        self.panel.show_progress("Analysis in progress...")
+        item = make_fake_item("indicator", "Clinics nearby", analysis_mode="use_point_per_cell")
+
+        self.panel.show_item(item)
+
+        self.assertEqual(self.panel.stack.currentIndex(), 2)
+        self.assertEqual(self.panel.header_label.text(), "Analysis in progress...")
+
+    def test_clearing_the_selection_mid_run_does_not_interrupt_the_progress_page(self):
+        self.panel.show_progress("Analysis in progress...")
+
+        self.panel.clear()
+
+        self.assertEqual(self.panel.stack.currentIndex(), 2)
+
+    def test_header_label_click_does_nothing_while_a_run_is_active(self):
+        self.panel.show_progress("Analysis in progress...")
+
+        self.panel.header_label.click()
+
+        self.assertEqual(self.panel.stack.currentIndex(), 2)
+        self.assertEqual(self.panel.header_label.text(), "Analysis in progress...")
+
+    def test_selected_item_before_the_run_is_shown_once_it_finishes(self):
+        item = make_fake_item("indicator", "Clinics nearby", analysis_mode="use_point_per_cell")
+        self.panel.show_item(item)
+        self.panel.show_progress("Analysis in progress...")
+        # Selecting something else mid-run still updates the content
+        # underneath, ready for when the run finishes.
+        other_item = make_fake_item("dimension", "Accessibility")
+        self.panel.show_item(other_item)
+
+        self.panel.hide_progress()
+
+        self.assertEqual(self.panel.stack.currentIndex(), 0)
+        self.assertEqual(self.panel.item_heading_label.text(), "Accessibility")
+
 
 if __name__ == "__main__":
     unittest.main()

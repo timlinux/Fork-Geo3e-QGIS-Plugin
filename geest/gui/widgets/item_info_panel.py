@@ -98,6 +98,13 @@ class ItemInfoPanel(QWidget):
         super().__init__(parent)
         self._expanded = True
         self._current_technique_key = None
+        # Tracks whether a run is currently showing, independent of which
+        # stack page happens to be visible right now - set_expanded(True)
+        # consults this to re-force the progress page if a collapse/expand
+        # (or anything else) slipped the stack back to the item page while
+        # processing was still under way.
+        self._progress_active = False
+        self._progress_title = "Analysis in progress..."
         self._build_ui()
         self.clear()
 
@@ -334,10 +341,20 @@ class ItemInfoPanel(QWidget):
     def set_expanded(self, expanded: bool):
         """⚙️ Show or hide the card, keeping only the slim header visible when collapsed.
 
+        Re-expanding while a run is in progress always lands back on the
+        progress page, regardless of what the stack happened to be
+        showing - minimising the panel mid-run and expanding it again
+        should return to "what's running", not silently drop back to
+        "what's selected" just because the panel was collapsed for a
+        moment.
+
         Args:
             expanded: Whether the card should be visible.
         """
         self._expanded = expanded
+        if expanded and self._progress_active:
+            self._set_header_as_progress(self._progress_title)
+            self.stack.setCurrentIndex(2)
         self.card.setVisible(expanded)
         self.collapse_button.setText("▾" if expanded else "▸")
         self.toggled.emit(expanded)
@@ -353,9 +370,16 @@ class ItemInfoPanel(QWidget):
             self.set_expanded(True)
 
     def _on_header_label_clicked(self):
-        """⚙️ Carousel "previous" control: expand first, then go back."""
+        """⚙️ Carousel "previous" control: expand first, then go back.
+
+        A no-op carousel step while a run is in progress - the header
+        reads a status title then, not "← Selected item", so there's
+        nothing to navigate back to until the run finishes.
+        """
         if not self._expanded:
             self.set_expanded(True)
+        if self._progress_active:
+            return
         self._show_item_page()
 
     def _on_more_link_clicked(self):
@@ -371,6 +395,11 @@ class ItemInfoPanel(QWidget):
         self.item_heading_label.setText("No item selected")
         self.item_meta_label.setPlainText("Click a dimension, factor or indicator in the tree to see details here.")
         self.more_link.setVisible(False)
+        # Same reasoning as show_item(): the tree's selection clearing
+        # (e.g. the user clicking empty space) shouldn't interrupt a
+        # progress display that's still showing a run in progress.
+        if self._progress_active:
+            return
         self._show_item_page()
 
     def _set_header_as_label(self):
@@ -411,6 +440,8 @@ class ItemInfoPanel(QWidget):
                 (an analysis, a resource download) say what's actually
                 happening instead of a generic "in progress".
         """
+        self._progress_active = True
+        self._progress_title = title
         self.more_link.setVisible(False)
         self._set_header_as_progress(title)
         self.set_expanded(True)
@@ -418,6 +449,7 @@ class ItemInfoPanel(QWidget):
 
     def hide_progress(self) -> None:
         """⚙️ Return to the normal "selected item" page once a run finishes."""
+        self._progress_active = False
         self._show_item_page()
 
     def _topic_icon(self, role: str, item_id: str):
@@ -495,6 +527,13 @@ class ItemInfoPanel(QWidget):
         analysis_mode = item.attribute("analysis_mode", "") if hasattr(item, "attribute") else ""
         technique_key = technique_for_analysis_mode(analysis_mode) if analysis_mode else None
         self._current_technique_key = technique_key
+        # Content above is still updated (ready for when hide_progress()
+        # eventually calls _show_item_page()) but the stack itself stays
+        # on the progress page while a run is active - selecting a
+        # different tree item mid-run shouldn't silently replace the
+        # progress display the user is actually watching.
+        if self._progress_active:
+            return
         self._show_item_page()
 
     def _show_item_page(self):
