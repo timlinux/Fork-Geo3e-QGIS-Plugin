@@ -84,7 +84,16 @@ version per the policy above.
   borrows its parent factor's description instead (always populated)
   rather than showing the bare word "Indicator" with nothing after it,
   truncated the same way the methodology summary already is so a long
-  borrowed description doesn't overflow the card.
+  borrowed description doesn't overflow the card. The bicycle icon's
+  frame didn't reach the centre of one wheel and its cyan accent
+  overlapped the wheel's rim, reading as a mis-coloured wheel - redrawn
+  with a proper diamond frame that meets both hubs exactly, with the
+  accent moved well clear of either wheel. The "Methodology →" link
+  moved out of the card into the header row, to the left of the
+  collapse/expand chevron, freeing a full line of the card's height for
+  the description; the card itself grew (112px -> 140px) and the
+  description's truncation budget grew to match (previously the first
+  thing cut, now using the freed space instead of leaving it blank).
 - Every map in the analysis report - the large main map (inset into its
   own bottom-right corner over a translucent backing panel) and every
   minimap (dimension/factor/indicator grids, plus the GeoE3 score/
