@@ -21,6 +21,7 @@ from geest.core.workflows import (
     MultiBufferDistancesNativeWorkflow,
     MultiBufferDistancesORSWorkflow,
     OsmTransportPolylinePerCellWorkflow,
+    OsmTransportPolylineWeightedPerCellWorkflow,
     PointPerCellWorkflow,
     PolygonPerCellWorkflow,
     PolylinePerCellWorkflow,
@@ -109,6 +110,14 @@ class WorkflowFactory:
             elif analysis_mode == "use_polyline_per_cell":
                 return PolylinePerCellWorkflow(item, cell_size_m, analysis_scale, feedback, context)
             elif analysis_mode == "use_osm_transport_polyline_per_cell":
+                # National scale uses a score-weighted average across every
+                # intersecting feature instead of "highest score wins" -
+                # worldbank/GeoE3#397. Regional and local scale are
+                # deliberately unchanged.
+                if analysis_scale == "national":
+                    return OsmTransportPolylineWeightedPerCellWorkflow(
+                        item, cell_size_m, analysis_scale, feedback, context
+                    )
                 return OsmTransportPolylinePerCellWorkflow(item, cell_size_m, analysis_scale, feedback, context)
             elif analysis_mode == "use_polygon_per_cell":
                 return PolygonPerCellWorkflow(item, cell_size_m, analysis_scale, feedback, context)

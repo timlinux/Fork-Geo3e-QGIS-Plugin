@@ -255,6 +255,82 @@ class TestItemInfoPanelMethodologySlideOver(unittest.TestCase):
         )
 
 
+class TestItemInfoPanelScaleAwareMethodology(unittest.TestCase):
+    """National-scale Active Transport scores a cell with a score-weighted
+    average instead of the single-best-feature technique used everywhere
+    else - the technique shown in the methodology slide-over has to track
+    that, reading the project's analysis_scale off the root "analysis"
+    tree item rather than the indicator's own analysis_mode alone.
+    worldbank/GeoE3#397.
+    """
+
+    def setUp(self):
+        self.panel = ItemInfoPanel()
+        self.panel.show()
+
+    def _make_analysis_parent(self, analysis_scale):
+        analysis = make_fake_item("analysis", "Tunisia")
+        attrs = {"description": "", "analysis_mode": "", "id": "", "analysis_scale": analysis_scale}
+        analysis.attribute.side_effect = lambda key, default="": attrs.get(key, default)
+        return analysis
+
+    def test_national_scale_active_transport_uses_the_weighted_technique(self):
+        analysis = self._make_analysis_parent("national")
+        item = make_fake_item(
+            "indicator",
+            "Cycle network",
+            analysis_mode="use_osm_transport_polyline_per_cell",
+            parent=analysis,
+        )
+
+        self.panel.show_item(item)
+
+        self.assertEqual(self.panel._current_technique_key, "weighted_feature_average")
+
+    def test_regional_scale_active_transport_keeps_the_feature_count_technique(self):
+        analysis = self._make_analysis_parent("regional")
+        item = make_fake_item(
+            "indicator",
+            "Cycle network",
+            analysis_mode="use_osm_transport_polyline_per_cell",
+            parent=analysis,
+        )
+
+        self.panel.show_item(item)
+
+        self.assertEqual(self.panel._current_technique_key, "feature_count")
+
+    def test_no_analysis_ancestor_defaults_to_national_and_the_weighted_technique(self):
+        # Mirrors TreePanel.analysis_scale()'s own "national" default.
+        item = make_fake_item(
+            "indicator",
+            "Cycle network",
+            analysis_mode="use_osm_transport_polyline_per_cell",
+        )
+
+        self.panel.show_item(item)
+
+        self.assertEqual(self.panel._current_technique_key, "weighted_feature_average")
+
+    def test_methodology_slide_over_shows_the_weighted_technique_name(self):
+        analysis = self._make_analysis_parent("national")
+        item = make_fake_item(
+            "indicator",
+            "Cycle network",
+            analysis_mode="use_osm_transport_polyline_per_cell",
+            parent=analysis,
+        )
+        self.panel.show_item(item)
+
+        self.panel.more_link.click()
+
+        self.assertEqual(self.panel.methodology_heading_label.text(), "A Score Weighted Toward the Best Infrastructure")
+        self.assertEqual(
+            self.panel.methodology_body_label.toPlainText(),
+            TECHNIQUES["weighted_feature_average"]["description"],
+        )
+
+
 class TestItemInfoPanelCollapse(unittest.TestCase):
     def setUp(self):
         self.panel = ItemInfoPanel()
