@@ -126,3 +126,6 @@ symbology-style.db
 vscode.log
 flake.lock.pre-nixpkgs-qgis.bak
 TODO.md
+
+# Raw screencast source footage (too large for git, kept locally only)
+/ScreencastsGitIgnore/
