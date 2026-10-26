@@ -57,8 +57,8 @@ class TestClearSingleItemOutputsForAnalysisRole(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    @patch("geest.core.grid_column_utils.clear_grid_column")
-    def test_clearing_the_analysis_item_deletes_files_in_every_output_directory(self, mock_clear_grid_column):
+    @patch("geest.core.grid_column_utils.clear_grid_columns")
+    def test_clearing_the_analysis_item_deletes_files_in_every_output_directory(self, mock_clear_grid_columns):
         # Grid-column clearing is exercised separately below - mocked out
         # here since the placeholder study_area.gpkg isn't a real
         # GeoPackage and this test only cares about file deletion.
@@ -68,12 +68,19 @@ class TestClearSingleItemOutputsForAnalysisRole(unittest.TestCase):
             directory = os.path.join(self.temp_dir, name)
             self.assertEqual(os.listdir(directory), [], f"{name} still has a stale file")
 
-    @patch("geest.core.grid_column_utils.clear_grid_column")
-    def test_clearing_the_analysis_item_clears_every_one_of_its_own_grid_columns(self, mock_clear_grid_column):
+    @patch("geest.core.grid_column_utils.clear_grid_columns")
+    def test_clearing_the_analysis_item_clears_every_one_of_its_own_grid_columns_in_one_call(
+        self, mock_clear_grid_columns
+    ):
+        # All 5 columns go through clear_grid_columns() together - one
+        # open/transaction/WAL-checkpoint instead of 5, which is what made
+        # "Clear Item" on the Analysis node noticeably slower than on any
+        # other role.
         TreePanel._clear_single_item_outputs(self.panel, self.analysis_item)
 
-        cleared_columns = {call.args[1] for call in mock_clear_grid_column.call_args_list}
-        self.assertEqual(cleared_columns, set(TreePanel.ANALYSIS_GRID_COLUMNS))
+        mock_clear_grid_columns.assert_called_once()
+        _gpkg_path, cleared_columns = mock_clear_grid_columns.call_args.args
+        self.assertEqual(set(cleared_columns), set(TreePanel.ANALYSIS_GRID_COLUMNS))
         self.assertNotIn("", cleared_columns)
 
 

@@ -12,6 +12,8 @@ from osgeo import ogr
 from geest.core.grid_column_utils import (
     _ensure_column_exists,
     add_model_columns_to_grid,
+    clear_grid_column,
+    clear_grid_columns,
     get_aggregate_column_names,
     populated_area_names,
     rasterize_grid_column,
@@ -973,6 +975,83 @@ class TestGetAggregateColumnNamesExcludesDeadColumns(unittest.TestCase):
             "opportunities_mask",
         ):
             self.assertIn(real_name, names)
+
+
+class TestClearGridColumns(unittest.TestCase):
+    """clear_grid_columns() - the batched sibling of clear_grid_column(),
+    used to clear the Analysis tree item's 5 own columns in one
+    open/transaction/WAL-checkpoint instead of 5 separate ones (see its
+    docstring for why that mattered: it's what made "Clear Item" on the
+    Analysis node noticeably slower than on any other role).
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp(prefix="test_clear_grid_columns_")
+        self.gpkg_path = os.path.join(self.temp_dir, "study_area.gpkg")
+        driver = ogr.GetDriverByName("GPKG")
+        dataset = driver.CreateDataSource(self.gpkg_path)
+        layer = dataset.CreateLayer("study_area_grid", geom_type=ogr.wkbPolygon)
+        layer.CreateField(ogr.FieldDefn("geoe3", ogr.OFTReal))
+        layer.CreateField(ogr.FieldDefn("geoe3_by_population", ogr.OFTReal))
+        layer.CreateField(ogr.FieldDefn("unrelated", ogr.OFTReal))
+
+        layer_defn = layer.GetLayerDefn()
+        for value in (1.0, 2.0, 3.0):
+            feature = ogr.Feature(layer_defn)
+            feature.SetField("geoe3", value)
+            feature.SetField("geoe3_by_population", value * 10)
+            feature.SetField("unrelated", value * 100)
+            layer.CreateFeature(feature)
+        dataset = None
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _column_values(self, column_name):
+        dataset = ogr.Open(self.gpkg_path, 0)
+        layer = dataset.GetLayerByName("study_area_grid")
+        values = [feature.GetField(column_name) for feature in layer]
+        dataset = None
+        return values
+
+    def test_clears_every_listed_column_across_every_row(self):
+        result = clear_grid_columns(self.gpkg_path, ["geoe3", "geoe3_by_population"])
+
+        self.assertTrue(result)
+        self.assertEqual(self._column_values("geoe3"), [None, None, None])
+        self.assertEqual(self._column_values("geoe3_by_population"), [None, None, None])
+
+    def test_leaves_columns_not_in_the_list_untouched(self):
+        clear_grid_columns(self.gpkg_path, ["geoe3"])
+
+        self.assertEqual(self._column_values("unrelated"), [100.0, 200.0, 300.0])
+
+    def test_blank_name_in_the_list_is_skipped_but_valid_ones_still_clear(self):
+        result = clear_grid_columns(self.gpkg_path, ["geoe3", ""])
+
+        self.assertTrue(result)
+        self.assertEqual(self._column_values("geoe3"), [None, None, None])
+
+    def test_all_blank_names_returns_false_without_crashing(self):
+        result = clear_grid_columns(self.gpkg_path, ["", ""])
+
+        self.assertFalse(result)
+        self.assertEqual(self._column_values("unrelated"), [100.0, 200.0, 300.0])
+
+    def test_missing_gpkg_returns_false(self):
+        result = clear_grid_columns(os.path.join(self.temp_dir, "nonexistent.gpkg"), ["geoe3"])
+
+        self.assertFalse(result)
+
+    def test_single_call_matches_what_several_clear_grid_column_calls_would_do(self):
+        # Same end state as calling clear_grid_column() once per name -
+        # clear_grid_columns() only changes how many times the GeoPackage
+        # is opened/committed/checkpointed to get there, not the result.
+        for column in ("geoe3", "geoe3_by_population"):
+            clear_grid_column(self.gpkg_path, column)
+
+        self.assertEqual(self._column_values("geoe3"), [None, None, None])
+        self.assertEqual(self._column_values("geoe3_by_population"), [None, None, None])
 
 
 if __name__ == "__main__":
