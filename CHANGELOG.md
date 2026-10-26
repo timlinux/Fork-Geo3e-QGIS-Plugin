@@ -455,6 +455,15 @@ version per the policy above.
 
 ### Fixed
 
+- The item info panel's progress page (status text + the two progress
+  bars, shown while a run is active) didn't survive collapsing and
+  re-expanding the panel mid-run, or selecting a different tree item -
+  either silently dropped back to "Selected item" even though the run
+  was still going. `set_expanded(True)` now re-forces the progress page
+  whenever a run is active, and `show_item()`/`clear()` (triggered by
+  tree selection changes) no longer switch the stack away from it while
+  one is - both still update their own content underneath, ready for
+  when the run actually finishes and `hide_progress()` is called.
 - **"Clear Item" on the Analysis tree node was noticeably slower than on
   any other role.** Its own outputs span 5 separate `study_area_grid`
   columns (`geoe3`, `geoe3_by_population`, `geoe3_masked`,
