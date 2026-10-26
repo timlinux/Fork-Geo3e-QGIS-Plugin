@@ -488,6 +488,21 @@ version per the policy above.
   stores was equally at risk; this one was just the most noticeable
   since it's toggled against its own default. Now syncs explicitly on
   every write and delete.
+- **"Include Subnational Score Matrix" (and in principle any other
+  boolean setting in Settings > GeoE3) could still show checked
+  immediately after being unchecked and saved**, even with the sync
+  fix above in place - a second, separate bug on the read side.
+  `QSettings.value()`'s implicit Python-type coercion when no explicit
+  `type=` is given turned out to be binding/platform-dependent: on a
+  real QGIS 4 install it returned the literal ini string `"false"`
+  rather than a native bool, and `bool("false")` is `True` in Python
+  (any non-empty string is truthy), so every `bool(setting(...))` call
+  site read a freshly-saved "off" value straight back as "on".
+  `general_setting()` now infers the expected type from the caller's
+  own `default` (bool/int/float/str) when `expected_type` isn't given
+  explicitly, so `QSettings` does the conversion itself instead of
+  leaving it to chance - fixes every setting read this way, not just
+  this one checkbox.
 - The item info panel's progress page (status text + the two progress
   bars, shown while a run is active) didn't survive collapsing and
   re-expanding the panel mid-run, or selecting a different tree item -

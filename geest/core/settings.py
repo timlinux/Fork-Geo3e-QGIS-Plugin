@@ -98,6 +98,21 @@ def general_setting(key, default=None, expected_type=None, qsettings=None):
     """
     if qsettings is None:
         qsettings = QSettings()
+    if expected_type is None and isinstance(default, (bool, int, float, str)):
+        # Without an explicit type=, QSettings.value()'s Python-side
+        # coercion is binding/platform-dependent: on at least one real
+        # QGIS 4 install, a bool written to an INI-format settings file
+        # comes back from value() as the literal string "false" rather
+        # than a native Python bool, and bool("false") is True in Python
+        # (any non-empty string is truthy) - so a checkbox explicitly
+        # unchecked and saved shows checked again the moment the
+        # settings page is reopened (worldbank/GeoE3 field report,
+        # 2026-10-25 - "Include Subnational Score Matrix"). Inferring
+        # the expected type from the caller's own default forces
+        # QSettings to do the conversion itself instead of leaving it to
+        # chance, covering every bool/int/float/str setting read this
+        # way without needing every call site to opt in individually.
+        expected_type = type(default)
     try:
         if isinstance(expected_type, type):
             return qsettings.value(key, default, type=expected_type)
