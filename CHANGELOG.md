@@ -455,6 +455,17 @@ version per the policy above.
 
 ### Fixed
 
+- **Settings toggled in Settings > GeoE3 (e.g. "Include Subnational
+  Score Matrix") could silently revert after restarting QGIS**, even
+  when correctly unchecked and confirmed with OK every time.
+  `set_general_setting()` wrote the new value into a QSettings object
+  but never called `sync()`, relying instead on that object's
+  destructor - triggered by Python garbage collection, not guaranteed
+  to run before QGIS's own shutdown sequence tears down the interpreter
+  - to actually flush the write to disk. Every setting the plugin
+  stores was equally at risk; this one was just the most noticeable
+  since it's toggled against its own default. Now syncs explicitly on
+  every write and delete.
 - The item info panel's progress page (status text + the two progress
   bars, shown while a run is active) didn't survive collapsing and
   re-expanding the panel mid-run, or selecting a different tree item -

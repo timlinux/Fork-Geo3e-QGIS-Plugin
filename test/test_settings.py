@@ -18,11 +18,23 @@ __revision__ = "$Format:%H$"
 # (at your option) any later version.
 # ---------------------------------------------------------------------
 
+import os
+import shutil
+import tempfile
 import unittest
 from collections import OrderedDict
 from unittest.mock import MagicMock, patch
 
-from geest.core.settings import deep_convert_dict, set_setting, setting
+from qgis.PyQt.QtCore import QSettings
+
+from geest.core.settings import (
+    deep_convert_dict,
+    delete_general_setting,
+    general_setting,
+    set_general_setting,
+    set_setting,
+    setting,
+)
 
 
 class TestSettings(unittest.TestCase):
@@ -87,6 +99,55 @@ class TestSettings(unittest.TestCase):
         set_setting("test_key", "test_value")
 
         mock_settings_instance.setValue.assert_called()
+
+    @patch("geest.core.settings.QSettings")
+    @patch("geest.core.settings.QgsProject")
+    def test_set_setting_syncs_to_disk(self, _mock_project, mock_qsettings):
+        # A value set right before QGIS closes must not depend on the
+        # QSettings object's destructor (garbage-collection timing) to
+        # actually reach disk - without an explicit sync(), it can be
+        # silently lost (worldbank/GeoE3 field report, 2026-10-25:
+        # "Include Subnational Score Matrix" reverting to checked after
+        # every restart despite being unchecked and OK'd every time).
+        mock_settings_instance = MagicMock()
+        mock_qsettings.return_value = mock_settings_instance
+
+        set_setting("test_key", "test_value")
+
+        mock_settings_instance.sync.assert_called_once()
+
+    @patch("geest.core.settings.QSettings")
+    def test_delete_setting_syncs_to_disk(self, mock_qsettings):
+        mock_settings_instance = MagicMock()
+        mock_qsettings.return_value = mock_settings_instance
+
+        delete_general_setting("test_key")
+
+        mock_settings_instance.remove.assert_called_once()
+        mock_settings_instance.sync.assert_called_once()
+
+    def test_a_boolean_setting_survives_a_simulated_restart(self):
+        # Two independent QSettings instances pointed at the same file,
+        # never open at the same time - exactly how a setting toggled in
+        # one QGIS session needs to be readable by the next one. Without
+        # set_general_setting()'s explicit sync(), this round trip is the
+        # one that silently loses the write.
+        temp_dir = tempfile.mkdtemp(prefix="test_settings_restart_")
+        try:
+            ini_path = os.path.join(temp_dir, "settings.ini")
+
+            session_one = QSettings(ini_path, QSettings.Format.IniFormat)
+            set_general_setting("geoe3/include_subnational_score_matrix", False, qsettings=session_one)
+            del session_one  # the QGIS process exiting, not a clean close
+
+            session_two = QSettings(ini_path, QSettings.Format.IniFormat)
+            result = general_setting(
+                "geoe3/include_subnational_score_matrix", default=True, expected_type=bool, qsettings=session_two
+            )
+
+            self.assertFalse(result)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":
