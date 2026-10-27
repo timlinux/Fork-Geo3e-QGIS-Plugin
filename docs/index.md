@@ -52,8 +52,8 @@ would raise the score where it's weakest.
 
     ---
 
-    Pull OpenStreetMap, Humanitarian Data Exchange and other open sources
-    straight into the project — no manual GIS prep required.
+    OpenStreetMap, GHSL settlement data and Ookla broadband coverage download
+    straight into the project automatically — no manual GIS prep required.
 
     [:octicons-arrow-right-24: Data collection](training/datacollection.md)
 
