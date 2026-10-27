@@ -135,12 +135,13 @@ nav:
     - Installation: getting-started/installation.md
   - Training Walkthrough:
     - training/index.md
-    - Project Setup &amp; Navigation: training/navigation.md
+    - Getting Data: training/datacollection.md
+    - Project Setup: training/navigation.md
     - Contextual Dimension: training/contextual.md
     - Accessibility Dimension: training/accessibility.md
     - Place Characterization Dimension: training/placecharacterization.md
-    - Insights &amp; Results: training/insights.md
-    - Data Collection: training/datacollection.md
+    - Exploring Your Results: training/insights.md
+    - The Analysis Report &amp; Raw Data: training/report.md
   - About:
     - about/index.md
     - Background &amp; Framework: about/background.md

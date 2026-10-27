@@ -10,18 +10,20 @@ reference for whichever dimension you're configuring.
 
 ## Course outline
 
-1. [Project Setup &amp; Navigation](navigation.md) — open the plugin, create
-   or load a project, and get oriented.
-2. [Contextual Dimension](contextual.md) — the national and regional factors
+1. [Getting Data](datacollection.md) — every way GeoE3 sources its input
+   data, from fully automatic downloads to manual research.
+2. [Project Setup](navigation.md) — open the plugin, create a project,
+   and get oriented in the model tree.
+3. [Contextual Dimension](contextual.md) — the national and regional factors
    that set the baseline for enablement.
-3. [Accessibility Dimension](accessibility.md) — service areas for
+4. [Accessibility Dimension](accessibility.md) — service areas for
    childcare, healthcare, education and other daily needs.
-4. [Place Characterization Dimension](placecharacterization.md) — safety,
+5. [Place Characterization Dimension](placecharacterization.md) — safety,
    walkability and hazard exposure at the place level.
-5. [Insights &amp; Results](insights.md) — combine the dimensions into a
+6. [Exploring Your Results](insights.md) — combine the dimensions into a
    single enablement score and interpret it.
-6. [Data Collection](datacollection.md) — where the input data comes from,
-   with a worked Saint Lucia example.
+7. [The Analysis Report &amp; Raw Data](report.md) — read the PDF report and
+   export the underlying grid for further analysis.
 
 ## Related formal training
 
