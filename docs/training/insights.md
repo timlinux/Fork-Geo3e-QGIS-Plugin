@@ -1,8 +1,28 @@
-## Insights
+## Exploring Your Results
+
+!!! abstract "Learning objective"
+    By the end of this page you'll be able to compute the final GeoE3
+    score, read its 5-class enablement legend, enrich it with population
+    and subnational boundaries, and understand the bivariate legend that
+    results from combining enablement with population density.
 
 <p align="justify">
 The final aggregation of all three dimensions is carried out by applying weights to each dimension, ensuring a balanced and comprehensive representation. This tab provides users with deeper insights by identifying regions where conditions are optimal—or at least favorable—for women to access job opportunities in a specific sector. The outputs from this tab assign a combined classification score to the input raster, aggregate results at desired adminstrative level and extract aggregated polygons or administrative units intersecting these regions. Additionally, GeoE3 highlights key infrastructure investments that could boost women's participation in the workforce. Population data can also be incorporated into the analysis to provide more nuanced insights that account for both population levels and enablement. This process integrates proximity data, classification scores, population data and weighted dimensions to support informed decision-making.
 </p>
+
+Once every dimension has been processed (see the three previous pages),
+the GeoE3 Score node combines them into a single result:
+
+<figure markdown>
+![The final GeoE3 Score map, with its 5-class enablement legend and a fully completed model tree](../images/training/geoe3-score-map-legend.jpg)
+<figcaption>Every item in the tree shows a green checkmark once its workflow has run — the GeoE3 Score itself is the weighted combination of all three dimensions, on the same 0–5 scale as everything underneath it.</figcaption>
+</figure>
+
+You can click on any item in the tree — not just the final score — to see
+its individual result on the map, and expand its legend to see the
+colour scheme: red for very low enablement through to blue for highly
+enabling. Click any layer to open an info panel at the bottom describing
+what it measures and the methodology used to calculate it.
 
 ### Computing the GeoE3 Score
 ---
@@ -36,6 +56,24 @@ The process should be successfully completed and indicated by a green checkmark 
 <p align="justify">
 GeoE3 can be visualized in relation to male/female population distribution by providing a raster dataset containing male/female population density and/or by job distribution by providing job locations. These datasets are combined with the GeoE3 score to calculate the GeoE3 by Population score and/or GeoE3 by Job Distribution score. If an administrative layer is defined, results are aggregated by subnational boundaries to display the predominant WEE outputs for each region.
 </p>
+
+All of these optional steps live in the same dialog as the dimension
+weights:
+
+<figure markdown>
+![The GeoE3 Score edit weightings dialog: dimension weights, aggregation boundaries, population and job-distribution/mask options](../images/training/geoe3-score-weightings-dialog.jpg)
+<figcaption>Dimension weights, aggregation boundaries, the GeoE3 by Population demographics source, and the GeoE3 by Job Distribution mask options, all in one dialog.</figcaption>
+</figure>
+
+For population, you don't have to source your own dataset: click
+**Download from S2S** to fetch a Space2Stats demographics layer directly,
+or point it at your own raster — for example a file from
+[WorldPop](datacollection.md#tutorial-population-data-from-worldpop) if
+you need a specific year or a breakdown by age and sex. For the mask,
+**Use Global Human Settlements Layer** is the quickest way to restrict
+results to populated areas — GeoE3 fetches it automatically — or supply
+your own buffer points, polygon or raster mask if you're targeting a
+specific intervention area rather than "wherever people live."
 
 #### 1. Aggregation Boundaries (Optional)
 
@@ -97,6 +135,23 @@ The outputs are stored within the project folder created during the setup phase 
 
 If the results do not immediately appear in the Layer Panel after processing the GeoE3 Scores, you can resolve this by either adding them manually from the folder path or by right-clicking on the GeoE3 Score and selecting **Add to map** from the context menu.
 </p>
+
+When population and a subnational boundary layer are both configured,
+**Add GeoE3 Aggregates to Map** shows the predominant class per region,
+labelled with its full name rather than just a number:
+
+<figure markdown>
+![Subnational districts coloured by the 15-class enablement × population legend](../images/training/geoe3-bivariate-legend-map.jpg)
+<figcaption>Each subnational region shaded by its majority class — combining 5 enablement levels with 3 population tiers (low/medium/high) gives the 15 categories in the legend.</figcaption>
+</figure>
+
+!!! tip "Advanced: the subnational score matrix"
+    There's one more option worth knowing about, hidden in **Settings →
+    Options → GeoE3** rather than this dialog: **Subnational score
+    matrix**. It's off by default; switching it on adds an extra table to
+    your [analysis report](report.md) showing every subnational region's
+    score against every factor at once — useful for spotting which
+    specific factor is dragging a particular region down.
 
 **🖥️ Key attributes of GeoE3 Score tab**
 
@@ -164,3 +219,21 @@ If the results do not immediately appear in the Layer Panel after processing the
 </table>
 
 <br>
+
+Every run also produces a full PDF analysis report, and the raw grid
+results are available for export to CSV or any GIS format — both covered
+next, in [The Analysis Report & Raw Data](report.md).
+
+!!! success "Recap"
+    - The GeoE3 Score combines the three dimensions you've already
+      configured, weighted and run just like any other item in the tree.
+    - Adding a population layer (auto-fetched from Space2Stats, or your
+      own — see [WorldPop](datacollection.md#tutorial-population-data-from-worldpop))
+      unlocks the 15-class bivariate legend: 5 enablement levels × 3
+      population tiers.
+    - Adding a subnational boundary layer breaks results down by region;
+      adding a mask (GHSL settlements, or your own) restricts the
+      analysis to areas you actually care about.
+    - The **Subnational score matrix** setting (Settings → Options →
+      GeoE3, off by default) adds a region-by-factor breakdown table to
+      the PDF report.
