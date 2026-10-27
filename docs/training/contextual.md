@@ -11,11 +11,11 @@ The Contextual Dimension refers to the laws and policies that shape workplace ge
     <a href="../datacollection/#tutorial-manual-national-index-score-entry">Getting Data tutorial</a>.
 </p>
 
-Every Contextual factor works the same way: you research a published
-score for your country, then type it straight into the factor's dialog —
-there's no spatial dataset to download or configure. Because the
-legislative and regulatory environment doesn't vary within a country's
-borders, GeoE3 fills every grid cell with that same number.
+Every Contextual factor works the same way — a researched national score
+typed straight into the factor's dialog, no spatial dataset involved. See
+[Getting
+Data](datacollection.md#tutorial-manual-national-index-score-entry) for
+how that number is calculated and entered.
 
 ### Input Contextual factors
 
