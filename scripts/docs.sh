@@ -7,6 +7,10 @@
 # active (mkdocs/mkdocs-material come from requirements-dev.txt).
 set -euo pipefail
 
+# Silences mkdocs-material's own "MkDocs 2.0 is coming" nag banner —
+# noise on every invocation, not something this project can act on.
+export NO_MKDOCS_2_WARNING=true
+
 PID_FILE="${TMPDIR:-/tmp}/geoe3-mkdocs-serve.pid"
 LOG_FILE="${TMPDIR:-/tmp}/geoe3-mkdocs-serve.log"
 ADDR="${GEOE3_DOCS_ADDR:-127.0.0.1:8005}"
