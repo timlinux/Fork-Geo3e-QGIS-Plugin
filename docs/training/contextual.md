@@ -1,9 +1,21 @@
 ## Contextual
 
+!!! abstract "Learning objective"
+    By the end of this page you'll be able to configure all four
+    Contextual-dimension factors, understand why they're entered as a
+    single national number rather than a spatial dataset, and know which
+    published index backs each one.
+
 <p align="justify">
 The Contextual Dimension refers to the laws and policies that shape workplace gender discrimination, financial autonomy, and overall gender empowerment. Although this dimension may vary between countries due to differences in legal frameworks, it remains consistent within a single country, as national policies and regulations are typically applied uniformly across countries.  For more information on data input used from open sources, please refer to the
-    <a href="../datacollection.md">Data Collection section</a>.
+    <a href="datacollection.md#tutorial-manual-national-index-score-entry">Getting Data tutorial</a>.
 </p>
+
+Every Contextual factor works the same way: you research a published
+score for your country, then type it straight into the factor's dialog —
+there's no spatial dataset to download or configure. Because the
+legislative and regulatory environment doesn't vary within a country's
+borders, GeoE3 fills every grid cell with that same number.
 
 ### Input Contextual factors
 
@@ -34,10 +46,10 @@ The Contextual Dimension refers to the laws and policies that shape workplace ge
 
 </p>
 <p align="justify">
-<strong>Regulatory Frameworks</strong> pertain to laws and policies that protect women’s employment rights, such as childcare support and parental leave, influencing their workforce participation.This indicator is composed by the Workplace Index score of the WBL database.
+<strong>Regulatory Frameworks</strong> pertain to laws and policies that protect women’s employment rights, such as childcare support and parental leave, influencing their workforce participation. This indicator is composed by the Pay and Parenthood Index score of the WBL database.
 </p>
 <p align="justify">
-<strong>Finacial Inclusion</strong> involves laws concerning women’s access to financial resources like loans and credit, which is crucial for starting businesses and investing in economic opportunities. This indicator is composed by the Workplace Index score of the WBL 2024.
+<strong>Financial Inclusion</strong> involves laws concerning women’s access to financial resources like loans and credit, which is crucial for starting businesses and investing in economic opportunities. This indicator is composed by the Entrepreneurship Index score of the WBL 2024.
 </p>
 The conversion of the WBL scores to the corresponding GeoWEAF classes is represented below.
 <p align="center">
@@ -52,6 +64,12 @@ The conversion of the WBL scores to the corresponding GeoWEAF classes is represe
 > - ⚖️ **Assign Weights**: Ensure the **weights** are correctly assigned, as they determine the relative importance of each factor in the analysis. Carefully review these values to ensure they are aligned with your project's objectives and reflect the significance of each factor accurately.
 > - 🚫 **Exclude Unused Factors**: If a specific factor is not intended to be included in the process, uncheck the **Use** button associated with it.
 > - 🔄 **Readjust Weights**: After excluding any factors, make sure to **Balance Weights** of the remaining factors. This step ensures the weight distribution remains balanced and totals correctly, preserving the integrity of the analysis, then click **OK** to proceed.
+
+As a rough feel for the scale: a country with strongly enabling
+legislation would score in the 90s; something clearly below that reflects
+whatever gap you've identified in your research. There's no hard rule
+beyond "find the published index value and enter it" — the WBL index
+scores are already 0–100, so you can typically use them directly.
 
 ### Process Contextual factors
 
@@ -131,3 +149,15 @@ If the results do not immediately appear in the Layer Panel after processing the
 - **Input Accuracy**: Ensure all input values are carefully entered and correspond to the correct indices (e.g., Workplace Discrimination, Regulatory Frameworks, Financial Inclusion). Incorrect data will impact the outputs and subsequent analysis.
 
 - **Weight Adjustment**: Assign weights thoughtfully to reflect the importance of each factor in the overall analysis. After making changes, always balance the weights to ensure they sum up correctly.
+
+!!! success "Recap"
+    - All four Contextual factors (EPLEX Score for a generic analysis;
+      Workplace Discrimination, Regulatory Frameworks and Financial
+      Inclusion for a Women's Enabling Environments analysis) are entered
+      as a single national number, not a spatial dataset.
+    - Workplace Discrimination, Regulatory Frameworks and Financial
+      Inclusion map to three different WBL 2024 sub-indices — the
+      Workplace, Pay and Parenthood, and Entrepreneurship index scores
+      respectively — don't reuse the same number for all three.
+    - Results combine into a single Contextual output on the usual 0–5
+      enablement scale, viewable as a mutually-exclusive layer group.
