@@ -84,7 +84,7 @@ cmd_pdf() {
   # dependency (see mkdocs-pdf.yml's header comment), so fetch it here,
   # on top of whatever's already on PYTHONPATH.
   echo "Resolving weasyprint + brand fonts for PDF rendering..."
-  local weasyprint nunito jbm dejavu fcdir pyver
+  local weasyprint lato jbm dejavu fcdir pyver
   weasyprint="$($NIX build --no-link --print-out-paths nixpkgs#python3Packages.weasyprint)"
   pyver="$(python3 -c 'import sys; print(f"python{sys.version_info[0]}.{sys.version_info[1]}")')"
   export PYTHONPATH="$weasyprint/lib/$pyver/site-packages:${PYTHONPATH:-}"
@@ -92,9 +92,12 @@ cmd_pdf() {
   # weasyprint also needs real font files visible to fontconfig — this
   # sandbox/most nix machines have no system fontconfig at all, so
   # everything would silently fall back to whatever's on disk. Build a
-  # throwaway fonts.conf pointing at the nix store, same approach as
-  # srs/build.sh uses for the SRS PDF.
-  nunito="$($NIX build --no-link --print-out-paths nixpkgs#nunito-fonts)"
+  # throwaway fonts.conf pointing at the nix store, same approach (same
+  # packages, even) as srs/build.sh uses for the SRS PDF. Lato, not the
+  # site's own Nunito: there's no standalone top-level `nunito-fonts`
+  # attribute in nixpkgs, and Lato is already the proven, working choice
+  # here — it's the "Kartoza document typeface" per flake.nix.
+  lato="$($NIX build --no-link --print-out-paths nixpkgs#lato)"
   jbm="$($NIX build --no-link --print-out-paths nixpkgs#jetbrains-mono)"
   dejavu="$($NIX build --no-link --print-out-paths nixpkgs#dejavu_fonts)"
   fcdir="$(mktemp -d)"
@@ -106,7 +109,7 @@ cmd_pdf() {
     echo '<!DOCTYPE fontconfig SYSTEM "fonts.dtd">'
     echo '<fontconfig>'
     echo "  <dir>$fcdir/fonts</dir>"
-    echo "  <dir>$nunito/share/fonts</dir>"
+    echo "  <dir>$lato/share/fonts</dir>"
     echo "  <dir>$dejavu/share/fonts</dir>"
     echo "  <cachedir>$fcdir/cache</cachedir>"
     echo '</fontconfig>'
