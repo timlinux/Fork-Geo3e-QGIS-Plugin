@@ -82,9 +82,3 @@ would raise the score where it's weakest.
 - [The GeoWEAF framework and the theory behind it](about/background.md)
 - [Who built GeoE3 and why](about/acknowledgements.md)
 - [Research and blog posts using GeoE3](about/media.md)
-
-<div class="kz-footer-credits" markdown>
-Made with 💗 by [Kartoza](https://kartoza.com) &middot;
-[Donate!](https://github.com/sponsors/kartoza) &middot;
-[GitHub](https://github.com/worldbank/GeoE3)
-</div>

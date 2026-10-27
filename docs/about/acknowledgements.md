@@ -6,7 +6,7 @@ The tool was developed by <a href="https://kartoza.com/">Kartoza</a>.
 
 # Contact Us
 
-For further inquiries or to get involved, please feel free to drop us an **email.** [Contact us here.](gost@worldbank.org)
+For further inquiries or to get involved, please feel free to drop us an **email.** [Contact us here.](mailto:gost@worldbank.org)
 
 We look forward to hearing from you!
 

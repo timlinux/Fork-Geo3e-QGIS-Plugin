@@ -1,53 +1,36 @@
-# Training
+# Training Walkthrough
 
-## 🌍 Upcoming Course (April 2025)
+This section is a complete, hands-on walkthrough of GeoE3 — from opening the
+plugin for the first time through to reading the final enablement scores. It
+follows the same path a new analyst takes when running a real study,
+illustrated with screenshots captured step by step.
 
-<p align="justify">
-The <strong>Geographic Considerations in Evaluating Women's Employment Opportunities</strong> course will equip participants with a comprehensive understanding of how <strong>geographic factors</strong> impact women's access to <strong>employment and business opportunities</strong>. This course explores the <strong>intersection of geography and gender</strong>, highlighting how environmental characteristics can either <strong>enable or hinder women's empowerment</strong>.
-</p>
+Work through it top to bottom the first time; after that, use it as a
+reference for whichever dimension you're configuring.
 
-<p align="justify">
-Participants will engage with <strong>animated videos, quizzes and interactive content</strong> to learn about the <strong>innovative analytical framework</strong> developed by the World Bank Group (WBG), which assesses the supportiveness of environments for women's job access.
-</p>
+## Course outline
 
-<p align="justify">
-Additionally, the course introduces the <strong>Geospatial Enabling Environments for Employment Spatial Tool (GEOE3)</strong>, a <strong>cutting-edge tool</strong> designed to apply this framework in real-world scenarios. Key modules cover the framework's three main dimensions: Contextual, Accessibility and Place-Characterization, culminating in a final exam to evaluate participants' understanding and application of these concepts.
-</p>
+1. [Project Setup &amp; Navigation](navigation.md) — open the plugin, create
+   or load a project, and get oriented.
+2. [Contextual Dimension](contextual.md) — the national and regional factors
+   that set the baseline for enablement.
+3. [Accessibility Dimension](accessibility.md) — service areas for
+   childcare, healthcare, education and other daily needs.
+4. [Place Characterization Dimension](placecharacterization.md) — safety,
+   walkability and hazard exposure at the place level.
+5. [Insights &amp; Results](insights.md) — combine the dimensions into a
+   single enablement score and interpret it.
+6. [Data Collection](datacollection.md) — where the input data comes from,
+   with a worked Saint Lucia example.
 
-📢 **The course is open to everyone** and is available for enrollment on the **[WBG Institute](https://wbginstitute.learnworlds.com/home)**. Stay tuned for updates!
+## Related formal training
 
----
-
-## 🎓 Course Overview
-
-<p align="justify">
-This virtual course provides insights into how <strong>geographic factors</strong> influence women's access to <strong>employment and business opportunities</strong>. Using the <strong>Geospatial Women's Employment Analytical Framework (GeoWEAF)</strong>, the course explores how <strong>location-specific characteristics</strong> can either <strong>enable or hinder women's empowerment</strong>.
-</p>
-
-### 👥 Who Should Enroll?
-
-<p align="justify">
-This course is ideal for urban planners, policymakers, gender specialists, researchers, students and social development professionals seeking to understand how geography and the environment influence women's access to employment. Whether you're shaping cities, developing gender-focused policies, conducting research or simply exploring the intersection of gender and geography, this course offers valuable insights and practical skills to address location-specific barriers to women's economic empowerment.
-</p>
-
-### 🎯 What You Will Learn
-- 📍 How **infrastructure, frameworks and accessibility** impact women's employment and business opportunities.
-- 🌍 The **GeoWEAF framework** and its role in analyzing employment opportunities.
-- ⚖️ How **geography and gender** intersect to shape women's economic empowerment globally.
-- 🛠️ Gain insights into the **Geospatial Enabling Environments for Employment Spatial Tool (GEOE3)** and the types of results it can produce.
-
-### 🏛️ Course Format
-- ⏳ **Duration:** 2 hours
-- 🎥 **Includes:** Interactive videos, knowledge checks and a final assessment
-- 🏆 **Certificate of completion** upon successful completion
-
-### 📅 Enrollment Details
-- 📆 **Course Start Date:** April 1st, 2025
-- ⏳ **Course End Date:** May 16th, 2025
-- ⏳ **Enrollment Deadline:** March 31st, 2025
-- 🔗 **[Enroll Here](https://courses.wbginstitute.org/course/geospatial-data-women-employment)**
-
-### 📢 Stay Updated
-📩 Subscribe to the **[Institute for Economic Development Newsletter](https://www.worldbank.org/en/newsletter-subscription?ifiifed=true)** to receive updates on upcoming courses and events.
-
-🚀 **Don’t miss this opportunity—enroll now!**
+The World Bank Group Institute periodically runs a scheduled online course,
+*Geographic Considerations in Evaluating Women's Employment Opportunities*,
+covering the same GeoWEAF framework with animated videos, quizzes and a
+certificate of completion. It's aimed at urban planners, policymakers,
+gender specialists, researchers and social development professionals.
+Current enrollment dates are published on the
+[WBG Institute](https://wbginstitute.learnworlds.com/home) site; subscribe to
+the [Institute for Economic Development Newsletter](https://www.worldbank.org/en/newsletter-subscription?ifiifed=true)
+to be notified of upcoming sessions.
