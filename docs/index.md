@@ -22,10 +22,25 @@ exactly where to invest to close the gap.
 
 </div>
 
-## What it is
+## Welcome to GeoE3
 
-GeoE3 (Geospatial Enabling Environments for Employment, Economic Empowerment)
-is the practical, in-QGIS implementation of the World Bank's GeoWEAF
+<p align="center">
+  <img src="images/new%20images/framework.png" alt="A diverse group of people connected by a winding road through infrastructure — wind turbines, schools, clinics, transport, housing — illustrating the spatial factors the GeoWEAF framework scores" style="max-width:360px;">
+</p>
+
+Developed by the World Bank, **GeoE3 (The Geospatial Enabling Environments
+for Employment Spatial Tool)** is a powerful and user-friendly open-source
+spatial mapping tool that enables a comprehensive analysis of how various
+spatial factors influence employment and business opportunities in any
+geographic area of interest.
+
+By using this tool, you can identify key areas for intervention, make
+data-driven decisions, and ultimately work toward creating more equitable
+job opportunities for people across different regions.
+
+### What it is
+
+GeoE3 is the practical, in-QGIS implementation of the World Bank's GeoWEAF
 framework. It combines contextual, accessibility and place-characterization
 data — childcare, safety, transport, digital inclusion, environmental hazards
 and more — into a single enablement score for every cell of a study area.
