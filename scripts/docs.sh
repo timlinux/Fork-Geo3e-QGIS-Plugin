@@ -10,10 +10,18 @@ set -euo pipefail
 PID_FILE="${TMPDIR:-/tmp}/geoe3-mkdocs-serve.pid"
 LOG_FILE="${TMPDIR:-/tmp}/geoe3-mkdocs-serve.log"
 ADDR="${GEOE3_DOCS_ADDR:-127.0.0.1:8005}"
+NIX="nix --extra-experimental-features nix-command --extra-experimental-features flakes"
 
 require_mkdocs() {
   if ! command -v mkdocs >/dev/null 2>&1; then
     echo "mkdocs not found on PATH — run this from inside 'nix develop'." >&2
+    exit 1
+  fi
+}
+
+require_nix() {
+  if ! command -v nix >/dev/null 2>&1; then
+    echo "nix not found on PATH — run this from inside 'nix develop'." >&2
     exit 1
   fi
 }
@@ -66,13 +74,62 @@ cmd_build() {
   mkdocs build --strict
 }
 
+cmd_pdf() {
+  require_mkdocs
+  require_nix
+
+  # weasyprint (mkdocs-with-pdf's rendering engine) needs its cffi/pango/
+  # cairo bindings linked the way nixpkgs links them — a pip install
+  # breaks with dlopen errors. It's deliberately not a permanent devShell
+  # dependency (see mkdocs-pdf.yml's header comment), so fetch it here,
+  # on top of whatever's already on PYTHONPATH.
+  echo "Resolving weasyprint + brand fonts for PDF rendering..."
+  local weasyprint nunito jbm dejavu fcdir pyver
+  weasyprint="$($NIX build --no-link --print-out-paths nixpkgs#python3Packages.weasyprint)"
+  pyver="$(python3 -c 'import sys; print(f"python{sys.version_info[0]}.{sys.version_info[1]}")')"
+  export PYTHONPATH="$weasyprint/lib/$pyver/site-packages:${PYTHONPATH:-}"
+
+  # weasyprint also needs real font files visible to fontconfig — this
+  # sandbox/most nix machines have no system fontconfig at all, so
+  # everything would silently fall back to whatever's on disk. Build a
+  # throwaway fonts.conf pointing at the nix store, same approach as
+  # srs/build.sh uses for the SRS PDF.
+  nunito="$($NIX build --no-link --print-out-paths nixpkgs#nunito-fonts)"
+  jbm="$($NIX build --no-link --print-out-paths nixpkgs#jetbrains-mono)"
+  dejavu="$($NIX build --no-link --print-out-paths nixpkgs#dejavu_fonts)"
+  fcdir="$(mktemp -d)"
+  trap 'rm -rf "$fcdir"' EXIT
+  mkdir -p "$fcdir/fonts"
+  cp "$jbm"/share/fonts/truetype/JetBrainsMono-{Regular,Bold,Italic,BoldItalic}.ttf "$fcdir/fonts/"
+  {
+    echo '<?xml version="1.0"?>'
+    echo '<!DOCTYPE fontconfig SYSTEM "fonts.dtd">'
+    echo '<fontconfig>'
+    echo "  <dir>$fcdir/fonts</dir>"
+    echo "  <dir>$nunito/share/fonts</dir>"
+    echo "  <dir>$dejavu/share/fonts</dir>"
+    echo "  <cachedir>$fcdir/cache</cachedir>"
+    echo '</fontconfig>'
+  } >"$fcdir/fonts.conf"
+
+  # No --strict here: mkdocs-with-pdf's internal link checker piggybacks
+  # on that flag and misfires on glightbox's image-zoom anchors (see the
+  # comment at the top of mkdocs-pdf.yml). Real broken links are still
+  # caught by the plain `mkdocs build --strict` used by
+  # `scripts/docs.sh build` and CI.
+  echo "Building PDF documentation (this also builds a separate copy of the HTML site)..."
+  FONTCONFIG_FILE="$fcdir/fonts.conf" mkdocs build -f mkdocs-pdf.yml
+  echo "PDF: site/pdf/GeoE3-Documentation.pdf"
+}
+
 case "${1:-}" in
   serve) cmd_serve ;;
   stop) cmd_stop ;;
   status) cmd_status ;;
   build) cmd_build ;;
+  pdf) cmd_pdf ;;
   *)
-    echo "Usage: $0 {serve|stop|status|build}" >&2
+    echo "Usage: $0 {serve|stop|status|build|pdf}" >&2
     exit 1
     ;;
 esac

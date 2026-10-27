@@ -8,7 +8,7 @@
 
 <p align="justify">
 The Contextual Dimension refers to the laws and policies that shape workplace gender discrimination, financial autonomy, and overall gender empowerment. Although this dimension may vary between countries due to differences in legal frameworks, it remains consistent within a single country, as national policies and regulations are typically applied uniformly across countries.  For more information on data input used from open sources, please refer to the
-    <a href="datacollection.md#tutorial-manual-national-index-score-entry">Getting Data tutorial</a>.
+    <a href="../datacollection/#tutorial-manual-national-index-score-entry">Getting Data tutorial</a>.
 </p>
 
 Every Contextual factor works the same way: you research a published

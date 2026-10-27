@@ -782,7 +782,7 @@ If you see the following error message, please check if you're CRS has been set 
 
 **If the "Plugin Reloader" does not resolve the error close QGIS, restart it again, and re-run the process you were trying to execute.**
 
-# List of CRSs for SIDS
+## List of CRSs for SIDS
 
 | **Country** | **WGS84 / UTM CRS** | **EPSG** |
 | --- | --- | --- |
@@ -818,5 +818,5 @@ If you see the following error message, please check if you're CRS has been set 
 | Tuvalu | WGS 84 / UTM zone 60S | 32760 |
 | Vanuatu | WGS 84 / UTM zone 59S | 32759 |
 
-# License
+## License
 This project is licensed under the MIT License - see the [LICENSE](https://github.com/worldbank/GeoE3/blob/main/LICENSE.md) file for details

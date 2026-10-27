@@ -11,18 +11,31 @@ The final aggregation of all three dimensions is carried out by applying weights
 </p>
 
 Once every dimension has been processed (see the three previous pages),
-the GeoE3 Score node combines them into a single result:
+we can see a new layer added at the analysis node for the GeoE3 score.
+Looking at the data, it's in a Likert scale: red cells are very low
+economic enablement, orange is low, yellow is intermediate, green is
+enabling, and blue is very enabling.
 
 <figure markdown>
 ![The final GeoE3 Score map, with its 5-class enablement legend and a fully completed model tree](../images/training/geoe3-score-map-legend.jpg)
 <figcaption>Every item in the tree shows a green checkmark once its workflow has run — the GeoE3 Score itself is the weighted combination of all three dimensions, on the same 0–5 scale as everything underneath it.</figcaption>
 </figure>
 
-You can click on any item in the tree — not just the final score — to see
-its individual result on the map, and expand its legend to see the
-colour scheme: red for very low enablement through to blue for highly
-enabling. Click any layer to open an info panel at the bottom describing
-what it measures and the methodology used to calculate it.
+We're able to go and explore all of the individual results as well — you
+can click on any layer and you'll see a description of it at the bottom,
+in the info panel (you can shrink this panel and resize it back again),
+including the methodology that was used to calculate it. For example,
+Workplace Discrimination uses a single factor applied equally to all
+cells throughout the region.
+
+You can go through and explore the different results generated at the
+dimension level, then the factor level, and down at the indicator level —
+remembering that the combination of indicators is combined into the
+factor. If you double-click on a factor, you can see in a table the
+weightings used to say what the relative importance of each was in the
+total assessment, and factor weightings are in turn combined into
+dimension scores, which you can see and change the same way (weighting
+0 to 1; press **Balance Weights** after changing one).
 
 ### Computing the GeoE3 Score
 ---
@@ -58,22 +71,30 @@ GeoE3 can be visualized in relation to male/female population distribution by pr
 </p>
 
 All of these optional steps live in the same dialog as the dimension
-weights:
+weights — double-click the GeoE3 Score node to open it, and there are
+extra options beyond the weightings for the three dimensions. Let's go
+through those one by one:
 
 <figure markdown>
 ![The GeoE3 Score edit weightings dialog: dimension weights, aggregation boundaries, population and job-distribution/mask options](../images/training/geoe3-score-weightings-dialog.jpg)
 <figcaption>Dimension weights, aggregation boundaries, the GeoE3 by Population demographics source, and the GeoE3 by Job Distribution mask options, all in one dialog.</figcaption>
 </figure>
 
-For population, you don't have to source your own dataset: click
-**Download from S2S** to fetch a Space2Stats demographics layer directly,
-or point it at your own raster — for example a file from
-[WorldPop](datacollection.md#tutorial-population-data-from-worldpop) if
-you need a specific year or a breakdown by age and sex. For the mask,
-**Use Global Human Settlements Layer** is the quickest way to restrict
-results to populated areas — GeoE3 fetches it automatically — or supply
-your own buffer points, polygon or raster mask if you're targeting a
-specific intervention area rather than "wherever people live."
+First there's **aggregation boundaries** — set this to, for example,
+Admin 1, and that means you can then break the results down further by
+subnational units. Then there's the option to set a **demographics
+layer**: click **Download from S2S** and it will fetch it for you, or you
+can provide your own population dataset — one common place to get that
+is [WorldPop](datacollection.md#tutorial-population-data-from-worldpop),
+which provides free open population data if you need a specific year or
+a breakdown by age and sex.
+
+You can also choose a **mask**. If you're trying to pilot economic
+upliftment in specific areas, you could use the mask layer to filter out
+all the cells outside that area. One way to do that is using the Global
+Human Settlements layer, which masks everything to just where it's
+highly settled — but you can also use your own raster, points buffered
+by a certain distance, or a polygon layer.
 
 #### 1. Aggregation Boundaries (Optional)
 
@@ -137,21 +158,21 @@ If the results do not immediately appear in the Layer Panel after processing the
 </p>
 
 When population and a subnational boundary layer are both configured,
-**Add GeoE3 Aggregates to Map** shows the predominant class per region,
-labelled with its full name rather than just a number:
+**Add GeoE3 Aggregates to Map** breaks the enablement scores down by
+subnational district — and in this case we have not five categories but
+15, because each area has a bivariate legend combining population and
+enablement. Dark red is low enablement and low population; light red is
+low enablement but high population; the best would be bright blue, high
+enablement with high population.
 
 <figure markdown>
 ![Subnational districts coloured by the 15-class enablement × population legend](../images/training/geoe3-bivariate-legend-map.jpg)
 <figcaption>Each subnational region shaded by its majority class — combining 5 enablement levels with 3 population tiers (low/medium/high) gives the 15 categories in the legend.</figcaption>
 </figure>
 
-!!! tip "Advanced: the subnational score matrix"
-    There's one more option worth knowing about, hidden in **Settings →
-    Options → GeoE3** rather than this dialog: **Subnational score
-    matrix**. It's off by default; switching it on adds an extra table to
-    your [analysis report](report.md) showing every subnational region's
-    score against every factor at once — useful for spotting which
-    specific factor is dragging a particular region down.
+There's one more advanced option worth knowing about — the subnational
+score matrix — covered in [The Analysis Report & Raw Data](report.md)
+along with the rest of what's in the PDF report.
 
 **🖥️ Key attributes of GeoE3 Score tab**
 

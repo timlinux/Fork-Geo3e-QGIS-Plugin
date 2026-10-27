@@ -23,82 +23,101 @@ to whichever source you need.
 
 ## Tutorial: automatic downloads built into GeoE3
 
-Several sources need no manual downloading at all:
+There's another way to get data besides going and fetching it yourself:
+you can also use the built-in downloader tool, which is based on
+[QuickOSM](https://docs.3liz.org/QuickOSM/) logic. Click the **Download
+from OSM** button inside an indicator's dialog, and it will do a query
+from OpenStreetMap and fetch down the specific data that indicator
+needs — childcare facilities, for example, if that's the one you're
+configuring.
 
-- **OpenStreetMap, via the built-in downloader.** Most indicator
-  configuration dialogs have a **Download from OSM** button. It runs a
-  [QuickOSM](https://docs.3liz.org/QuickOSM/)-style query against the
-  OpenStreetMap Overpass API for exactly the feature type that indicator
-  needs — childcare facilities, pharmacies, banks and so on — scoped to
-  your study area.
+<figure markdown>
+![Download from OSM button inside an indicator's configuration dialog](../images/training/indicator-osm-download.jpg)
+<figcaption>The <strong>OSM Download</strong> button inside an indicator dialog — here, Women's Travel Patterns.</figcaption>
+</figure>
 
-    <figure markdown>
-    ![Download from OSM button inside an indicator's configuration dialog](../images/training/indicator-osm-download.jpg)
-    <figcaption>The <strong>OSM Download</strong> button inside an indicator dialog — here, Women's Travel Patterns.</figcaption>
-    </figure>
+!!! note
+    Quite often the servers are busy and it might fail — I suggest you
+    just keep trying every few minutes until it works for you.
 
-    !!! note
-        The public Overpass servers get busy and will sometimes fail or
-        hang. If a download doesn't complete after a minute or two, just
-        try again — it usually goes through within a few attempts.
+One of the nice things about setting up a project is that if you're doing
+a **regional**-scale one, you can also prefetch a bunch of data for your
+analysis. Tick the box in the setup wizard and click Next, and it's going
+to go and download a bunch of indicators — a bunch of reference datasets,
+Space2Stats, that we can use for the analysis.
 
-- **Space2Stats**, a set of regional reference datasets hosted by the
-  World Bank (environmental hazards, nighttime lights, demographics and
-  more). If you're running a **regional**-scale analysis, the project
-  setup wizard offers to prefetch all of it in one step:
+<figure markdown>
+![The GeoE3 Space2Stats prefetch step in the project setup wizard](../images/training/space2stats-prefetch-step.jpg)
+<figcaption>Tick "Fetch S2S data" during project setup and GeoE3 downloads everything it needs for every Space2Stats-backed indicator.</figcaption>
+</figure>
 
-    <figure markdown>
-    ![The GeoE3 Space2Stats prefetch step in the project setup wizard](../images/training/space2stats-prefetch-step.jpg)
-    <figcaption>Tick "Fetch S2S data" during project setup and GeoE3 downloads everything it needs for every Space2Stats-backed indicator.</figcaption>
-    </figure>
+GHSL (Global Human Settlement Layer) settlement/population classification
+and Ookla open broadband/mobile coverage also get fetched automatically
+in the background the first time a workflow needs them — there's nothing
+to click for those.
 
-    This is the single biggest time-saver for a regional-scale project —
-    it replaces most of the manual sourcing described below.
-
-- **GHSL** (Global Human Settlement Layer) settlement/population
-  classification and **Ookla** open broadband/mobile coverage tiles both
-  download automatically in the background the first time a workflow
-  needs them — there's nothing to click.
+This whole process is about collecting data, and there are a bunch of
+different sources you can fetch it from: there's the Space2Stats program,
+which is World Bank hosted data; there's OpenStreetMap — which basically
+you wouldn't get straight from OpenStreetMap, you'd get it from a service
+like the Geofabrik service below, or using the QuickOSM downloader tool,
+or using the button inside of the indicator, which also basically uses
+QuickOSM underneath the hood; or you might get it from your national
+dataset, from whatever your country's official data sources provide.
 
 ## Tutorial: OpenStreetMap extracts from Geofabrik
 
-For national or local-scale projects — where Space2Stats' regional
-prefetch doesn't apply — the easiest way to get a complete, current OSM
-extract for your whole country is [Geofabrik](https://www.geofabrik.de/).
+For a national or local-scale project — where Space2Stats' regional
+prefetch doesn't apply — to get busy with actually using the plugin, we
+need to get some data. What I recommend is to head over to
+[Geofabrik](https://www.geofabrik.de/) to start off. Geofabrik is an
+amazing website where they provide extracts from OpenStreetMap for free,
+and you can just go and download any data you want.
 
 <figure markdown>
 ![The Geofabrik download server page](../images/training/geofabrik-download-server.jpg)
 <figcaption>Geofabrik's download server — free OSM extracts, updated daily, organised by continent then country.</figcaption>
 </figure>
 
-1. Go to [download.geofabrik.de](https://download.geofabrik.de/) and drill
-   down: continent → country (→ sub-region, for larger countries).
-2. Download the **`.gpkg.zip`** (GeoPackage) if it's offered — one file
-   with every OSM layer in it, much tidier than the equivalent shapefile
-   set.
-3. Extract it, add it to QGIS, and right-click the folder in the
-   **Browser** panel → **Add as a Favorite** so it's one click to get back
-   to.
+Go to the Geofabrik homepage, then **Data**, then **Downloads**. Click the
+link at the top and it's split up by regions, so you just start drilling
+down to your region — continent, then country (and sometimes there are
+sub-regions too, for larger countries). You can download it in different
+ways: individual files, or one big file which has got kind of everything
+in it — grab the latest free `.gpkg.zip` (GeoPackage) if it's offered.
+Once it's downloaded, extract it, add it to QGIS, and right-click the
+folder in the **Browser** panel → **Add as a Favorite**, which will make
+it easy to work with the data in that folder going forward.
 
-GeoPackage extracts occasionally have a malformed admin-boundaries layer.
-If that happens to you, Geofabrik's shapefile download is a reliable
-fallback — or use GADM (below) for boundaries specifically.
+The geopackage is more convenient because you get everything in one
+single file — you don't have a lot of files all over your hard drive to
+keep track of. But if there's an error in the file, you can go to plan B,
+which is to download the shapefiles instead — or use GADM (below) for
+boundaries specifically.
 
 ## Tutorial: official administrative boundaries from GADM
 
-OpenStreetMap's administrative boundaries aren't always clean or
-complete — coastline handling in particular can be inconsistent. When you
-need an authoritative national or first-level administrative boundary,
-[GADM](https://gadm.org/) is a good fallback.
+Sometimes the admin boundary you get from OpenStreetMap or HDX still
+isn't quite what you want — it might include the coastal maritime area
+rather than the land boundary you need, or the highest level available
+might not be the one you're after. If you don't have what you want yet,
+the next option is to use [GADM](https://gadm.org/) boundaries.
+
+You could search just for "[your country] official boundary" and see if
+you can find it published by an official source — quite difficult to do,
+though if you're working in your own country, maybe you're already
+familiar with where to get the official data. I happen to know about
+GADM:
 
 <figure markdown>
 ![The GADM data download page](../images/training/gadm-data-page.jpg)
 <figcaption>GADM — pick your country, download a GeoPackage of its administrative boundaries at every level.</figcaption>
 </figure>
 
-Go to **Data → country**, choose your country, and download the
-GeoPackage. It will contain one layer per administrative level (`ADM_0`
-for the national boundary, `ADM_1` for the first subdivision, and so on).
+Here you can also download data by country — choose yours, and again, you
+can get a geopackage, which is always nicer. It contains one layer per
+administrative level (`ADM_0` for the national boundary, `ADM_1` for the
+first subdivision, and so on) — finally, what we need.
 
 !!! warning "Check the license before you redistribute anything"
     GADM data is free for **academic and non-commercial use**.
@@ -108,28 +127,29 @@ for the national boundary, `ADM_1` for the first subdivision, and so on).
 
 ## Tutorial: Humanitarian Data Exchange (HDX)
 
-[HDX](https://data.humdata.org/) is a UN OCHA-maintained catalogue of
-humanitarian and development datasets — health facilities, population,
-administrative boundaries and more, for most countries. GeoE3 does **not**
-query HDX automatically; this is a manual browse-and-download source, the
-same as Geofabrik or GADM.
+Another common source of data is the [Humanitarian Data
+Exchange](https://data.humdata.org/), HDX for short. GeoE3 does **not**
+query it automatically — this is a manual browse-and-download source, the
+same as Geofabrik or GADM. Punch in your country and you'll see a range
+of interesting-looking datasets: health, population, airports, railways,
+buildings, education. Some of these will be useful for you — but you want
+only the geospatial data, so filter on **geodata** to narrow it down.
 
-1. Search HDX for your country and the data type you need (for example,
-   *"health facilities Portugal"*), and tick the **geodata** filter to
-   hide non-spatial results.
+<figure markdown>
+![Searching HDX for a dataset](../images/new%20images/Humdata_search.jpg)
+<figcaption>Filtering an HDX search down to geospatial datasets only.</figcaption>
+</figure>
 
-    <figure markdown>
-    ![Searching HDX for a dataset](../images/new%20images/Humdata_search.jpg)
-    <figcaption>Filtering an HDX search down to geospatial datasets only.</figcaption>
-    </figure>
+For example, health facilities is going to be one of the things you're
+interested in for the Accessibility dimension — since it's there on HDX,
+grab it. (The source is still coming from HDX, though it looks like they
+get it from HOT OSM.) Open the dataset page, scroll to **Data and
+Resources**, and download the shapefile or GeoPackage.
 
-2. Open the dataset page, scroll to **Data and Resources**, and download
-   the shapefile (or GeoPackage, where offered).
-
-    <figure markdown>
-    ![Downloading a dataset from its HDX resource page](../images/new%20images/Humdata_download.jpg)
-    <figcaption>Downloading the point-data resource for a dataset.</figcaption>
-    </figure>
+<figure markdown>
+![Downloading a dataset from its HDX resource page](../images/new%20images/Humdata_download.jpg)
+<figcaption>Downloading the point-data resource for a dataset.</figcaption>
+</figure>
 
 HDX is a good first stop for health facilities and some administrative
 boundary sets, but coverage varies a lot by country — if it doesn't have
@@ -137,33 +157,43 @@ what you need, fall back to the in-app OSM downloader or Geofabrik.
 
 ## Tutorial: population data from WorldPop
 
-Adding a demographics layer lets GeoE3 combine enablement scores with
-population density (see [Exploring Your Results](insights.md)). If you
-ticked **Fetch S2S data** during project setup you likely already have a
-Space2Stats population layer and can skip this. If you need your own —
-for a different year, or broken down by age and sex —
-[WorldPop](https://hub.worldpop.org/) is an open population-data
-initiative that covers most countries.
+If you want to introduce population into your results (see [Exploring
+Your Results](insights.md)) and you already ticked **Fetch S2S data**
+during project setup, you likely already have a Space2Stats population
+layer and can skip this. If not, getting it is its own little side quest.
+
+There are various places to get population data. You can go to the
+Humanitarian Data Exchange — ideally looking for the group you're trying
+to foster enablement for (women's census population, say), though it's
+not always there as a clean geospatial layer. Failing that, go to
+[WorldPop](https://hub.worldpop.org/). WorldPop is an open data
+initiative for providing population data for around the world.
+
+Under national boundaries you can download the total population for a
+given year. But if you want more, you can also get the demographic
+breakdown — go to **Age and sex structures** and you can get individual
+countries from there.
 
 <figure markdown>
 ![WorldPop's age and sex structures dataset page for Portugal](../images/training/worldpop-age-sex-structures.jpg)
 <figcaption>WorldPop's per-country age/sex breakdowns — useful if you want to target a specific demographic, not just total population.</figcaption>
 </figure>
 
-Under **Data → Age and sex structures**, pick your country and download
-the GeoTIFF. The filename encodes exactly what's inside it — country
-code, gender, age band, year and resolution — so you can tell at a glance
-which file has, for example, working-age women.
+The filename encodes exactly what's inside it — country code, gender, age
+band, year and resolution — so you can tell at a glance which file has,
+for example, working-age women.
 
 ## Tutorial: manual national index-score entry
 
-The four Contextual-dimension factors — EPLEX Score, Workplace
-Discrimination, Regulatory Frameworks and Financial Inclusion — aren't
-spatial datasets at all. They're a single researched number, on a 0–100
-scale, applied uniformly across the whole country (the legal and
-regulatory environment doesn't vary within a border). You research the
-figure from a published index, then type it into the factor's
-configuration dialog.
+This class of indicators — the four Contextual-dimension factors, EPLEX
+Score, Workplace Discrimination, Regulatory Frameworks and Financial
+Inclusion — is calculated using a national score. It assigns one number
+to the whole dataset based on, for example, what the workplace
+discrimination environment is like. You need to do your research, find
+out for your country what level of enablement there is in the
+legislation, and if it's highly enabling, for example, you'd give it a 95
+or plus; if it's some order below that, you'd give it a rating as
+appropriate.
 
 The table below gives a worked Saint Lucia example and the general
 sources to use for any other country.

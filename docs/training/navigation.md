@@ -69,51 +69,55 @@ which is what the rest of this page covers.
 
 ## Creating a new project
 
-Creating a project is one wizard: pick a scale, point it at your
-boundary layer, and decide whether to include women-specific factors.
+Choose **Create a New Project**, then browse to the empty working folder
+you made earlier and use that as the project folder. Then you've got
+three choices to pick from to define the scale of your analysis:
+
+| Scale    | Typical use                      | Default grid size |
+|----------|-----------------------------------|--------------------|
+| Regional | Quick analysis, multi-country or continental study | ~30 km (hex grid) |
+| National | A single country                  | 1,000 m (1 km)     |
+| Local    | A city or small region             | 100 m              |
+
+In all three cases you can change the grid size if you want to, but the
+defaults are a reasonable place to start. Regional scale also unlocks the
+Space2Stats prefetch step covered in [Getting
+Data](datacollection.md#tutorial-automatic-downloads-built-into-geoe3).
 
 <figure markdown>
 ![The GeoE3 project creation wizard: scale, grid size, boundary layer and Women's Enabling Environments options](../images/training/project-wizard.jpg)
 <figcaption>Scale, grid size, boundary layer and the Women's Enabling Environments toggle, all in one step.</figcaption>
 </figure>
 
-**Scale of analysis** — pick whichever matches what you're studying:
-
-| Scale    | Typical use                      | Default grid size |
-|----------|-----------------------------------|--------------------|
-| Regional | Multi-country or continental study | ~30 km hex cells  |
-| National | A single country                  | 1000 m             |
-| Local    | A city or small region             | 100 m              |
-
-All three default grid sizes can be overridden — smaller cells give more
-detail but take longer to process. Regional scale also unlocks the
-Space2Stats prefetch step covered in [Getting
-Data](datacollection.md#tutorial-automatic-downloads-built-into-geoe3).
-
-**Boundary layer** — point this at your Admin0 (national boundary) layer
-and tell it which column holds the country/area name. If you're not sure
-your boundary data is clean, see the
+Then it asks for the boundary layer — point it at your Admin0 (national
+boundary) layer, and tell it which column has the country name. If your
+boundary layer doesn't look like the typical boundary you'd expect (it
+still extends out into the ocean, for example, or is missing the level
+you need), see the
 [GADM](datacollection.md#tutorial-official-administrative-boundaries-from-gadm)
 and
 [HDX](datacollection.md#tutorial-humanitarian-data-exchange-hdx)
-tutorials — OpenStreetMap's admin boundaries aren't always reliable,
-especially around coastlines.
+tutorials — OpenStreetMap's admin boundaries aren't always reliable.
 
-**Women's Enabling Environments** — leave this ticked to analyze through
-the lens of the Geospatial Women's Employment Analytical Framework
-(GeoWEAF), which is what the rest of this walkthrough demonstrates. GeoE3
-can equally run a generic economic-enablement analysis with this
-unticked; some women-specific factors (and the Contextual dimension's
-EPLEX scoring) are only available with it on.
+The last thing it asks is whether you want to do a Women's Enabling
+Environment study, or just a generic economic enabling-environment study.
+Leave **Women's Enabling Environments** ticked for the
+GeoWEAF-framework analysis this walkthrough demonstrates; untick it for
+the generic one, and you'll get a slightly different workflow — some
+women-specific factors get disabled, and the Contextual dimension needs
+an EPLEX score instead of individual factor analysis.
 
 ### What happens next: the study area grid
 
-Once you confirm, GeoE3 builds a grid across your whole study area and
-writes it into a GeoPackage, together with a set of **mask** layers — a
-mask is a raster that's `1` inside your study area and NoData everywhere
-outside it, used to clip every later result to the right shape. For a
-regional analysis this is an H3 hexagon grid; national and local scale
-use square grid cells.
+Once you confirm, it computes a grid across the study area and writes
+that into a GeoPackage file — you can see it in the study area. It
+creates various different products: the main thing is the GeoPackage,
+which contains a regular grid (for a regional analysis this is an H3
+grid, so hexagons covering the whole study area; national and local
+scale use square grid cells instead), and it also contains masks. A mask
+is a raster layer which covers the study area, excluding any pixels
+outside the area by giving them NoData, and including any areas inside
+the study area by giving them a value of one.
 
 <p align="center">
  <img
@@ -139,22 +143,21 @@ to process, and where the generated files live (your project folder's
 
 ### Setting up routing
 
-Several Accessibility indicators need to know travel time or distance
-along the real road network — for example, how far someone has to walk
-or drive to reach a clinic. GeoE3 offers two engines for this:
+The next thing it wants to do is set up the routing environment. For some
+analysis steps we use a routing analysis that allows us to understand,
+for example, what's the travel time for a woman to move from her home to
+a clinic (or what have you) using the road network. It's possible to use
+OpenRouteService for this, but you need an API key — or you can use the
+native QGIS routing (`native:serviceareafromlayer`), which is a bit
+slower but doesn't require any keys.
 
-- **QGIS's native routing** (`native:serviceareafromlayer`) — the
-  default. No API key, no setup, just slower on large areas.
-- **OpenRouteService (ORS)** — faster, but needs a free API key from
-  [openrouteservice.org](https://openrouteservice.org/). Paste the key
-  into the settings panel here, or set an `ORS_API_KEY` environment
-  variable.
-
-Either way, you need a road network. If you've already downloaded OSM
-data (see [Getting Data](datacollection.md)), point GeoE3 at the roads
-layer — GeoE3 will reproject it into the analysis CRS automatically if
-needed. If you don't have one yet, click **Download from OpenStreetMap**
-to fetch one directly.
+Either way, it wants to know if you've got a road network. If you've
+already downloaded OSM data (see [Getting Data](datacollection.md)), you
+probably don't want to use the railways — you want the roads layer. If
+it's in the wrong coordinate reference system, GeoE3 will reproject it
+into the correct one for you automatically. If you don't have a road
+dataset, you can also click the **Download from OpenStreetMap** button
+and it will fetch one for you from Geofabrik or OpenStreetMap directly.
 
 <p align="center">
  <img
@@ -173,9 +176,14 @@ to fetch one directly.
 
 ## Reading the model tree
 
-With the project created, you land on the **Processing Data Interface** —
-the model tree you'll spend most of your time in. It organizes every
-piece of the analysis into three levels:
+What you see now is the model tree for GeoE3, and basically it organises
+the different types of analysis outputs into three categories — we call
+these **dimensions**: the Contextual dimension, the Accessibility
+dimension, and the Place Characterization dimension. Those are further
+subdivided into **factors** — the second-level grouping — and each
+dimension may have one or more factors associated with it. What we need
+to do now, in order to actually run our analysis, is go through all these
+items and configure them.
 
 <figure markdown>
 ![The full GeoE3 model tree: 3 dimensions, 16 factors, 35 indicators](../images/training/model-tree.jpg)
