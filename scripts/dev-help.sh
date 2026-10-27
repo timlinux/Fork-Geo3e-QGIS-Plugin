@@ -60,6 +60,13 @@ cmd "" "shellcheck, cspell, nixfmt, yamllint, actionlint..."
 cmd "nix flake check" "Validate the flake itself"
 cmd "./scripts/run-codeql.sh" "CodeQL static analysis"
 
+section "📚  Documentation (mkdocs)"
+cmd "nix run .#docs-serve" "Start mkdocs serve in the background"
+cmd "nix run .#docs-stop" "Stop the background mkdocs serve"
+cmd "nix run .#docs-status" "Is mkdocs serve running, and where?"
+cmd "nix run .#docs-build" "mkdocs build --strict -> site/"
+cmd "scripts/docs.sh {serve|stop|status|build}" "Same, without nix run"
+
 section "🧹  Cleanup"
 cmd "./scripts/clean.sh" "Remove __pycache__, .venv, core dumps, logs, tmp files"
 
