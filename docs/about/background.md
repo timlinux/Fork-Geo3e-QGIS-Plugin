@@ -83,7 +83,7 @@ When the enablement scores are combined with data on the distribution of women o
   <img src="https://raw.githubusercontent.com/worldbank/GEOE3/main/docs/images/new%20images/3D%20Score%20map.png" alt="3D Score Map" width="600" style="display: block; margin-left: auto; margin-right: auto;" title="Click to view map">
 </a>
 
-> <p align="justify"><strong>Note</strong>: For detailed information and guidance on the data collected and utilized, please refer to the <a href="https://worldbank.github.io/GEOE3/docs/userguide/datacollection.html">Data Collection</a> section.</p>
+> <p align="justify"><strong>Note</strong>: For detailed information and guidance on the data collected and utilized, please refer to the <a href="../training/datacollection.md">Data Collection</a> section.</p>
 >
 ## 4. Gender Spatial Data Gap Assessment
 
