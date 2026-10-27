@@ -1,7 +1,14 @@
 ## Place Characterization
 
+!!! abstract "Learning objective"
+    By the end of this page you'll be able to configure all seven Place
+    Characterization factors, choose between the alternative data input
+    options several of them offer, and understand how two of them —
+    Education and Digital Inclusion — combine a national index score
+    with spatial masking or coverage layers rather than raw point data.
+
 <p align="justify">
-The Place Characterization Dimension refers to the social, environmental, and infrastructural attributes of geographical locations, such as walkability, safety, and vulnerability to natural hazards. Unlike the Accessibility Dimension, these factors do not involve mobility but focus on the inherent characteristics of a place that influence people’s ability to participate in the workforce. For more information on data input used from open sources, please refer to the <a href="../datacollection.md">Data Collection section</a>.
+The Place Characterization Dimension refers to the social, environmental, and infrastructural attributes of geographical locations, such as walkability, safety, and vulnerability to natural hazards. Unlike the Accessibility Dimension, these factors do not involve mobility but focus on the inherent characteristics of a place that influence people’s ability to participate in the workforce. For more information on data input used from open sources, please refer to the <a href="datacollection.md">Data Collection section</a>.
 </p>
 
 ### General Overview
@@ -11,7 +18,7 @@ Place Characterization factors refer to the following indicators:
 - **Active Transport:** identifies areas based on their capacity to support safe and efficient active transport — such as walking, cycling, and other non-motorized modes—by analyzing and categorizing the road network features downloaded during the project setup phase.
 - **Safety Perception:** defines areas perceived as safe based on specific data or, alternatively, on how brightly lit they are, assuming that brightly lit areas are safer than those with no lights.
 - **Fragility, conflict and violence (FCV):** assigns scores to by analyzing overlap with ACLED data with buffers representing various types of events.
-- **Education:** computes a raster that provides a standardized measure of the percentage of people who have attained higher education within the country or region of interest.The spatial representation of education attainment is confined to inhabited areas as classified by GHS-SMOD. The default classes to be excluded from GHS-MOD are 10 (Water grid cell) and 11 (Very low density rural grid cell)
+- **Education:** computes a raster that provides a standardized measure of the percentage of people who have attained higher education within the country or region of interest.The spatial representation of education attainment is confined to inhabited areas as classified by GHS-SMOD. The default classes to be excluded from GHS-SMOD are 10 (Water grid cell) and 11 (Very low density rural grid cell)
 - **Digital Inclusion:** assesses the availability and accessibility of digital infrastructure by computing a national index score.If local statistics are available, this is used in conjunction with Ookla coverage layers, which supports the spatial representation of the data. Each ookla polygon receives the DI score and it is further mapped to the raster cell. Raster cells that do not intersect ookla polygons receive a score of 0 (no access)
 - **Environmental Hazards:** characterizes areas based on their vulnerability to natural disasters.
 - **Water sanitation:** assesses the availability and accessibility of clean water and sanitation facilities.
@@ -502,3 +509,14 @@ If the results do not immediately appear in the Layer Panel after processing the
 - **Input Accuracy**: Ensure all input datasets are carefully entered/selected and correspond to the correct factors and/or subfactors. Incorrect data will impact the outputs and subsequent analysis.
 
 - **Weight Adjustment**: Assign weights thoughtfully to reflect the importance of each factor in the overall analysis. After making changes, always balance the weights to ensure they sum up correctly.
+
+!!! success "Recap"
+    - Place Characterization has seven factors; most take point, line or
+      polygon OSM-style data, but Education and Digital Inclusion are
+      driven by a national index score combined with a spatial mask or
+      coverage layer, closer in spirit to the Contextual factors.
+    - Several factors (Safety Perception, Active Transport, Water
+      sanitation) offer more than one input option — pick whichever
+      matches the data you actually have.
+    - Results combine into a single Place Characterization output on the
+      usual 0–5 enablement scale.

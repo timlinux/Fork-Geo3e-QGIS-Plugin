@@ -1,7 +1,14 @@
 ## Accessibility
 
+!!! abstract "Learning objective"
+    By the end of this page you'll be able to configure all five
+    Accessibility factors with point data for the facilities they
+    measure, choose an appropriate travel mode and distance thresholds,
+    and understand how service-area buffers turn proximity into a 0–5
+    score.
+
 <p align="justify">
-The Accessibility Dimension evaluates people's daily mobility by examining their access to essential services. Levels of enablement for work access in this dimension are determined by service areas, which represent the geographic zones that facilities like childcare, supermarkets, universities, banks, and clinics can serve based on proximity. The nearer these facilities are to where people live, the more supportive and enabling the environment becomes for their participation in the workforce. For more information on data input used from open sources, please refer to the <a href="../datacollection.md">Data Collection section</a>.
+The Accessibility Dimension evaluates people's daily mobility by examining their access to essential services. Levels of enablement for work access in this dimension are determined by service areas, which represent the geographic zones that facilities like childcare, supermarkets, universities, banks, and clinics can serve based on proximity. The nearer these facilities are to where people live, the more supportive and enabling the environment becomes for their participation in the workforce. For more information on data input used from open sources, please refer to the <a href="datacollection.md">Data Collection section</a>.
 </p>
 
 ### General Overview
@@ -553,3 +560,15 @@ If the results do not immediately appear in the Layer Panel after processing the
 - **Input Accuracy**: Ensure all input datasets are carefully entered/selected and correspond to the correct factors and/or subfactors. Incorrect data will impact the outputs and subsequent analysis.
 
 - **Weight Adjustment**: Assign weights thoughtfully to reflect the importance of each factor in the overall analysis. After making changes, always balance the weights to ensure they sum up correctly.
+
+!!! success "Recap"
+    - All five Accessibility factors need point data for the facility
+      they measure — grab it with the in-app **Download from OSM**
+      button, or see [Getting Data](datacollection.md) for alternatives.
+    - Pick one travel mode (walking or driving) and stick with it across
+      every factor for consistent, comparable results.
+    - Distance thresholds differ by factor and by national vs. local
+      scale — the defaults are evidence-based, but override them if your
+      local context calls for it.
+    - Results combine into a single Accessibility output on the usual
+      0–5 enablement scale.
