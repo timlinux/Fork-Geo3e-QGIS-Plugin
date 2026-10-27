@@ -1,8 +1,174 @@
-# Data Collection
+# Getting Data
 
-This page provides guidance on finding and collecting relevant data for the GEOE3 tool, using Saint Lucia as an example. The data sources, layers, indicators and the table structure shown here can serve as references when gathering data for other countries.
+!!! abstract "Learning objective"
+    By the end of this page you'll know every way GeoE3 gets its input
+    data — what downloads automatically, what you fetch yourself and
+    import, and what you research and type in by hand — so you can source
+    data confidently for any country, not just the Portugal example used
+    throughout this walkthrough.
 
-## Data Sources for Saint Lucia
+Every indicator in the GeoE3 model needs a dataset or a number behind it.
+There are three distinct ways that data gets into your project:
+
+1. **Automatic, in-app downloads** — GeoE3 fetches it for you, no browser
+   required.
+2. **Manual download and import** — you find a dataset on an external
+   website, download it, and load it into QGIS yourself.
+3. **Manual research and entry** — for national-level indicators (like
+   workplace discrimination law), you research a published score and type
+   a single number into the plugin.
+
+This page works through each one as a short, self-contained tutorial. Skip
+to whichever source you need.
+
+## Tutorial: automatic downloads built into GeoE3
+
+Several sources need no manual downloading at all:
+
+- **OpenStreetMap, via the built-in downloader.** Most indicator
+  configuration dialogs have a **Download from OSM** button. It runs a
+  [QuickOSM](https://docs.3liz.org/QuickOSM/)-style query against the
+  OpenStreetMap Overpass API for exactly the feature type that indicator
+  needs — childcare facilities, pharmacies, banks and so on — scoped to
+  your study area.
+
+    <figure markdown>
+    ![Download from OSM button inside an indicator's configuration dialog](../images/training/indicator-osm-download.jpg)
+    <figcaption>The <strong>OSM Download</strong> button inside an indicator dialog — here, Women's Travel Patterns.</figcaption>
+    </figure>
+
+    !!! note
+        The public Overpass servers get busy and will sometimes fail or
+        hang. If a download doesn't complete after a minute or two, just
+        try again — it usually goes through within a few attempts.
+
+- **Space2Stats**, a set of regional reference datasets hosted by the
+  World Bank (environmental hazards, nighttime lights, demographics and
+  more). If you're running a **regional**-scale analysis, the project
+  setup wizard offers to prefetch all of it in one step:
+
+    <figure markdown>
+    ![The GeoE3 Space2Stats prefetch step in the project setup wizard](../images/training/space2stats-prefetch-step.jpg)
+    <figcaption>Tick "Fetch S2S data" during project setup and GeoE3 downloads everything it needs for every Space2Stats-backed indicator.</figcaption>
+    </figure>
+
+    This is the single biggest time-saver for a regional-scale project —
+    it replaces most of the manual sourcing described below.
+
+- **GHSL** (Global Human Settlement Layer) settlement/population
+  classification and **Ookla** open broadband/mobile coverage tiles both
+  download automatically in the background the first time a workflow
+  needs them — there's nothing to click.
+
+## Tutorial: OpenStreetMap extracts from Geofabrik
+
+For national or local-scale projects — where Space2Stats' regional
+prefetch doesn't apply — the easiest way to get a complete, current OSM
+extract for your whole country is [Geofabrik](https://www.geofabrik.de/).
+
+<figure markdown>
+![The Geofabrik download server page](../images/training/geofabrik-download-server.jpg)
+<figcaption>Geofabrik's download server — free OSM extracts, updated daily, organised by continent then country.</figcaption>
+</figure>
+
+1. Go to [download.geofabrik.de](https://download.geofabrik.de/) and drill
+   down: continent → country (→ sub-region, for larger countries).
+2. Download the **`.gpkg.zip`** (GeoPackage) if it's offered — one file
+   with every OSM layer in it, much tidier than the equivalent shapefile
+   set.
+3. Extract it, add it to QGIS, and right-click the folder in the
+   **Browser** panel → **Add as a Favorite** so it's one click to get back
+   to.
+
+GeoPackage extracts occasionally have a malformed admin-boundaries layer.
+If that happens to you, Geofabrik's shapefile download is a reliable
+fallback — or use GADM (below) for boundaries specifically.
+
+## Tutorial: official administrative boundaries from GADM
+
+OpenStreetMap's administrative boundaries aren't always clean or
+complete — coastline handling in particular can be inconsistent. When you
+need an authoritative national or first-level administrative boundary,
+[GADM](https://gadm.org/) is a good fallback.
+
+<figure markdown>
+![The GADM data download page](../images/training/gadm-data-page.jpg)
+<figcaption>GADM — pick your country, download a GeoPackage of its administrative boundaries at every level.</figcaption>
+</figure>
+
+Go to **Data → country**, choose your country, and download the
+GeoPackage. It will contain one layer per administrative level (`ADM_0`
+for the national boundary, `ADM_1` for the first subdivision, and so on).
+
+!!! warning "Check the license before you redistribute anything"
+    GADM data is free for **academic and non-commercial use**.
+    Redistribution or commercial use needs permission from GADM first —
+    see their [license page](https://gadm.org/license.html) before you
+    publish an analysis built on it.
+
+## Tutorial: Humanitarian Data Exchange (HDX)
+
+[HDX](https://data.humdata.org/) is a UN OCHA-maintained catalogue of
+humanitarian and development datasets — health facilities, population,
+administrative boundaries and more, for most countries. GeoE3 does **not**
+query HDX automatically; this is a manual browse-and-download source, the
+same as Geofabrik or GADM.
+
+1. Search HDX for your country and the data type you need (for example,
+   *"health facilities Portugal"*), and tick the **geodata** filter to
+   hide non-spatial results.
+
+    <figure markdown>
+    ![Searching HDX for a dataset](../images/new%20images/Humdata_search.jpg)
+    <figcaption>Filtering an HDX search down to geospatial datasets only.</figcaption>
+    </figure>
+
+2. Open the dataset page, scroll to **Data and Resources**, and download
+   the shapefile (or GeoPackage, where offered).
+
+    <figure markdown>
+    ![Downloading a dataset from its HDX resource page](../images/new%20images/Humdata_download.jpg)
+    <figcaption>Downloading the point-data resource for a dataset.</figcaption>
+    </figure>
+
+HDX is a good first stop for health facilities and some administrative
+boundary sets, but coverage varies a lot by country — if it doesn't have
+what you need, fall back to the in-app OSM downloader or Geofabrik.
+
+## Tutorial: population data from WorldPop
+
+Adding a demographics layer lets GeoE3 combine enablement scores with
+population density (see [Exploring Your Results](insights.md)). If you
+ticked **Fetch S2S data** during project setup you likely already have a
+Space2Stats population layer and can skip this. If you need your own —
+for a different year, or broken down by age and sex —
+[WorldPop](https://hub.worldpop.org/) is an open population-data
+initiative that covers most countries.
+
+<figure markdown>
+![WorldPop's age and sex structures dataset page for Portugal](../images/training/worldpop-age-sex-structures.jpg)
+<figcaption>WorldPop's per-country age/sex breakdowns — useful if you want to target a specific demographic, not just total population.</figcaption>
+</figure>
+
+Under **Data → Age and sex structures**, pick your country and download
+the GeoTIFF. The filename encodes exactly what's inside it — country
+code, gender, age band, year and resolution — so you can tell at a glance
+which file has, for example, working-age women.
+
+## Tutorial: manual national index-score entry
+
+The four Contextual-dimension factors — EPLEX Score, Workplace
+Discrimination, Regulatory Frameworks and Financial Inclusion — aren't
+spatial datasets at all. They're a single researched number, on a 0–100
+scale, applied uniformly across the whole country (the legal and
+regulatory environment doesn't vary within a border). You research the
+figure from a published index, then type it into the factor's
+configuration dialog.
+
+The table below gives a worked Saint Lucia example and the general
+sources to use for any other country.
+
+## Data sources used for the Saint Lucia example
 
 <table style="border-collapse: collapse; width: 100%; font-size: small;">
   <tr>
@@ -187,7 +353,7 @@ This page provides guidance on finding and collecting relevant data for the GEOE
 </tr>
 
   <tr>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">🛡️Safety</td>
+    <td style="border: 1px solid black; padding: 1px; text-align: left; ">🛡️Safety Perception</td>
     <td style="border: 1px solid black; padding: 1px; text-align: left; ">Street lights/Nighttime lights</td>
 <td style="border: 1px solid black; padding: 1px; text-align: left;">
     <a href="https://www.mapillary.com/developer/api-documentation/points" target="_blank">
@@ -252,120 +418,51 @@ This page provides guidance on finding and collecting relevant data for the GEOE
 </tr>
 </table>
 
-## Potential Data Sources for Other Countries
+### General sources for other countries
 
-<p style="text-align: justify;">
-While the above table showcases data specific to Saint Lucia, similar data can be found for other countries through the following sources:
+While the table above is specific to Saint Lucia, the same kinds of
+sources exist for most countries:
 
-1. <strong>World Bank - Women, Business and the Law</strong>: Offers indices on workplace discrimination, regulatory frameworks, financial inclusion, and more, helping to track progress on women’s economic empowerment across countries.
+1. **World Bank — Women, Business and the Law (WBL)**: indices on
+   workplace discrimination, regulatory frameworks and financial
+   inclusion.
+2. **ILO EPLEX**: employment protection legislation index.
+3. **UNDP**: gender equality, economic participation and sustainable
+   development metrics.
+4. **National statistics offices**: gender-disaggregated data for
+   contextual and accessibility indicators.
+5. **OpenStreetMap**: locations of facilities for accessibility and
+   active-transport indicators (via the in-app downloader, Geofabrik, or
+   [overpass-turbo.eu](https://overpass-turbo.eu/) directly).
+6. **Humanitarian Data Exchange (HDX)**: schools, health facilities and
+   other infrastructure.
+7. **World Bank environmental hazards catalogue**: fire, flood,
+   landslide, cyclone and drought layers.
+8. **Mapillary**: crowdsourced street-level imagery, useful for street
+   crossings, sidewalks and public lighting where OSM coverage is thin.
+9. **VIIRS Nighttime Lights (NTL)**: a proxy for safety perception where
+   no dedicated safety-perception dataset exists.
 
-2. <strong>United Nations Development Programme (UNDP)</strong>: Provides metrics on gender equality, economic participation, and sustainable development, essential for evaluating contextual and place-based factors.
+### Data attribution
 
-3. <strong>National Statistics Offices</strong>: Many countries publish gender-disaggregated data, which is crucial for contextual and accessibility insights in specific regions.
+GeoE3 pulls from whichever external datasets and services your workflow
+and inputs actually use — typically some combination of OpenStreetMap,
+OpenRouteService, GHSL (European Commission JRC), Ookla Open Data,
+Space2Stats, ACLED and VIIRS Nighttime Lights. When you publish or share
+an analysis, check and include the attribution, citation text and
+license/terms for whichever of these you actually used — they're not all
+the same license.
 
-4. <strong>International Labour Organization (ILO)</strong>: Collects data on labor force participation, wage disparities, and workplace regulations by country, supporting the analysis of gender gaps and regulatory environments.
-
-5. <strong>OpenStreetMap (OSM)</strong>: A valuable open-source platform providing geospatial data, including the locations of educational, healthcare, and financial facilities, as well as transport and green spaces. OSM data can help assess accessibility and environmental factors at a local level.
-
-6. <strong>Humanitarian Data Exchange (Humdata)</strong>: Maintained by the United Nations Office for the Coordination of Humanitarian Affairs (OCHA), Humdata offers open datasets on schools, health facilities, and other infrastructure, aiding in the geospatial analysis of services critical for accessibility assessments.
-
-7. <strong>Global Natural Hazards Data</strong>: Provides data on environmental hazards, including earthquakes, floods, cyclones, landslides, fires and others across regions. This data is essential for assessing natural risks and planning in vulnerable areas.
-
-8. <strong>Mapillary</strong>: A collaborative platform that offers street-level imagery contributed by users worldwide. Mapillary data includes vector data on street crossings, sidewalks, and public lighting, making it useful for place-based and accessibility assessments.
-</p>
-
-## Data Attribution and Citation
-
-GeoE3 may use external datasets and services depending on the selected workflows and user-provided inputs. Typical sources include OpenStreetMap, OpenRouteService, GHSL (European Commission JRC), Ookla Open Data, Space2Stats, ACLED, and VIIRS Nighttime Lights.
-
-When sharing outputs, always verify and include the relevant provider attribution, citation text, and license/terms for the datasets actually used in your analysis.
-
-
-### Instructions for Data Collection:
-- **Query the Source**: Use the query instructions provided in the table to filter and collect specific data.
-- **Check Availability for Each Country**: Not all indicators may be available for every country; adapt based on what is accessible.
-- **Document Sources and Methods**: Record each source, method, and any specific details relevant to your data collection process.
-
-#### Contextual factors
-
-To access the data for inputting into the tool, visit the provided <a href="https://wbl.worldbank.org/en/wbl" target="_blank">World Bank WBL</a> page and follow the next steps:
-
-> - Select a region from the dropdown list:
-
-<p align="center">
-<img
-    src="https://raw.githubusercontent.com/worldbank/GEOE3/main/docs/images/new%20images/WBL.jpg"
-    alt="WBL"
-    style="width:45%;"
-    title="Click to enlarge"
-    onclick="window.open(this.src, '_blank')">
-</p>
-
-> - After selecting the country, the new webpage that opens provides the necessary information for input into the plugin. The data includes:
->   - WBL Index Score for the Workplace Discrimination factor.
->   - Pay and Parenthood scores for the Regulatory Frameworks factor.
->   - Entrepreneurship score for the Financial Inclusion factor.
-
-<p align="center">
-<img
-    src="https://raw.githubusercontent.com/worldbank/GEOE3/main/docs/images/new%20images/WBL_data.jpg"
-    alt="WBL"
-    style="width:45%;"
-    title="Click to enlarge"
-    onclick="window.open(this.src, '_blank')">
-</p>
-
-#### Accessibility and Place Characterization factors
----
-**1. Using Humdata source**
-
-> - Visit the <a href="https://data.humdata.org/dataset" target="_blank">Humdata</a> webpage and search for the required factor to retrieve the necessary data for the tool as in the following example:
-> - Search for "health facilities for Saint Lucia" in the search bar and click on the most relevant link to access the dataset:
-
-<p align="center">
-<img
-    src="https://raw.githubusercontent.com/worldbank/GEOE3/main/docs/images/new%20images/Humdata_search.jpg"
-    alt="Humdata"
-    style="width:45%;"
-    title="Click to enlarge"
-    onclick="window.open(this.src, '_blank')">
-</p>
-
-> - In the newly opened webpage, scroll down until you reach the **Data and Resources** section and locate the dataset corresponding to shapefile point data and click on the Download button next to it:
-
-<p align="center">
-<img
-    src="https://raw.githubusercontent.com/worldbank/GEOE3/main/docs/images/new%20images/Humdata_download.jpg"
-    alt="Humdata download"
-    style="width:45%;"
-    title="Click to enlarge"
-    onclick="window.open(this.src, '_blank')">
-</p>
-
-**2. Using OSM source**
-
-> - Click on the links in the table provided above as in the following example (pharmacies):
-
-<p align="center">
-<img
-    src="https://raw.githubusercontent.com/worldbank/GEOE3/main/docs/images/new%20images/OSM_link.jpg"
-    alt="OSM link"
-    style="width:45%;"
-    title="Click to enlarge"
-    onclick="window.open(this.src, '_blank')">
-</p>
-
-> - In the newly opened webpage, change the country selection to match your region.
-> - Click on the **Run** button to load the available datasets, which will be displayed within the right map extent.
-> - Click on the **Export** button.
-> - In the new pop-up, under the **Data** section, click on the **download** button next to the **GeoJSON** format and save the dataset locally to your machine.
-> - Open QGIS, add the downloaded data and export it as a shapefile format for further processing.
-
-<p align="center">
-<img
-    src="https://raw.githubusercontent.com/worldbank/GEOE3/main/docs/images/new%20images/OSM_query.jpg"
-    alt="OSM query"
-    style="width:45%;"
-    title="Click to enlarge"
-    onclick="window.open(this.src, '_blank')">
-</p>
+!!! success "Recap"
+    - GeoE3 gets data three ways: automatic in-app download (OSM,
+      Space2Stats, GHSL, Ookla), manual download-and-import (Geofabrik,
+      GADM, HDX, WorldPop), and manual research-and-entry (the four
+      Contextual factors).
+    - For a regional-scale project, ticking **Fetch S2S data** during
+      project setup covers most of your data needs in one step.
+    - For national or local-scale projects, you'll do more manual
+      sourcing — Geofabrik for OSM extracts, GADM for clean admin
+      boundaries, HDX and WorldPop for everything else.
+    - Check data licenses before you redistribute results — GADM in
+      particular restricts commercial/redistribution use without
+      permission.
