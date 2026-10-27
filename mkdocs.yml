@@ -20,6 +20,24 @@ edit_uri: edit/new_docs/docs/
 docs_dir: docs
 site_dir: site
 
+# Internal/dev-facing files that live under docs/ for convenience but
+# aren't part of the published site: investigation notes, a one-off
+# conversion log, the separate conference-presentations subsystem (its
+# own README/PRESENTER-NOTES, built independently), and the raw
+# docx-export this project's content was originally drafted from (now
+# superseded by about/legacy-detailed-reference.md and
+# about/CODE_OF_CONDUCT.md — the customized one lives at the repo root).
+exclude_docs: |
+  CODE_OF_CONDUCT.md
+  Gender_Enabling_Environments_Spatial_Tool_v1.md
+  Gender Enabling Environments Spatial Tool_v1.pdf
+  ICON_EXTRACTION_SUMMARY.md
+  active_transport_workflow.md
+  active_transport_workflow.html
+  workflow_analysis.md
+  gpkg-corruption-causal-analysis.md
+  presentations/
+
 theme:
   name: material
   logo: images/logo.png
