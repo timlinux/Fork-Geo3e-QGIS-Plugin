@@ -446,6 +446,20 @@ body,
     }
 }
 
+/* mkdocs-with-pdf's own bundled stylesheet hardcodes red heading rules
+   (article h1 { border-bottom: 2px solid #f00 }, h2 #f99) — loaded after
+   ours, so it wins on equal specificity without !important here. Brand
+   blue, not red. */
+@media print {
+    article h1,
+    #doc-cover h1 {
+        border-bottom: 2px solid var(--brand-blue) !important;
+    }
+    article h2 {
+        border-bottom: 1px solid var(--rule-line) !important;
+    }
+}
+
 /* This weasyprint build's CSS Grid `minmax()` support crashes on
    mkdocs-material's own `.grid` rule (repeat(auto-fit, minmax(...))) —
    fall back to flexbox for print only; screen users never see this. */

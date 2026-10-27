@@ -105,7 +105,12 @@ cmd_pdf() {
   jbm="$($NIX build --no-link --print-out-paths nixpkgs#jetbrains-mono)"
   dejavu="$($NIX build --no-link --print-out-paths nixpkgs#dejavu_fonts)"
   fcdir="$(mktemp -d)"
-  trap 'rm -rf "$fcdir"' EXIT
+  # Double-quoted so $fcdir expands now, to a literal path baked into
+  # the trap command — not deferred to fire-time, when this function's
+  # `local fcdir` has already gone out of scope (with `set -u`, that's
+  # an "unbound variable" error instead of a harmless no-op cleanup).
+  # shellcheck disable=SC2064
+  trap "rm -rf '$fcdir'" EXIT
   mkdir -p "$fcdir/fonts"
   cp "$jbm"/share/fonts/truetype/JetBrainsMono-{Regular,Bold,Italic,BoldItalic}.ttf "$fcdir/fonts/"
   {
