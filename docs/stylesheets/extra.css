@@ -433,6 +433,19 @@ body,
     margin: 2.4cm 1.8cm 2.6cm 1.8cm;
 }
 
+/* PDF rendering uses Lato, not the site's own Nunito (see scripts/docs.sh
+   pdf) — there's no standalone `nunito-fonts` package in nixpkgs. Without
+   this override the --font-sans chain's first face would be unavailable
+   and everything would silently fall back past Lato to DejaVu Sans. */
+@media print {
+    body,
+    .md-typeset,
+    .md-typeset .kz-eyebrow,
+    #doc-cover {
+        font-family: "Lato", "Helvetica Neue", Arial, sans-serif;
+    }
+}
+
 /* This weasyprint build's CSS Grid `minmax()` support crashes on
    mkdocs-material's own `.grid` rule (repeat(auto-fit, minmax(...))) —
    fall back to flexbox for print only; screen users never see this. */
