@@ -1,10 +1,16 @@
 # Training Walkthrough
 
-This section is a complete, hands-on walkthrough of GeoE3 — from opening the
-plugin for the first time through to reading the final enablement scores. It
-follows the same path a new analyst takes when running a real study,
-illustrated with screenshots captured step by step.
+This walkthrough is presented by Tim, lead developer of the GeoE3
+plugin, built under contract to the World Bank.
 
+GeoE3 is a tool to help identify areas where we can improve employment
+and economic outcomes — specifically for women, but it can also be used
+generically to look at the local population of a country and understand
+which areas need intervention to improve people's economic outcomes.
+
+This section walks you through from absolute beginning, starting from
+zero through to having a complete project set up and running for your
+country of choice, illustrated with screenshots captured step by step.
 Work through it top to bottom the first time; after that, use it as a
 reference for whichever dimension you're configuring.
 

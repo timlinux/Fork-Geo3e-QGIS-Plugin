@@ -421,3 +421,98 @@ body,
     background: transparent !important;
     color: var(--text-default);
 }
+
+/* -----------------------------------------------------------------------
+   PDF export (mkdocs-with-pdf / weasyprint). #doc-cover only exists in
+   the combined PDF document weasyprint renders — these rules are inert
+   on the live site.
+   ----------------------------------------------------------------------- */
+
+@page {
+    size: A4;
+    margin: 2.4cm 1.8cm 2.6cm 1.8cm;
+}
+
+/* This weasyprint build's CSS Grid `minmax()` support crashes on
+   mkdocs-material's own `.grid` rule (repeat(auto-fit, minmax(...))) —
+   fall back to flexbox for print only; screen users never see this. */
+@media print {
+    .md-typeset .grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+    }
+    .md-typeset .grid.cards > ul,
+    .md-typeset .grid.cards > ol {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+        width: 100%;
+    }
+    .md-typeset .grid.cards > ul > li,
+    .md-typeset .grid.cards > ol > li {
+        flex: 1 1 14rem;
+    }
+}
+
+@page:not(:first) {
+    @bottom-center {
+        content: "GeoE3 Documentation";
+        font-family: var(--font-sans);
+        font-size: 8pt;
+        color: var(--text-muted);
+    }
+    @bottom-right {
+        content: counter(page);
+        font-family: var(--font-sans);
+        font-size: 8pt;
+        color: var(--text-muted);
+    }
+}
+
+#doc-cover {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    height: 24cm;
+    text-align: center;
+    page-break-after: always;
+}
+
+#doc-cover .wrapper.upper {
+    margin-top: 2.5cm;
+}
+
+#doc-cover .logo {
+    width: 240px;
+    height: 100px;
+    margin: 0 auto;
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: contain;
+}
+
+#doc-cover h1 {
+    margin-top: 2cm;
+    font-size: 26pt;
+    font-weight: 800;
+    color: var(--text-default);
+}
+
+#doc-cover h2 {
+    font-size: 13pt;
+    font-weight: 400;
+    color: var(--text-muted);
+    max-width: 32ch;
+    margin: 0.5cm auto 0;
+}
+
+#doc-cover .properties {
+    margin-bottom: 2cm;
+    color: var(--text-muted);
+    font-size: 9pt;
+}
+
+#doc-cover .properties address {
+    font-style: normal;
+}

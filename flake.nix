@@ -119,6 +119,7 @@
         docs-stop = mkDocsApp "stop"; # stop the background mkdocs serve
         docs-status = mkDocsApp "status"; # is mkdocs serve running?
         docs-build = mkDocsApp "build"; # mkdocs build --strict -> site/
+        docs-pdf = mkDocsApp "pdf"; # single combined PDF -> site/pdf/
       };
 
       devShells.${system}.default = pkgs.mkShell {
