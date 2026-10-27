@@ -1,0 +1,17 @@
+/* SPDX-FileCopyrightText: Kartoza
+   SPDX-License-Identifier: MIT
+
+   Design tokens for the GeoE3 documentation theme. Single source of truth
+   for colour and type — extra.css consumes these as CSS custom properties,
+   it never hardcodes a hex value. Palette drawn from the World Bank Group
+   identity already used in the GeoE3 plugin (navy + sky blue). */
+:root{
+  --brand-blue:#2E8FD1; --brand-amber:#EEB348; --brand-grey:#8A8B8B;
+  --text-default:#0A2E52; --text-muted:#5B7389; --rule-line:#D7E2EC;
+  --surface-cloud:#F2F6FA; --surface-white:#FFFFFF;
+  --font-sans:'Nunito','Helvetica Neue',Arial,sans-serif;
+  --font-mono:'JetBrains Mono',monospace;
+  --status-success:#3C7D54; --status-success-tint:#EAF3EC;
+  --status-warn:#EEB348;    --status-warn-tint:#FCF3E0;
+  --status-error:#B0473C;   --status-error-tint:#FBEFEF;
+}
