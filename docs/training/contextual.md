@@ -1,4 +1,4 @@
-## Contextual
+## ![](../images/topics/contextual.svg){ width="28" style="vertical-align:middle;margin-right:0.4rem;" } Contextual
 
 !!! abstract "Learning objective"
     By the end of this page you'll be able to configure all four
@@ -6,14 +6,23 @@
     single national number rather than a spatial dataset, and know which
     published index backs each one.
 
-<p align="justify">
-The Contextual Dimension refers to the laws and policies that shape workplace gender discrimination, financial autonomy, and overall gender empowerment. Although this dimension may vary between countries due to differences in legal frameworks, it remains consistent within a single country, as national policies and regulations are typically applied uniformly across countries.  For more information on data input used from open sources, please refer to the
-    <a href="../datacollection/#tutorial-manual-national-index-score-entry">Getting Data tutorial</a>.
-</p>
+The Contextual Dimension refers to the laws and policies that shape
+workplace gender discrimination, financial autonomy, and overall gender
+empowerment. Although this dimension may vary between countries due to
+differences in legal frameworks, it remains consistent within a single
+country, as national policies and regulations are typically applied
+uniformly across countries. For more information on data input used
+from open sources, see the [Getting Data
+tutorial](datacollection.md#tutorial-manual-national-index-score-entry).
 
-Every Contextual factor works the same way — a researched national score
-typed straight into the factor's dialog, no spatial dataset involved. See
-[Getting
+![National Index Score technique: one published value filled across every cell](../images/methodology/index_score.svg){ style="float:right;width:96px;margin:0 0 0.75rem 1rem;" }
+
+Every Contextual factor uses the **National Index Score** technique (see
+[Processor Types](processor-types.md#national-index-score)): a researched national score
+typed straight into the factor's dialog, no spatial dataset involved.
+Configure each one using the pattern from [Configuring
+Items](configuring-items.md#the-generic-pattern): double-click, enter the
+score, then right-click → **Run Item Workflow**. See [Getting
 Data](datacollection.md#tutorial-manual-national-index-score-entry) for
 how that number is calculated and entered.
 
@@ -21,134 +30,75 @@ how that number is calculated and entered.
 
 ---
 
-#### > If the analysis is generic, GeoE3 utilizes the EPLEX score of a country.
+#### ![](../images/topics/eplex.svg){ width="22" style="vertical-align:middle;margin-right:0.4rem;" } Generic analysis: the EPLEX score
 
-<p align="justify">EPLEX is a summary measure of Employment Protection Legislation (EPL) stringency, created by the International Labour Organization (ILO) that measures how strongly a country's laws protect workers against dismissal at the initiative of an employer.
-<p align="center">
-<img
-    src="https://raw.githubusercontent.com/worldbank/GEOE3/main/docs/images/new%20images/Contextual_dm.jpg"
-    alt="Contextual Weights"
-    style="width:75%;"
-    title="Click to enlarge"
-    onclick="window.open(this.src, '_blank')">
-</p>
-<p align="center">
-<img width="369" height="189" alt="image" src="https://github.com/user-attachments/assets/23240df3-f294-4310-9259-c47a8eebd849" />
-</p>
+EPLEX is a summary measure of Employment Protection Legislation (EPL)
+stringency, created by the International Labour Organization (ILO),
+that measures how strongly a country's laws protect workers against
+dismissal at the initiative of an employer.
 
----
+![Contextual Weights](../images/new%20images/Contextual_dm.jpg){ width="75%" }
 
-#### > If the analysis is tailored for Women's Enabling Environments, GeoE3 utilizes data from the WBL database, as follows:
-
-<p align="justify">
-
-<strong>Workplace Discrimination</strong> involves laws that address gender biases and stereotypes that hinder women's career advancement, especially in male-dominated fields and it is obtained from the Workplace Index score of the WBL.
-
-</p>
-<p align="justify">
-<strong>Regulatory Frameworks</strong> pertain to laws and policies that protect women’s employment rights, such as childcare support and parental leave, influencing their workforce participation. This indicator is composed by the Pay and Parenthood Index score of the WBL database.
-</p>
-<p align="justify">
-<strong>Financial Inclusion</strong> involves laws concerning women’s access to financial resources like loans and credit, which is crucial for starting businesses and investing in economic opportunities. This indicator is composed by the Entrepreneurship Index score of the WBL 2024.
-</p>
-The conversion of the WBL scores to the corresponding GeoWEAF classes is represented below.
-<p align="center">
-<img width="420" height="209" alt="image" src="https://github.com/user-attachments/assets/d6b223bf-25dc-4e86-bb60-77c93762782c" />
-</p>
+Enter the EPLEX score as a fraction between 0 and 1 (the tool multiplies
+it by 5 to put it on the usual 0–5 scale); if you already have a value
+on the 0–5 scale from an older project, you can enter that directly and
+it's used as-is.
 
 ---
 
-**Additional Steps Before Processing**:
+#### Women's Enabling Environments analysis: the WBL database
 
-> - 🖱️🖱️ **Double-click** on the **Contextual section** to open the pop-up.
-> - ⚖️ **Assign Weights**: Ensure the **weights** are correctly assigned, as they determine the relative importance of each factor in the analysis. Carefully review these values to ensure they are aligned with your project's objectives and reflect the significance of each factor accurately.
-> - 🚫 **Exclude Unused Factors**: If a specific factor is not intended to be included in the process, uncheck the **Use** button associated with it.
-> - 🔄 **Readjust Weights**: After excluding any factors, make sure to **Balance Weights** of the remaining factors. This step ensures the weight distribution remains balanced and totals correctly, preserving the integrity of the analysis, then click **OK** to proceed.
+For a Women's Enabling Environments analysis, GeoE3 uses data from the
+WBL (Women, Business and the Law) database instead:
+
+![](../images/topics/workplace_discrimination.svg){ width="22" style="vertical-align:middle;margin-right:0.4rem;" }
+**Workplace Discrimination** involves laws that address gender biases
+and stereotypes that hinder women's career advancement, especially in
+male-dominated fields. It's obtained from the Workplace Index score of
+the WBL.
+
+![](../images/topics/regulatory_frameworks.svg){ width="22" style="vertical-align:middle;margin-right:0.4rem;" }
+**Regulatory Frameworks** pertain to laws and policies that protect
+women's employment rights, such as childcare support and parental
+leave, influencing their workforce participation. This indicator is
+composed by the Pay and Parenthood Index score of the WBL database.
+
+![](../images/topics/financial_inclusion.svg){ width="22" style="vertical-align:middle;margin-right:0.4rem;" }
+**Financial Inclusion** involves laws concerning women's access to
+financial resources like loans and credit, which is crucial for
+starting businesses and investing in economic opportunities. This
+indicator is composed by the Entrepreneurship Index score of the WBL
+2024.
+
+The WBL index scores are already 0–100, so you enter the published value
+directly and GeoE3 converts it to the usual 0–5 scale for you:
+
+| WBL score | GeoE3 score | Colour |
+|---|---|---|
+| 95 – 100 | 5 | <span style="display:inline-block;width:14px;height:14px;background:#2c7bb6;border:1px solid #0003;border-radius:2px;"></span> |
+| 90 – 94 | 4 | <span style="display:inline-block;width:14px;height:14px;background:#bce1b8;border:1px solid #0003;border-radius:2px;"></span> |
+| 80 – 89 | 3 | <span style="display:inline-block;width:14px;height:14px;background:#ffffbf;border:1px solid #0003;border-radius:2px;"></span> |
+| 75 – 79 | 2 | <span style="display:inline-block;width:14px;height:14px;background:#fdae61;border:1px solid #0003;border-radius:2px;"></span> |
+| 60 – 74 | 1 | <span style="display:inline-block;width:14px;height:14px;background:#d7191c;border:1px solid #0003;border-radius:2px;"></span> |
+| 0 – 59 | 0 | <span style="display:inline-block;width:14px;height:14px;background:#d7191c;border:1px solid #0003;border-radius:2px;"></span> |
 
 As a rough feel for the scale: a country with strongly enabling
-legislation would score in the 90s; something clearly below that reflects
-whatever gap you've identified in your research. There's no hard rule
-beyond "find the published index value and enter it" — the WBL index
-scores are already 0–100, so you can typically use them directly.
-
-### Process Contextual factors
+legislation would score in the 90s; something clearly below that
+reflects whatever gap you've identified in your research.
 
 ---
 
-After entering the values for the factors and adjusting their weights to achieve balance, you can initiate the process workflow:
+Once every factor has a value, double-click the **Contextual** dimension
+and follow the same [generic pattern](configuring-items.md#the-generic-pattern)
+as every other item in the tree: assign weights, balance them, and run
+it.
 
-> - 🖱️**Right-click on Contextual**.
-> - ▶️**Select Run Item Workflow** from the context menu.
+![Contextual Final Output](../images/new%20images/Contextual_dm1.jpg){ width="75%" }
 
-<p align="center">
-<img
-    src="https://raw.githubusercontent.com/worldbank/GEOE3/main/docs/images/new%20images/Contextual_dm2.jpg"
-    alt="Contextual Run"
-    style="width:55%;"
-    title="Click to enlarge"
-    onclick="window.open(this.src, '_blank')">
-</p>
-
-The successful completion of the process is indicated by the green checkmark widgets.
-
-### Visualizing the Outputs
-
----
-
-<p align="justify">
-After completing the process, the outputs are automatically added to the Layer Panel in QGIS as a group layer. This group layer has the <i>Mutually Exclusive Group</i> feature activated, which ensures that only one layer within the group can be visible at a time. When this feature is enabled, turning on the visibility of one layer automatically turns off the visibility of the others within the same group, making it easier to compare results without overlapping visualizations.
-
-The outputs consist of the Workplace Discrimination, Regulatory Frameworks, and Financial Inclusion factors, as well as the aggregation of these three factors into the final Contextual output. All scores are assessed on a scale from 0 to 5, categorized as follows: **≤ 0.5 (Not Enabling) | 0.5–1.5 (Very Low Enablement) | 1.5–2.5 (Low Enablement) | 2.5–3.5 (Moderately Enabling) | 3.5–4.5 (Enabling) | 4.5–5.0 (Highly Enabling)**.
-
-</p>
-
-<p align="center">
-<img
-    src="https://raw.githubusercontent.com/worldbank/GEOE3/main/docs/images/new%20images/Contextual_dm1.jpg"
-    alt="Contextual Final Output"
-    style="width:75%;"
-    title="Click to enlarge"
-    onclick="window.open(this.src, '_blank')">
-</p>
-
-<p align="justify">
-The outputs are stored under the Contextual folder within the project folder created during the setup phase as raster files. These files can be shared and further utilized for various purposes, such as visualization in QGIS or other GIS software, integration into reports, overlaying with other spatial datasets, or performing advanced geospatial analyses, such as identifying priority areas or conducting trend analysis based on the scores.
-
-If the results do not immediately appear in the Layer Panel after processing the Contextual Dimension, you can resolve this by either adding them manually from the folder path or by right-clicking on the Contextual Dimension and selecting **Add to map** from the context menu. There is also an option to directly open the working folder from within the interface:
-
-</p>
-
-<p align="center">
-<img
-    src="https://raw.githubusercontent.com/worldbank/GEOE3/main/docs/images/new%20images/Contextual_dm3.jpg"
-    alt="Contextual Add to map"
-    style="width:55%;"
-    title="Click to enlarge"
-    onclick="window.open(this.src, '_blank')">
-</p>
-
-> 💡 **Tip**: If the input values need to be changed for any reason (e.g., incorrect initial input), you can clear the results and reprocess them as follows:
->
-> - 🖱️ **Right-click** on the factor/dimension and select **Clear Item**.
-> - 🖱️ **Right-click again** on the same cleared factor/dimension, and while holding the **SHIFT** key on your keyboard, select **Run Item Workflow**.
->   This process ensures that the tool reassesses the input values and outputs the corrected scores.
-
-<p align="center">
-<img
-    src="https://raw.githubusercontent.com/worldbank/GEOE3/main/docs/images/new%20images/CD%20clear%20and%20rerun.jpg"
-    alt="Contextual Clear and rerun"
-    style="width:75%;"
-    title="Click to enlarge"
-    onclick="window.open(this.src, '_blank')">
-</p>
-
-### Key Considerations
-
----
-
-- **Input Accuracy**: Ensure all input values are carefully entered and correspond to the correct indices (e.g., Workplace Discrimination, Regulatory Frameworks, Financial Inclusion). Incorrect data will impact the outputs and subsequent analysis.
-
-- **Weight Adjustment**: Assign weights thoughtfully to reflect the importance of each factor in the overall analysis. After making changes, always balance the weights to ensure they sum up correctly.
+The outputs (Workplace Discrimination, Regulatory Frameworks and
+Financial Inclusion, plus their aggregation into the final Contextual
+score) land in the Contextual folder within your project folder, on the
+usual [0–5 enablement scale](the-model.md#the-05-likert-scale).
 
 !!! success "Recap"
     - All four Contextual factors (EPLEX Score for a generic analysis;
@@ -156,8 +106,8 @@ If the results do not immediately appear in the Layer Panel after processing the
       Inclusion for a Women's Enabling Environments analysis) are entered
       as a single national number, not a spatial dataset.
     - Workplace Discrimination, Regulatory Frameworks and Financial
-      Inclusion map to three different WBL 2024 sub-indices — the
+      Inclusion map to three different WBL 2024 sub-indices (the
       Workplace, Pay and Parenthood, and Entrepreneurship index scores
-      respectively — don't reuse the same number for all three.
+      respectively). Don't reuse the same number for all three.
     - Results combine into a single Contextual output on the usual 0–5
       enablement scale, viewable as a mutually-exclusive layer group.

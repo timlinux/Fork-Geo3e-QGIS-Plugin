@@ -44,3 +44,11 @@ plugins:
       ordered_chapter_level: 1
       exclude_pages:
         - about/changelog/
+        # Legacy reference content carried over from the old Jupyter-Book
+        # site: 25 of its screenshots are linked as bare GitHub PR/issue
+        # attachment URLs (github.com/.../assets/<id>/<uuid>, no
+        # descriptive filename), so there's no local copy to resolve them
+        # to and no way to fetch them for a build that must stay fully
+        # offline. Supplementary content, not part of the core training
+        # walkthrough — stays on the website, just not in the PDF.
+        - about/legacy-detailed-reference/

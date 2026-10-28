@@ -1,4 +1,4 @@
-## Accessibility
+## ![](../images/topics/accessibility.svg){ width="28" style="vertical-align:middle;margin-right:0.4rem;" } Accessibility
 
 !!! abstract "Learning objective"
     By the end of this page you'll be able to configure all five
@@ -7,19 +7,34 @@
     and understand how service-area buffers turn proximity into a 0–5
     score.
 
-<p align="justify">
-The Accessibility Dimension evaluates people's daily mobility by examining their access to essential services. Levels of enablement for work access in this dimension are determined by service areas, which represent the geographic zones that facilities like childcare, supermarkets, universities, banks, and clinics can serve based on proximity. The nearer these facilities are to where people live, the more supportive and enabling the environment becomes for their participation in the workforce. For more information on data input used from open sources, please refer to the <a href="../datacollection/">Data Collection section</a>.
-</p>
+The Accessibility Dimension evaluates people's daily mobility by
+examining their access to essential services. Levels of enablement for
+work access in this dimension are determined by service areas, which
+represent the geographic zones that facilities like childcare,
+supermarkets, universities, banks, and clinics can serve based on
+proximity. The nearer these facilities are to where people live, the
+more supportive and enabling the environment becomes for their
+participation in the workforce. For more information on data input used
+from open sources, see [Getting Data](datacollection.md).
+
+![Distance by Road technique: travel-time rings following the road network](../images/methodology/network_isochrone.svg){ style="float:right;width:96px;margin:0 0 0.75rem 1rem;" }
+
+Every Accessibility factor uses the **Distance by Road** technique (see
+[Processor Types](processor-types.md#distance-by-road)).
+Configure each one using the [generic
+pattern](configuring-items.md#the-generic-pattern): double-click, point
+it at the relevant point data, and right-click → **Run Item Workflow**
+once you're done.
 
 ### General Overview
 ---
 This tool evaluates how easily people can access essential services and amenities, considering their potential caregiving roles and daily travel needs. It uses geospatial area analysis with OpenStreetMap (OSM) data to measure accessibility for several factors, including:
 
-- **Women’s Travel Patterns:** Access to everyday services like pharmacies, markets, supermarkets, childcare centers, schools and parks.
-- **Access to Public Transport:** Proximity to bus stops, train stations and other transport facilities.
-- **Health Facilities:** Availability of clinics, hospitals and other healthcare services.
-- **Education and Training Facilities:** Distance to colleges, universities and other training centers.
-- **Financial Facilities:** Access to banks and financial support institutions.
+- ![](../images/topics/women_s_travel_patterns.svg){ width="18" style="vertical-align:middle;margin-right:0.3rem;" } **Women’s Travel Patterns:** Access to everyday services like pharmacies, markets, supermarkets, childcare centers, schools and parks.
+- ![](../images/topics/access_to_public_transport.svg){ width="18" style="vertical-align:middle;margin-right:0.3rem;" } **Access to Public Transport:** Proximity to bus stops, train stations and other transport facilities.
+- ![](../images/topics/access_to_health_facilities.svg){ width="18" style="vertical-align:middle;margin-right:0.3rem;" } **Health Facilities:** Availability of clinics, hospitals and other healthcare services.
+- ![](../images/topics/access_to_education_and_training_facilities.svg){ width="18" style="vertical-align:middle;margin-right:0.3rem;" } **Education and Training Facilities:** Distance to colleges, universities and other training centers.
+- ![](../images/topics/access_to_financial_facilities.svg){ width="18" style="vertical-align:middle;margin-right:0.3rem;" } **Financial Facilities:** Access to banks and financial support institutions.
 
 **Travel mode**: The user can select walking or driving as a travel mode, and it is recommended that the same travel mode should be selected for all accessibility factors. The default travel mode is walking due to its inclusive nature.
 
@@ -37,9 +52,15 @@ This tool evaluates how easily people can access essential services and amenitie
 
 ### Input Accessibility factors
 ---
-#### Women’s Travel Patterns (WTP)
-<p align="justify">
-<strong>Women’s Travel Patterns (WTP)</strong> refer to the unique travel behaviors of women, often involving multiple stops for household or caregiving tasks, making proximity to essential services like markets, supermarkets, childcare centers, primary schools, pharmacies and green spaces crucial. This factor is composed by 5 subfactors which provide additional granularity: kindergartens/childcare | primary schools | groceries | pharmacies | green spaces.
+#### ![](../images/topics/women_s_travel_patterns.svg){ width="22" style="vertical-align:middle;margin-right:0.4rem;" } Women’s Travel Patterns (WTP)
+
+**Women's Travel Patterns (WTP)** refer to the unique travel behaviors
+of women, often involving multiple stops for household or caregiving
+tasks, making proximity to essential services like markets,
+supermarkets, childcare centers, primary schools, pharmacies and green
+spaces crucial. This factor is composed of 5 subfactors which provide
+additional granularity: kindergartens/childcare, primary schools,
+groceries, pharmacies and green spaces.
 
 **Locate Women's Travel Patterns Section**
 
@@ -48,101 +69,67 @@ This tool evaluates how easily people can access essential services and amenitie
 > - 🔧 **Travel mode (optional)**: Change the travel mode from walking to driving and the measurements from meters to minutes and amend the default thresholds if local context suggests more appropriate increments.
 > - ⚖️ **Assign Weights**: Assign appropriate weights to reflect the relative importance of each factor in the analysis. Ensure these values are consistent with your project objectives, accurately represent the significance of each factor and add up to 1 for a balanced evaluation.
 > - 🚫 **Exclude Unused Factors (optional)**: If a specific factor is not intended to be included in the process, uncheck the **Use** button associated with it.
-> - 🔄 **Readjust Weights**: After excluding any factors, make sure to **Balance Weights** of the remaining factors. This step ensures the weight distribution remains balanced and totals correctly, preserving the integrity of the analysis.
+> - 🔄 **Readjust Weights**: Weight values must add up to 1 or they're shown in red. After excluding any subfactors, press **Balance Weights** to reset the remaining ones to an equal share rather than typing each value by hand.
 > - ✅ **Finalize**: Once all settings are configured, click OK to confirm and proceed to the next step.
 
-<p align="center">
-<img
-    src="https://raw.githubusercontent.com/worldbank/GeoE3/main/docs/images/new%20images/WTP_2.0.jpg"
-    alt="WTP input"
-    style="width:75%;"
-    title="Click to enlarge"
-    onclick="window.open(this.src, '_blank')">
-</p>
+![WTP input](../images/new%20images/WTP_2.0.jpg){ width="75%" }
 
-<strong>Default</strong> Women's Travel Patterns thresholds:
+**Default** Women's Travel Patterns thresholds:
 
-<table style="width:auto; border:1px solid black; border-collapse:collapse; margin-left:0; font-size:12px;">
-  <tr style="border:1px solid black;">
-    <th style="border:1px solid black; width:250px;"><strong>Distance to Facilities (meters)</strong><br><span style="font-weight:normal;">(National Level Analysis)</span></th>
-    <th style="border:1px solid black; width:80px; text-align:center;">Score</th>
-    <th style="border:1px solid black; width:250px;"><strong>Distance to Facilities (meters)</strong><br><span style="font-weight:normal;">(Local Level Analysis)</span></th>
-    <th style="border:1px solid black; width:80px; text-align:center;">Score</th>
+<table>
+  <tr>
+    <th><strong>Distance to Facilities (meters)</strong><br><span style="font-weight:normal;">(National Level Analysis)</span></th>
+    <th style="text-align:center;">Score</th>
+    <th><strong>Distance to Facilities (meters)</strong><br><span style="font-weight:normal;">(Local Level Analysis)</span></th>
+    <th style="text-align:center;">Score</th>
   </tr>
   <tr>
-    <td style="border:1px solid black;">0 - 400</td>
-    <td style="border:1px solid black; text-align:center;">5</td>
-    <td style="border:1px solid black;">0 - 300</td>
-    <td style="border:1px solid black; text-align:center;">5</td>
+    <td>0 - 400</td>
+    <td style="text-align:center;">5</td>
+    <td>0 - 300</td>
+    <td style="text-align:center;">5</td>
   </tr>
   <tr>
-    <td style="border:1px solid black;">401 - 800</td>
-    <td style="border:1px solid black; text-align:center;">4</td>
-    <td style="border:1px solid black;">301 - 800</td>
-    <td style="border:1px solid black; text-align:center;">4</td>
+    <td>401 - 800</td>
+    <td style="text-align:center;">4</td>
+    <td>301 - 800</td>
+    <td style="text-align:center;">4</td>
   </tr>
   <tr>
-    <td style="border:1px solid black;">801 - 1,200</td>
-    <td style="border:1px solid black; text-align:center;">3</td>
-    <td style="border:1px solid black;">801 - 1,000</td>
-    <td style="border:1px solid black; text-align:center;">3</td>
+    <td>801 - 1,200</td>
+    <td style="text-align:center;">3</td>
+    <td>801 - 1,000</td>
+    <td style="text-align:center;">3</td>
   </tr>
   <tr>
-    <td style="border:1px solid black;">1,201 - 1,500</td>
-    <td style="border:1px solid black; text-align:center;">2</td>
-    <td style="border:1px solid black;">1,001 - 1,300</td>
-    <td style="border:1px solid black; text-align:center;">2</td>
+    <td>1,201 - 1,500</td>
+    <td style="text-align:center;">2</td>
+    <td>1,001 - 1,300</td>
+    <td style="text-align:center;">2</td>
   </tr>
   <tr>
-    <td style="border:1px solid black;">1,501 - 2,000</td>
-    <td style="border:1px solid black; text-align:center;">1</td>
-    <td style="border:1px solid black;">1,301 - 1,500</td>
-    <td style="border:1px solid black; text-align:center;">1</td>
+    <td>1,501 - 2,000</td>
+    <td style="text-align:center;">1</td>
+    <td>1,301 - 1,500</td>
+    <td style="text-align:center;">1</td>
   </tr>
   <tr>
-    <td style="border:1px solid black;">Over 2,000</td>
-    <td style="border:1px solid black; text-align:center;">0</td>
-    <td style="border:1px solid black;">Over 1,500</td>
-    <td style="border:1px solid black; text-align:center;">0</td>
+    <td>Over 2,000</td>
+    <td style="text-align:center;">0</td>
+    <td>Over 1,500</td>
+    <td style="text-align:center;">0</td>
   </tr>
 </table>
 
 <br>
 
-**Process Women's Travel Patterns factors**
-
-Back in the Data Processing Interface:
-
-> - 🖱️ **Right-click** on **Women's Travel Patterns**.
-> - ▶️ **Select "Run Item Workflow"** from the context menu to initiate the process.
-
-
-<p align="center">
-<img
-    src="https://raw.githubusercontent.com/worldbank/GEOE3/main/docs/images/new%20images/WTP%20run.jpg"
-    alt="WTP run"
-    style="width:75%;"
-    title="Click to enlarge"
-    onclick="window.open(this.src, '_blank')">
-</p>
-
-The successful completion of the process is indicated by the green checkmark widgets:
-
-<p align="center">
-<img
-    src="https://raw.githubusercontent.com/worldbank/GEOE3/main/docs/images/new%20images/WTP%20success.jpg"
-    alt="WTP success"
-    style="width:75%;"
-    title="Click to enlarge"
-    onclick="window.open(this.src, '_blank')">
-</p>
-
 ---
-#### Access to Public Transport
+#### ![](../images/topics/access_to_public_transport.svg){ width="22" style="vertical-align:middle;margin-right:0.4rem;" } Access to Public Transport
 
-<p align="justify">
-<strong>Access to Public Transport</strong> focuses on the availability and proximity of public transportation stops, which is crucial for people that rely on buses, trains, or trams to access jobs, education, and essential services.
-</p>
+**Access to Public Transport** focuses on the availability and
+proximity of public transportation stops, which is crucial for people
+that rely on buses, trains, or trams to access jobs, education, and
+essential services.
 
 **Locate Access to Public Transport Section**
 
@@ -152,89 +139,63 @@ The successful completion of the process is indicated by the green checkmark wid
 > - 🚫 **Exclude Factor (optional)**: If this factor is not intended to be included in the process, uncheck the **Use** button associated with it.
 > - ✅ **Finalize**: Once all settings are configured, click OK to confirm and proceed to the next step.
 
-<p align="center">
-<img
-    src="https://raw.githubusercontent.com/worldbank/GeoE3/main/docs/images/new%20images/PT_2.0.jpg"
-    alt="APT input"
-    style="width:75%;"
-    title="Click to enlarge"
-    onclick="window.open(this.src, '_blank')">
-</p>
+![APT input](../images/new%20images/PT_2.0.jpg){ width="75%" }
 
-<strong>Default</strong> Access to Public Transport thresholds:
+**Default** Access to Public Transport thresholds:
 
-<table style="width:auto; border:1px solid black; border-collapse:collapse; margin-left:0; font-size:12px;">
-  <tr style="border:1px solid black;">
-    <th style="border:1px solid black; width:250px;"><strong>Distance to Public Transport Stops (meters)</strong><br><span style="font-weight:normal;">(National Level Analysis)</span></th>
-    <th style="border:1px solid black; width:80px; text-align:center;">Score</th>
-    <th style="border:1px solid black; width:250px;"><strong>Distance to Public Transport Stops (meters)</strong><br><span style="font-weight:normal;">(Local Level Analysis)</span></th>
-    <th style="border:1px solid black; width:80px; text-align:center;">Score</th>
+<table>
+  <tr>
+    <th><strong>Distance to Public Transport Stops (meters)</strong><br><span style="font-weight:normal;">(National Level Analysis)</span></th>
+    <th style="text-align:center;">Score</th>
+    <th><strong>Distance to Public Transport Stops (meters)</strong><br><span style="font-weight:normal;">(Local Level Analysis)</span></th>
+    <th style="text-align:center;">Score</th>
   </tr>
   <tr>
-    <td style="border:1px solid black;">0 - 250</td>
-    <td style="border:1px solid black; text-align:center;">5</td>
-    <td style="border:1px solid black;">0 - 250</td>
-    <td style="border:1px solid black; text-align:center;">5</td>
+    <td>0 - 250</td>
+    <td style="text-align:center;">5</td>
+    <td>0 - 250</td>
+    <td style="text-align:center;">5</td>
   </tr>
   <tr>
-    <td style="border:1px solid black;">251 - 500</td>
-    <td style="border:1px solid black; text-align:center;">4</td>
-    <td style="border:1px solid black;">251 - 500</td>
-    <td style="border:1px solid black; text-align:center;">4</td>
+    <td>251 - 500</td>
+    <td style="text-align:center;">4</td>
+    <td>251 - 500</td>
+    <td style="text-align:center;">4</td>
   </tr>
   <tr>
-    <td style="border:1px solid black;">501 - 750</td>
-    <td style="border:1px solid black; text-align:center;">3</td>
-    <td style="border:1px solid black;">501 - 750</td>
-    <td style="border:1px solid black; text-align:center;">3</td>
+    <td>501 - 750</td>
+    <td style="text-align:center;">3</td>
+    <td>501 - 750</td>
+    <td style="text-align:center;">3</td>
   </tr>
   <tr>
-    <td style="border:1px solid black;">751 - 1,000</td>
-    <td style="border:1px solid black; text-align:center;">2</td>
-    <td style="border:1px solid black;">751 - 1,000</td>
-    <td style="border:1px solid black; text-align:center;">2</td>
+    <td>751 - 1,000</td>
+    <td style="text-align:center;">2</td>
+    <td>751 - 1,000</td>
+    <td style="text-align:center;">2</td>
   </tr>
   <tr>
-    <td style="border:1px solid black;">1,001 - 1,500</td>
-    <td style="border:1px solid black; text-align:center;">1</td>
-    <td style="border:1px solid black;">1,001 - 1,250</td>
-    <td style="border:1px solid black; text-align:center;">1</td>
+    <td>1,001 - 1,500</td>
+    <td style="text-align:center;">1</td>
+    <td>1,001 - 1,250</td>
+    <td style="text-align:center;">1</td>
   </tr>
   <tr>
-    <td style="border:1px solid black;">Over 1,500</td>
-    <td style="border:1px solid black; text-align:center;">0</td>
-    <td style="border:1px solid black;">Over 1,250</td>
-    <td style="border:1px solid black; text-align:center;">0</td>
+    <td>Over 1,500</td>
+    <td style="text-align:center;">0</td>
+    <td>Over 1,250</td>
+    <td style="text-align:center;">0</td>
   </tr>
 </table>
 
 <br>
 
-**Process Access to Public Transport factor**
-
-Back in the Data Processing Interface:
-
-> - 🖱️ **Right-click** on **Access to Public Transport**.
-> - ▶️ **Select "Run Item Workflow"** from the context menu to initiate the process.
-
-<p align="center">
-<img
-    src="https://raw.githubusercontent.com/worldbank/GEOE3/main/docs/images/new%20images/APT%20run.jpg"
-    alt="APT run"
-    style="width:75%;"
-    title="Click to enlarge"
-    onclick="window.open(this.src, '_blank')">
-</p>
-
-The process should be successfully completed and indicated by a green checkmark widget.
-
-
 ---
-#### Access to Health Facilities
+#### ![](../images/topics/access_to_health_facilities.svg){ width="22" style="vertical-align:middle;margin-right:0.4rem;" } Access to Health Facilities
 
-<p align="justify">
-<strong>Access to Health Facilities</strong> evaluates how easily people can reach healthcare services in terms of distance, impacting their well-being and ability to participate in the workforce.
-</p>
+**Access to Health Facilities** evaluates how easily people can reach
+healthcare services in terms of distance, impacting their well-being
+and ability to participate in the workforce.
 
 **Locate Access to Health Facilities Section**
 
@@ -245,79 +206,63 @@ The process should be successfully completed and indicated by a green checkmark 
 > - ✅ **Finalize**: Once all settings are configured, click OK to confirm and proceed to the next step.
 
 
-<p align="center">
-<img
-    src="https://raw.githubusercontent.com/worldbank/GEOE3/main/docs/images/new%20images/HF_2.0.jpg"
-    alt="AHF input"
-    style="width:75%;"
-    title="Click to enlarge"
-    onclick="window.open(this.src, '_blank')">
-</p>
+![AHF input](../images/new%20images/HF_2.0.jpg){ width="75%" }
 
-<strong>Default</strong> Access to Health Facilities thresholds:
+**Default** Access to Health Facilities thresholds:
 
-<table style="width:auto; border:1px solid black; border-collapse:collapse; margin-left:0; font-size:12px;">
-  <tr style="border:1px solid black;">
-    <th style="border:1px solid black; width:250px;"><strong>Distance to Health Facilities (meters)</strong><br><span style="font-weight:normal;">(National Level Analysis)</span></th>
-    <th style="border:1px solid black; width:80px; text-align:center;">Score</th>
-    <th style="border:1px solid black; width:250px;"><strong>Distance to Health Facilities (meters)</strong><br><span style="font-weight:normal;">(Local Level Analysis)</span></th>
-    <th style="border:1px solid black; width:80px; text-align:center;">Score</th>
+<table>
+  <tr>
+    <th><strong>Distance to Health Facilities (meters)</strong><br><span style="font-weight:normal;">(National Level Analysis)</span></th>
+    <th style="text-align:center;">Score</th>
+    <th><strong>Distance to Health Facilities (meters)</strong><br><span style="font-weight:normal;">(Local Level Analysis)</span></th>
+    <th style="text-align:center;">Score</th>
   </tr>
   <tr>
-    <td style="border:1px solid black;">0 - 2,000</td>
-    <td style="border:1px solid black; text-align:center;">5</td>
-    <td style="border:1px solid black;">0 - 400</td>
-    <td style="border:1px solid black; text-align:center;">5</td>
+    <td>0 - 2,000</td>
+    <td style="text-align:center;">5</td>
+    <td>0 - 400</td>
+    <td style="text-align:center;">5</td>
   </tr>
   <tr>
-    <td style="border:1px solid black;">2,001 - 4,000</td>
-    <td style="border:1px solid black; text-align:center;">4</td>
-    <td style="border:1px solid black;">401 - 800</td>
-    <td style="border:1px solid black; text-align:center;">4</td>
+    <td>2,001 - 4,000</td>
+    <td style="text-align:center;">4</td>
+    <td>401 - 800</td>
+    <td style="text-align:center;">4</td>
   </tr>
   <tr>
-    <td style="border:1px solid black;">4,001 - 6,000</td>
-    <td style="border:1px solid black; text-align:center;">3</td>
-    <td style="border:1px solid black;">801 - 1,250</td>
-    <td style="border:1px solid black; text-align:center;">3</td>
+    <td>4,001 - 6,000</td>
+    <td style="text-align:center;">3</td>
+    <td>801 - 1,250</td>
+    <td style="text-align:center;">3</td>
   </tr>
   <tr>
-    <td style="border:1px solid black;">6,001 - 8,000</td>
-    <td style="border:1px solid black; text-align:center;">2</td>
-    <td style="border:1px solid black;">1,251 - 1,650</td>
-    <td style="border:1px solid black; text-align:center;">2</td>
+    <td>6,001 - 8,000</td>
+    <td style="text-align:center;">2</td>
+    <td>1,251 - 1,650</td>
+    <td style="text-align:center;">2</td>
   </tr>
   <tr>
-    <td style="border:1px solid black;">8,001 - 10,000</td>
-    <td style="border:1px solid black; text-align:center;">1</td>
-    <td style="border:1px solid black;">1,651 - 2,500</td>
-    <td style="border:1px solid black; text-align:center;">1</td>
+    <td>8,001 - 10,000</td>
+    <td style="text-align:center;">1</td>
+    <td>1,651 - 2,500</td>
+    <td style="text-align:center;">1</td>
   </tr>
   <tr>
-    <td style="border:1px solid black;">Over 10,000</td>
-    <td style="border:1px solid black; text-align:center;">0</td>
-    <td style="border:1px solid black;">Over 2,500</td>
-    <td style="border:1px solid black; text-align:center;">0</td>
+    <td>Over 10,000</td>
+    <td style="text-align:center;">0</td>
+    <td>Over 2,500</td>
+    <td style="text-align:center;">0</td>
   </tr>
 </table>
 
 <br>
 
-**Process Access to Health Facilities factor**
-
-Back in the Data Processing Interface:
-
-> - 🖱️ **Right-click** on **Access to Health Facilities**.
-> - ▶️ **Select "Run Item Workflow"** from the context menu to initiate the process.
-
-The process should be successfully completed and indicated by a green checkmark widget.
-
 ---
-#### Access to Education and Training Facilities
+#### ![](../images/topics/access_to_education_and_training_facilities.svg){ width="22" style="vertical-align:middle;margin-right:0.4rem;" } Access to Education and Training Facilities
 
-<p align="justify">
-<strong>Access to Education and Training Facilities</strong> assesses the proximity to higher education institutions and training centers, influencing people’s ability to gain necessary qualifications.
-</p>
+**Access to Education and Training Facilities** assesses the proximity
+to higher education institutions and training centers, influencing
+people's ability to gain necessary qualifications.
 
 **Locate Access to Education and Training Facilities Section**
 
@@ -327,79 +272,63 @@ The process should be successfully completed and indicated by a green checkmark 
 > - 🚫 **Exclude Factor (optional)**: If this factor is not intended to be included in the process, uncheck the **Use** button associated with it.
 > - ✅ **Finalize**: Once all settings are configured, click OK to confirm and proceed to the next step.
 
-<p align="center">
-<img
-    src="https://raw.githubusercontent.com/worldbank/GEOE3/main/docs/images/new%20images/EF_2.0.jpg"
-    alt="AET input"
-    style="width:75%;"
-    title="Click to enlarge"
-    onclick="window.open(this.src, '_blank')">
-</p>
+![AET input](../images/new%20images/EF_2.0.jpg){ width="75%" }
 
-<strong>Default</strong> Access to Education and Training Facilities thresholds:
+**Default** Access to Education and Training Facilities thresholds:
 
-<table style="width:auto; border:1px solid black; border-collapse:collapse; margin-left:0; font-size:12px;">
-  <tr style="border:1px solid black;">
-    <th style="border:1px solid black; width:250px;"><strong>Distance to Facilities (meters)</strong><br><span style="font-weight:normal;">(National Level Analysis)</span></th>
-    <th style="border:1px solid black; width:80px; text-align:center;">Score</th>
-    <th style="border:1px solid black; width:250px;"><strong>Distance to Facilities (meters)</strong><br><span style="font-weight:normal;">(Local Level Analysis)</span></th>
-    <th style="border:1px solid black; width:80px; text-align:center;">Score</th>
+<table>
+  <tr>
+    <th><strong>Distance to Facilities (meters)</strong><br><span style="font-weight:normal;">(National Level Analysis)</span></th>
+    <th style="text-align:center;">Score</th>
+    <th><strong>Distance to Facilities (meters)</strong><br><span style="font-weight:normal;">(Local Level Analysis)</span></th>
+    <th style="text-align:center;">Score</th>
   </tr>
   <tr>
-    <td style="border:1px solid black;">0 - 2,000</td>
-    <td style="border:1px solid black; text-align:center;">5</td>
-    <td style="border:1px solid black;">0 - 350</td>
-    <td style="border:1px solid black; text-align:center;">5</td>
+    <td>0 - 2,000</td>
+    <td style="text-align:center;">5</td>
+    <td>0 - 350</td>
+    <td style="text-align:center;">5</td>
   </tr>
   <tr>
-    <td style="border:1px solid black;">2,001 - 4,000</td>
-    <td style="border:1px solid black; text-align:center;">4</td>
-    <td style="border:1px solid black;">351 - 700</td>
-    <td style="border:1px solid black; text-align:center;">4</td>
+    <td>2,001 - 4,000</td>
+    <td style="text-align:center;">4</td>
+    <td>351 - 700</td>
+    <td style="text-align:center;">4</td>
   </tr>
   <tr>
-    <td style="border:1px solid black;">4,001 - 6,000</td>
-    <td style="border:1px solid black; text-align:center;">3</td>
-    <td style="border:1px solid black;">701 - 1,100</td>
-    <td style="border:1px solid black; text-align:center;">3</td>
+    <td>4,001 - 6,000</td>
+    <td style="text-align:center;">3</td>
+    <td>701 - 1,100</td>
+    <td style="text-align:center;">3</td>
   </tr>
   <tr>
-    <td style="border:1px solid black;">6,001 - 8,000</td>
-    <td style="border:1px solid black; text-align:center;">2</td>
-    <td style="border:1px solid black;">1,101 - 1,500</td>
-    <td style="border:1px solid black; text-align:center;">2</td>
+    <td>6,001 - 8,000</td>
+    <td style="text-align:center;">2</td>
+    <td>1,101 - 1,500</td>
+    <td style="text-align:center;">2</td>
   </tr>
   <tr>
-    <td style="border:1px solid black;">8,001 - 10,000</td>
-    <td style="border:1px solid black; text-align:center;">1</td>
-    <td style="border:1px solid black;">1,501 - 2,100</td>
-    <td style="border:1px solid black; text-align:center;">1</td>
+    <td>8,001 - 10,000</td>
+    <td style="text-align:center;">1</td>
+    <td>1,501 - 2,100</td>
+    <td style="text-align:center;">1</td>
   </tr>
   <tr>
-    <td style="border:1px solid black;">Over 10,000</td>
-    <td style="border:1px solid black; text-align:center;">0</td>
-    <td style="border:1px solid black;">Over 2,100</td>
-    <td style="border:1px solid black; text-align:center;">0</td>
+    <td>Over 10,000</td>
+    <td style="text-align:center;">0</td>
+    <td>Over 2,100</td>
+    <td style="text-align:center;">0</td>
   </tr>
 </table>
 
 <br>
 
-**Process Access to Education and Training Facilities factor**
-
-Back in the Data Processing Interface:
-
-> - 🖱️ **Right-click** on **Access to Education and Training Facilities**.
-> - ▶️ **Select "Run Item Workflow"** from the context menu to initiate the process.
-
-The process should be successfully completed and indicated by a green checkmark widget.
-
 ---
-#### Access to Financial Facilities
+#### ![](../images/topics/access_to_financial_facilities.svg){ width="22" style="vertical-align:middle;margin-right:0.4rem;" } Access to Financial Facilities
 
-<p align="justify">
-<strong>Access to Financial Facilities</strong> focuses on the proximity of banks and financial institutions, which is essential for people’s economic empowerment and ability to access credit.
-</p>
+**Access to Financial Facilities** focuses on the proximity of banks
+and financial institutions, which is essential for people's economic
+empowerment and ability to access credit.
 
 **Locate Access to Financial Facilities Section**
 
@@ -409,166 +338,79 @@ The process should be successfully completed and indicated by a green checkmark 
 > - 🚫 **Exclude Factor (optional)**: If this factor is not intended to be included in the process, uncheck the **Use** button associated with it.
 > - ✅ **Finalize**: Once all settings are configured, click OK to confirm and proceed to the next step.
 
-<p align="center">
-<img
-    src="https://raw.githubusercontent.com/worldbank/GEOE3/main/docs/images/new%20images/FF_2.0.jpg"
-    alt="AFF input"
-    style="width:75%;"
-    title="Click to enlarge"
-    onclick="window.open(this.src, '_blank')">
-</p>
+![AFF input](../images/new%20images/FF_2.0.jpg){ width="75%" }
 
-<strong>Default</strong> Access to Financial Facilities thresholds:
+**Default** Access to Financial Facilities thresholds:
 
-<table style="width:auto; border:1px solid black; border-collapse:collapse; margin-left:0; font-size:12px;">
-  <tr style="border:1px solid black;">
-    <th style="border:1px solid black; width:250px;"><strong>Distance to Financial Facilities (meters)</strong><br><span style="font-weight:normal;">(National Level Analysis)</span></th>
-    <th style="border:1px solid black; width:80px; text-align:center;">Score</th>
-    <th style="border:1px solid black; width:250px;"><strong>Distance to Financial Facilities (meters)</strong><br><span style="font-weight:normal;">(Local Level Analysis)</span></th>
-    <th style="border:1px solid black; width:80px; text-align:center;">Score</th>
+<table>
+  <tr>
+    <th><strong>Distance to Financial Facilities (meters)</strong><br><span style="font-weight:normal;">(National Level Analysis)</span></th>
+    <th style="text-align:center;">Score</th>
+    <th><strong>Distance to Financial Facilities (meters)</strong><br><span style="font-weight:normal;">(Local Level Analysis)</span></th>
+    <th style="text-align:center;">Score</th>
   </tr>
   <tr>
-    <td style="border:1px solid black;">0 - 400</td>
-    <td style="border:1px solid black; text-align:center;">5</td>
-    <td style="border:1px solid black;">0 - 500</td>
-    <td style="border:1px solid black; text-align:center;">5</td>
+    <td>0 - 400</td>
+    <td style="text-align:center;">5</td>
+    <td>0 - 500</td>
+    <td style="text-align:center;">5</td>
   </tr>
   <tr>
-    <td style="border:1px solid black;">401 - 800</td>
-    <td style="border:1px solid black; text-align:center;">4</td>
-    <td style="border:1px solid black;">501 - 1,000</td>
-    <td style="border:1px solid black; text-align:center;">4</td>
+    <td>401 - 800</td>
+    <td style="text-align:center;">4</td>
+    <td>501 - 1,000</td>
+    <td style="text-align:center;">4</td>
   </tr>
   <tr>
-    <td style="border:1px solid black;">801 - 1,200</td>
-    <td style="border:1px solid black; text-align:center;">3</td>
-    <td style="border:1px solid black;">1,001 - 1,500</td>
-    <td style="border:1px solid black; text-align:center;">3</td>
+    <td>801 - 1,200</td>
+    <td style="text-align:center;">3</td>
+    <td>1,001 - 1,500</td>
+    <td style="text-align:center;">3</td>
   </tr>
   <tr>
-    <td style="border:1px solid black;">1,201 - 2,000</td>
-    <td style="border:1px solid black; text-align:center;">2</td>
-    <td style="border:1px solid black;">1,501 - 2,000</td>
-    <td style="border:1px solid black; text-align:center;">2</td>
+    <td>1,201 - 2,000</td>
+    <td style="text-align:center;">2</td>
+    <td>1,501 - 2,000</td>
+    <td style="text-align:center;">2</td>
   </tr>
   <tr>
-    <td style="border:1px solid black;">2,001 - 3,000</td>
-    <td style="border:1px solid black; text-align:center;">1</td>
-    <td style="border:1px solid black;">2,001 - 2,500</td>
-    <td style="border:1px solid black; text-align:center;">1</td>
+    <td>2,001 - 3,000</td>
+    <td style="text-align:center;">1</td>
+    <td>2,001 - 2,500</td>
+    <td style="text-align:center;">1</td>
   </tr>
   <tr>
-    <td style="border:1px solid black;">Over 3,000</td>
-    <td style="border:1px solid black; text-align:center;">0</td>
-    <td style="border:1px solid black;">Over 2,500</td>
-    <td style="border:1px solid black; text-align:center;">0</td>
+    <td>Over 3,000</td>
+    <td style="text-align:center;">0</td>
+    <td>Over 2,500</td>
+    <td style="text-align:center;">0</td>
   </tr>
 </table>
 
 <br>
 
-**Process Access to Financial Facilities factor**
-
-Back in the Data Processing Interface:
-
-> - 🖱️ **Right-click** on **Access to Financial Facilities**.
-> - ▶️ **Select "Run Item Workflow"** from the context menu to initiate the process.
-
-The process should be successfully completed and indicated by a green checkmark widget.
-
 ---
-**Additional Steps Before Processing**:
 
-> - 🖱️🖱️ **Double-click** on the **Accessibility section** to open the pop-up.
-> - ⚖️ **Assign Weights**: Ensure the **weights** are correctly assigned, as they determine the relative importance of each factor in the analysis. Carefully review these values to ensure they are aligned with your project's objectives and reflect the significance of each factor accurately.
-> - 🚫 **Exclude Unused Factors (optional)**: If a specific factor is not intended to be included in the process, uncheck the **Use** button associated with it.
-> - 🔄 **Readjust Weights**: After excluding any factors, make sure to **Balance Weights** of the remaining factors. This step ensures the weight distribution remains balanced and totals correctly, preserving the integrity of the analysis, then click **OK** to proceed.
+Once every factor has its data, double-click the **Accessibility**
+dimension and follow the same [generic
+pattern](configuring-items.md#the-generic-pattern) as every other item
+in the tree: assign weights, balance them, and run it.
 
-<p align="center">
-<img
-    src="https://raw.githubusercontent.com/worldbank/GeoE3/main/docs/images/new%20images/ACC_2.0.jpg"
-    alt="Accessibility Weights"
-    style="width:75%;"
-    title="Click to enlarge"
-    onclick="window.open(this.src, '_blank')">
-</p>
+![Accessibility Weights](../images/new%20images/ACC_2.0.jpg){ width="75%" }
 
-
-### Process Accessibility factors
----
-After configuring the factors and adjusting their weights to achieve balance, you can initiate the process workflow:
-
-> - 🖱️**Right-click on Accessibility**.
-> - ▶️**Select Run Item Workflow** from the context menu.
-
-<p align="center">
-<img
-    src="https://raw.githubusercontent.com/worldbank/GEOE3/main/docs/images/new%20images/ACC%20run.jpg"
-    alt="Accessibility Run"
-    style="width:75%;"
-    title="Click to enlarge"
-    onclick="window.open(this.src, '_blank')">
-</p>
-
-The process should be successfully completed and indicated by a green checkmark widget.
-
-### Visualizing the Outputs
----
-<p align="justify">
-After completing the process, the outputs are automatically added to the Layer Panel in QGIS as a group layer. This group layer has the <i>Mutually Exclusive Group</i> feature activated, which ensures that only one layer within the group can be visible at a time. When this feature is enabled, turning on the visibility of one layer automatically turns off the visibility of the others within the same group, making it easier to compare results without overlapping visualizations.
-</p>
-
-<p align="justify">
-The outputs consist of all factors and subfactors, as well as the aggregation of these into the final Accessibility output. All scores are assessed on a scale from 0 to 5, categorized as follows: <strong>≤ 0.5 (Not Enabling) | 0.5–1.5 (Very Low Enablement) | 1.5–2.5 (Low Enablement) | 2.5–3.5 (Moderately Enabling) | 3.5–4.5 (Enabling) | 4.5–5.0 (Highly Enabling)</strong>.
-</p>
-
-<p align="justify">
-The outputs are stored under the Accessibility folder within the project folder created during the setup phase as raster files. These files can be shared and further utilized for various purposes, such as visualization in QGIS or other GIS software, integration into reports, overlaying with other spatial datasets, or performing advanced geospatial analyses, such as identifying priority areas or conducting trend analysis based on the scores.
-</p>
-
-<p align="justify">
-If the results do not immediately appear in the Layer Panel after processing the Accessibility Dimension, you can resolve this by either adding them manually from the folder path or by right-clicking on the Accessibility Dimension and selecting <strong>Add to map</strong> from the context menu:
-</p>
-
-
-<p align="center">
-<img
-    src="https://raw.githubusercontent.com/worldbank/GEOE3/main/docs/images/new%20images/ACC%20add.jpg"
-    alt="Accessibility Add to map"
-    style="width:75%;"
-    title="Click to enlarge"
-    onclick="window.open(this.src, '_blank')">
-</p>
-
-> 💡 **Tip**: If the input needs to be changed for any reason (e.g., incorrect initial input), you can clear the results and reprocess them as follows:
-> - 🖱️ **Right-click** on the factor/dimension and select **Clear Item**.
-> - 🖱️ **Right-click again** on the same cleared factor/dimension, and while holding the **SHIFT** key on your keyboard, select **Run Item Workflow**.
-> This process ensures that the tool reassesses the input datasets and outputs the corrected scores.
-
-
-<p align="center">
-<img
-    src="https://raw.githubusercontent.com/worldbank/GEOE3/main/docs/images/new%20images/ACC%20rerun.jpg"
-    alt="Accessibility Clear and rerun"
-    style="width:75%;"
-    title="Click to enlarge"
-    onclick="window.open(this.src, '_blank')">
-</p>
-
-### Key Considerations
----
-- **Input Accuracy**: Ensure all input datasets are carefully entered/selected and correspond to the correct factors and/or subfactors. Incorrect data will impact the outputs and subsequent analysis.
-
-- **Weight Adjustment**: Assign weights thoughtfully to reflect the importance of each factor in the overall analysis. After making changes, always balance the weights to ensure they sum up correctly.
+The outputs (all five factors and their subfactors, plus their
+aggregation into the final Accessibility score) land in the
+Accessibility folder within your project folder, on the usual
+[0–5 enablement scale](the-model.md#the-05-likert-scale).
 
 !!! success "Recap"
     - All five Accessibility factors need point data for the facility
-      they measure — grab it with the in-app **Download from OSM**
+      they measure. Grab it with the in-app **Download from OSM**
       button, or see [Getting Data](datacollection.md) for alternatives.
     - Pick one travel mode (walking or driving) and stick with it across
       every factor for consistent, comparable results.
     - Distance thresholds differ by factor and by national vs. local
-      scale — the defaults are evidence-based, but override them if your
+      scale. The defaults are evidence-based, but override them if your
       local context calls for it.
     - Results combine into a single Accessibility output on the usual
       0–5 enablement scale.

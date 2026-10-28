@@ -482,6 +482,19 @@ body,
     }
 }
 
+/* The home page's hero already has a proper cover page ahead of it
+   (#doc-cover, from mkdocs-with-pdf's own cover: true setting) — its
+   "Get Started" / "Training Walkthrough" / "GitHub" buttons are
+   interactive web navigation with nothing to click in a PDF, so they'd
+   just sit there as three empty-looking boxes on what's effectively a
+   second, redundant cover page. Keep the hero's title and description
+   (still useful framing text) but drop the button row in print. */
+@media print {
+    .kz-cta {
+        display: none;
+    }
+}
+
 @page:not(:first) {
     @bottom-center {
         content: "GeoE3 Documentation";

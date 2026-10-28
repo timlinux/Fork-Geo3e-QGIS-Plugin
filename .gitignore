@@ -134,3 +134,8 @@ TODO.md
 # training docs) — large, and a verifiable local reference kept outside
 # version control, not a build artefact to regenerate casually.
 /TranscriptsGitIgnore/
+
+# Example PDF analysis report (Portugal) used as source material for the
+# "Analysis Report" training page's page images — real example output,
+# not something to commit.
+/analysis_report.pdf
