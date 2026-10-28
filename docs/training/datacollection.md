@@ -157,8 +157,8 @@ what you need, fall back to the in-app OSM downloader or Geofabrik.
 
 ## Tutorial: population data from WorldPop
 
-If you want to introduce population into your results (see [Exploring
-Your Results](insights.md)) and you already ticked **Fetch S2S data**
+If you want to introduce population into your results (see [Configuring
+Items](configuring-items.md)) and you already ticked **Fetch S2S data**
 during project setup, you likely already have a Space2Stats population
 layer and can skip this. If not, getting it is its own little side quest.
 
@@ -200,21 +200,21 @@ sources to use for any other country.
 
 ## Data sources used for the Saint Lucia example
 
-<table style="border-collapse: collapse; width: 100%; font-size: small;">
+<table>
   <tr>
-    <th style="border: 1px solid black; padding: 1px; text-align: center;"><b>DIMENSION</b></th>
-    <th style="border: 1px solid black; padding: 1px; text-align: center;"><b>FACTOR</b></th>
-    <th style="border: 1px solid black; padding: 1px; text-align: center;"><b>LAYER</b></th>
-    <th style="border: 1px solid black; padding: 1px; text-align: center;"><b>DATA SOURCE/QUERY</b></th>
+    <th style="text-align: center;"><b>DIMENSION</b></th>
+    <th style="text-align: center;"><b>FACTOR</b></th>
+    <th style="text-align: center;"><b>LAYER</b></th>
+    <th style="text-align: center;"><b>DATA SOURCE/QUERY</b></th>
   </tr>
 
   <!-- Contextual Section with Merged DIMENSION Cell -->
 
   <tr>
-    <td rowspan="4" style="border: 1px solid black; padding: 1px; text-align: center; ">📝CONTEXTUAL</td>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">🏢Workplace Discrimination</td>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">WBL 2024 Workplace Index Score</td>
-<td style="border: 1px solid black; padding: 1px; text-align: left;">
+    <td rowspan="4" style="text-align: center;">📝CONTEXTUAL</td>
+    <td style="text-align: left;">🏢Workplace Discrimination</td>
+    <td style="text-align: left;">WBL 2024 Workplace Index Score</td>
+<td style="text-align: left;">
     <a href="https://wbl.worldbank.org/en/wbl" target="_blank">
         WBL 2024 index score
     </a>
@@ -222,25 +222,25 @@ sources to use for any other country.
 
   </tr>
   <tr>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">⚖️Regulatory Frameworks</td>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">WBL 2024 Pay+Parenthood Index Score</td>
-    <td style="border: 1px solid black; padding: 1px; text-align: left;">
+    <td style="text-align: left;">⚖️Regulatory Frameworks</td>
+    <td style="text-align: left;">WBL 2024 Pay+Parenthood Index Score</td>
+    <td style="text-align: left;">
     <a href="https://wbl.worldbank.org/en/wbl" target="_blank">
         WBL 2024 index score for Pay and Parenthood
     </a>
   </tr>
   <tr>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">💵Financial Inclusion</td>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">WBL 2024 Entrepreneurship Index Score</td>
- <td style="border: 1px solid black; padding: 1px; text-align: left;">
+    <td style="text-align: left;">💵Financial Inclusion</td>
+    <td style="text-align: left;">WBL 2024 Entrepreneurship Index Score</td>
+ <td style="text-align: left;">
     <a href="https://wbl.worldbank.org/en/wbl" target="_blank">
         WBL 2024 index score for Entrepreneurship
     </a>
   </tr>
   <tr>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">🏢EPLEX</td>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">The Employment Protection Legislation Index</td>
- <td style="border: 1px solid black; padding: 1px; text-align: left;">
+    <td style="text-align: left;">🏢EPLEX</td>
+    <td style="text-align: left;">The Employment Protection Legislation Index</td>
+ <td style="text-align: left;">
     <a href="https://eplex.ilo.org/en#indicators-section" target="_blank">
         EPLEX Score
     </a>
@@ -248,10 +248,10 @@ sources to use for any other country.
 
   <!-- Accessibility Section with Merged DIMENSION Cell -->
   <tr>
-    <td rowspan="9" style="border: 1px solid black; padding: 1px; text-align: center; ">🚶ACCESSIBILITY</td>
-    <td rowspan="5" style="border: 1px solid black; padding: 1px; text-align: left; ">🚶‍♀️Women's Travel Patterns</td>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">👶Location of kindergartens/childcare</td>
- <td style="border: 1px solid black; padding: 1px; text-align: left;">
+    <td rowspan="9" style="text-align: center;">🚶ACCESSIBILITY</td>
+    <td rowspan="5" style="text-align: left;">🚶‍♀️Women's Travel Patterns</td>
+    <td style="text-align: left;">👶Location of kindergartens/childcare</td>
+ <td style="text-align: left;">
     <a href="https://data.humdata.org/dataset" target="_blank">
         Humdata
     </a>
@@ -262,8 +262,8 @@ sources to use for any other country.
 </td>
 </tr>
   <tr>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">🏫Location of primary schools</td>
-<td style="border: 1px solid black; padding: 1px; text-align: left;">
+    <td style="text-align: left;">🏫Location of primary schools</td>
+<td style="text-align: left;">
     <a href="https://data.humdata.org/dataset" target="_blank">
         Humdata
     </a>
@@ -274,42 +274,42 @@ sources to use for any other country.
 </td>
   </tr>
   <tr>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">🛒Location of groceries</td>
-<td style="border: 1px solid black; padding: 1px; text-align: left;">
+    <td style="text-align: left;">🛒Location of groceries</td>
+<td style="text-align: left;">
     <a href="https://overpass-turbo.eu/?Q=[out:xml][timeout:25];{{geocodeArea:Saint%20Lucia}}->.area_0;(node[%22shop%22=%22greengrocer%22](area.area_0);way[%22shop%22=%22greengrocer%22](area.area_0);relation[%22shop%22=%22greengrocer%22](area.area_0););(._;>;);out%20body;" target="_blank">
         OSM
     </a>
 </td>
   </tr>
   <tr>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">💊Location of pharmacies</td>
-<td style="border: 1px solid black; padding: 1px; text-align: left;">
+    <td style="text-align: left;">💊Location of pharmacies</td>
+<td style="text-align: left;">
     <a href="https://overpass-turbo.eu/?Q=[out:xml][timeout:25];{{geocodeArea:Saint%20Lucia}}->.area_0;(node[%22amenity%22=%22pharmacy%22](area.area_0);way[%22amenity%22=%22pharmacy%22](area.area_0);relation[%22amenity%22=%22pharmacy%22](area.area_0););(._;>;);out%20body;" target="_blank">
         OSM
     </a>
 </td>
   </tr>
   <tr>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">🌳Location of green spaces</td>
-<td style="border: 1px solid black; padding: 1px; text-align: left;">
+    <td style="text-align: left;">🌳Location of green spaces</td>
+<td style="text-align: left;">
     <a href="https://overpass-turbo.eu/?Q=[out:xml][timeout:25];{{geocodeArea:Saint%20Lucia}}->.area_0;(node[%22leisure%22=%22park%22](area.area_0);node[%22boundary%22=%22national_park%22](area.area_0);way[%22leisure%22=%22park%22](area.area_0);way[%22boundary%22=%22national_park%22](area.area_0);relation[%22leisure%22=%22park%22](area.area_0);relation[%22boundary%22=%22national_park%22](area.area_0););(._;>;);out%20body;" target="_blank">
         OSM
     </a>
 </td>
 </tr>
   <tr>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">🚌Access to Public Transport</td>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">Location of public transportation stops, including maritime</td>
-<td style="border: 1px solid black; padding: 1px; text-align: left;">
+    <td style="text-align: left;">🚌Access to Public Transport</td>
+    <td style="text-align: left;">Location of public transportation stops, including maritime</td>
+<td style="text-align: left;">
     <a href="https://overpass-turbo.eu/?Q=[out:xml][timeout:25];{{geocodeArea:Saint%20Lucia}}->.area_0;(node[%22public_transport%22=%22stop_position%22](area.area_0);node[%22public_transport%22=%22platform%22](area.area_0);node[%22public_transport%22=%22station%22](area.area_0);node[%22public_transport%22=%22stop_area%22](area.area_0);node[%22highway%22=%22bus_stop%22](area.area_0);node[%22highway%22=%22platform%22](area.area_0);way[%22public_transport%22=%22stop_position%22](area.area_0);way[%22public_transport%22=%22platform%22](area.area_0);way[%22public_transport%22=%22station%22](area.area_0);way[%22public_transport%22=%22stop_area%22](area.area_0);way[%22highway%22=%22bus_stop%22](area.area_0);way[%22highway%22=%22platform%22](area.area_0);relation[%22public_transport%22=%22stop_position%22](area.area_0);relation[%22public_transport%22=%22platform%22](area.area_0);relation[%22public_transport%22=%22station%22](area.area_0);relation[%22public_transport%22=%22stop_area%22](area.area_0);relation[%22highway%22=%22bus_stop%22](area.area_0);relation[%22highway%22=%22platform%22](area.area_0);node[%22amenity%22=%22ferry_terminal%22](area.area_0);way[%22amenity%22=%22ferry_terminal%22](area.area_0);relation[%22amenity%22=%22ferry_terminal%22](area.area_0););(._;>;);out%20body;" target="_blank">
         OSM
     </a>
 </td>
 </tr>
   <tr>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">🏥Access to Health Facilities</td>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">Location of hospitals and clinics</td>
-<td style="border: 1px solid black; padding: 1px; text-align: left;">
+    <td style="text-align: left;">🏥Access to Health Facilities</td>
+    <td style="text-align: left;">Location of hospitals and clinics</td>
+<td style="text-align: left;">
     <a href="https://data.humdata.org/dataset" target="_blank">
         Humdata
     </a>
@@ -320,9 +320,9 @@ sources to use for any other country.
 </td>
 </tr>
   <tr>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">🎓Access to Education and Training Facilities</td>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">Location of universities and technical schools</td>
-<td style="border: 1px solid black; padding: 1px; text-align: left;">
+    <td style="text-align: left;">🎓Access to Education and Training Facilities</td>
+    <td style="text-align: left;">Location of universities and technical schools</td>
+<td style="text-align: left;">
     <a href="https://data.humdata.org/dataset" target="_blank">
         Humdata
     </a>
@@ -333,9 +333,9 @@ sources to use for any other country.
 </td>
 </tr>
   <tr>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">🏦Access to Financial Facilities</td>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">Location of Banks and other financial facilities</td>
-<td style="border: 1px solid black; padding: 1px; text-align: left;">
+    <td style="text-align: left;">🏦Access to Financial Facilities</td>
+    <td style="text-align: left;">Location of Banks and other financial facilities</td>
+<td style="text-align: left;">
     <a href="https://overpass-turbo.eu/?Q=[out:xml][timeout:25];{{geocodeArea:Saint%20Lucia}}->.area_0;(node[%22amenity%22=%22bank%22](area.area_0);node[%22office%22=%22financial%22](area.area_0);way[%22amenity%22=%22bank%22](area.area_0);way[%22office%22=%22financial%22](area.area_0);relation[%22amenity%22=%22bank%22](area.area_0);relation[%22office%22=%22financial%22](area.area_0););(._;>;);out%20body;" target="_blank">
         OSM
     </a>
@@ -344,10 +344,10 @@ sources to use for any other country.
 
   <!-- Place Characterization Section with Merged DIMENSION Cell -->
   <tr>
-    <td rowspan="10" style="border: 1px solid black; padding: 1px; text-align: center; ">🌍PLACE CHARACTERIZATION</td>
-    <td rowspan="4" style="border: 1px solid black; padding: 1px; text-align: left; ">🚴Active Transport</td>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">🚸Location of street crossings</td>
-<td style="border: 1px solid black; padding: 1px; text-align: left;">
+    <td rowspan="10" style="text-align: center;">🌍PLACE CHARACTERIZATION</td>
+    <td rowspan="4" style="text-align: left;">🚴Active Transport</td>
+    <td style="text-align: left;">🚸Location of street crossings</td>
+<td style="text-align: left;">
     <a href="https://www.mapillary.com/developer/api-documentation/points" target="_blank">
         Mapillary
     </a>
@@ -358,24 +358,24 @@ sources to use for any other country.
 </td>
 </tr>
   <tr>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">🚴‍♀️Location of cycle paths</td>
-<td style="border: 1px solid black; padding: 1px; text-align: left;">
+    <td style="text-align: left;">🚴‍♀️Location of cycle paths</td>
+<td style="text-align: left;">
     <a href="https://overpass-turbo.eu/?Q=[out:xml][timeout:25];{{geocodeArea:Saint%20Lucia}}->.area_0;(node[%22highway%22=%22cycleway%22](area.area_0);node[%22highway%22=%22track%22](area.area_0);node[%22cycleway%22=%22track%22](area.area_0);node[%22cycleway%22=%22lane%22](area.area_0);node[%22cycleway%22=%22share_busway%22](area.area_0);node[%22cycleway%22=%22shared_lane%22](area.area_0);way[%22highway%22=%22cycleway%22](area.area_0);way[%22highway%22=%22track%22](area.area_0);way[%22cycleway%22=%22track%22](area.area_0);way[%22cycleway%22=%22lane%22](area.area_0);way[%22cycleway%22=%22share_busway%22](area.area_0);way[%22cycleway%22=%22shared_lane%22](area.area_0);relation[%22highway%22=%22cycleway%22](area.area_0);relation[%22highway%22=%22track%22](area.area_0);relation[%22cycleway%22=%22track%22](area.area_0);relation[%22cycleway%22=%22lane%22](area.area_0);relation[%22cycleway%22=%22share_busway%22](area.area_0);relation[%22cycleway%22=%22shared_lane%22](area.area_0););(._;>;);out%20body;" target="_blank">
         OSM
     </a>
 </td>
 </tr>
   <tr>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">👣Location of footpaths</td>
-<td style="border: 1px solid black; padding: 1px; text-align: left;">
+    <td style="text-align: left;">👣Location of footpaths</td>
+<td style="text-align: left;">
     <a href="https://overpass-turbo.eu/?Q=[out:xml][timeout:25];{{geocodeArea:Saint%20Lucia}}->.area_0;(node[%22highway%22=%22footway%22](area.area_0);way[%22highway%22=%22footway%22](area.area_0);relation[%22highway%22=%22footway%22](area.area_0););(._;>;);out%20body;" target="_blank">
         OSM
     </a>
 </td>
 </tr>
   <tr>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">🏘️Block Layout</td>
-<td style="border: 1px solid black; padding: 1px; text-align: left;">
+    <td style="text-align: left;">🏘️Block Layout</td>
+<td style="text-align: left;">
     <a href="https://overpass-turbo.eu/?Q=[out:xml][timeout:25];{{geocodeArea:Saint%20Lucia}}->.area_0;(node[%22landuse%22=%22residential%22](area.area_0);node[%22landuse%22=%22commercial%22](area.area_0);node[%22landuse%22=%22industrial%22](area.area_0);node[%22boundary%22=%22administrative%22](area.area_0);way[%22landuse%22=%22residential%22](area.area_0);way[%22landuse%22=%22commercial%22](area.area_0);way[%22landuse%22=%22industrial%22](area.area_0);way[%22boundary%22=%22administrative%22](area.area_0);relation[%22landuse%22=%22residential%22](area.area_0);relation[%22landuse%22=%22commercial%22](area.area_0);relation[%22landuse%22=%22industrial%22](area.area_0);relation[%22boundary%22=%22administrative%22](area.area_0););(._;>;);out%20body;" target="_blank">
         OSM
     </a>
@@ -383,9 +383,9 @@ sources to use for any other country.
 </tr>
 
   <tr>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">🛡️Safety Perception</td>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">Street lights/Nighttime lights</td>
-<td style="border: 1px solid black; padding: 1px; text-align: left;">
+    <td style="text-align: left;">🛡️Safety Perception</td>
+    <td style="text-align: left;">Street lights/Nighttime lights</td>
+<td style="text-align: left;">
     <a href="https://www.mapillary.com/developer/api-documentation/points" target="_blank">
         Mapillary
     </a>
@@ -396,34 +396,34 @@ sources to use for any other country.
 </td>
 </tr>
   <tr>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">⚠️FCV</td>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">ACLED data</td>
-<td style="border: 1px solid black; padding: 1px; text-align: left;">
+    <td style="text-align: left;">⚠️FCV</td>
+    <td style="text-align: left;">ACLED data</td>
+<td style="text-align: left;">
     <a href="mailto:civanescu@worldbank.org">
       mail for ACLED data
     </a>
 </td>
 </tr>
   <tr>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">📚Education</td>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">Share of graduates by field, female (%)</td>
-<td style="border: 1px solid black; padding: 1px; text-align: left;">
+    <td style="text-align: left;">📚Education</td>
+    <td style="text-align: left;">Share of graduates by field, female (%)</td>
+<td style="text-align: left;">
     <a href="https://genderdata.worldbank.org/en/indicator/se-ter-grad-fe-zs?fieldOfStudy=Science%2C+Technology%2C+Engineering+and+Mathematics+%28STEM%29">
         WB data</a>
 </td>
 </tr>
   <tr>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">💻Digital Inclusion</td>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">Individuals using the Internet (% of population)</td>
-<td style="border: 1px solid black; padding: 1px; text-align: left;">
+    <td style="text-align: left;">💻Digital Inclusion</td>
+    <td style="text-align: left;">Individuals using the Internet (% of population)</td>
+<td style="text-align: left;">
     <a href="https://genderdata.worldbank.org/en/indicator/it-net-user-zs">
         WB data</a>
 </td>
 </tr>
   <tr>
-  <td style="border: 1px solid black; padding: 1px; text-align: left;">🌋Environmental Hazards</td>
-  <td style="border: 1px solid black; padding: 1px; text-align: left;">Global Natural Hazards Data</td>
-  <td style="border: 1px solid black; padding: 1px; text-align: left;">
+  <td style="text-align: left;">🌋Environmental Hazards</td>
+  <td style="text-align: left;">Global Natural Hazards Data</td>
+  <td style="text-align: left;">
     <strong>General Data Source:</strong> <br>
     <a href="https://datacatalog.worldbank.org/int/search/dataset/0067117/Active-Fires-density-2003-2022" target="_blank">Fires</a> |
     <a href="https://datacatalog.worldbank.org/int/search/dataset/0067118/flood_hazard_100_year_return_period" target="_blank">Flood</a> |
@@ -434,9 +434,9 @@ sources to use for any other country.
   </td>
 </tr>
   <tr>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">💧Water Sanitation</td>
-    <td style="border: 1px solid black; padding: 1px; text-align: left; ">Water points</td>
-<td style="border: 1px solid black; padding: 1px; text-align: left;">
+    <td style="text-align: left;">💧Water Sanitation</td>
+    <td style="text-align: left;">Water points</td>
+<td style="text-align: left;">
     <a href="https://www.mapillary.com/developer/api-documentation/points" target="_blank">
         Mapillary
     </a>

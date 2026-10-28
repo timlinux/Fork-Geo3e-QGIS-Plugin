@@ -15,7 +15,7 @@ Geospatial Women's Employment Analytical Framework (GeoWEAF), so you can see
 exactly where to invest to close the gap.
 
 <div class="kz-cta" markdown>
-[:material-rocket-launch: Get Started](getting-started/index.md){ .kz-cta__primary }
+[:material-rocket-launch: Get Started](training/installation.md){ .kz-cta__primary }
 [:material-school: Training Walkthrough](training/index.md){ .kz-cta__secondary }
 [:simple-github: GitHub](https://github.com/worldbank/GeoE3){ .kz-cta__secondary }
 </div>
@@ -79,7 +79,7 @@ would raise the score where it's weakest.
     Combine population distribution with enablement scores to flag the
     highest-impact places to act.
 
-    [:octicons-arrow-right-24: Insights &amp; results](training/insights.md)
+    [:octicons-arrow-right-24: Viewing your results](training/insights.md)
 
 -   :material-puzzle-outline:{ .lg .middle } __A standard QGIS plugin__
 
@@ -88,7 +88,7 @@ would raise the score where it's weakest.
     Installs from the QGIS Plugin Manager like any other plugin — nothing
     bespoke to compile or configure.
 
-    [:octicons-arrow-right-24: Installation](getting-started/installation.md)
+    [:octicons-arrow-right-24: Installation](training/installation.md)
 
 </div>
 

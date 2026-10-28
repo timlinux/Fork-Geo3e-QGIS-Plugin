@@ -66,7 +66,7 @@ This tool employs a multicriteria evaluation (MCE) framework to spatially descri
 QGIS website: [https://www.qgis.org/en/site/](https://www.qgis.org/en/site/)
 
 <p align="center">
-  <img src="https://github.com/worldbank/GEOE3/raw/main/docs/pictures/installQGIS.jpg" alt="Install QGIS">
+  <img src="../pictures/installQGIS.jpg" alt="Install QGIS">
 </p>
 
 
@@ -75,7 +75,7 @@ QGIS website: [https://www.qgis.org/en/site/](https://www.qgis.org/en/site/)
 3. A pop-up window as seen in the image below should show up. Follow the prompts and leave all settings on default.
 
 <p align="center">
-  <img src="https://github.com/worldbank/GEOE3/raw/main/docs/pictures/qgis-setup.jpg" alt="QGIS Setup">
+  <img src="../pictures/qgis-setup.jpg" alt="QGIS Setup">
 </p>
 
 
@@ -84,7 +84,7 @@ QGIS website: [https://www.qgis.org/en/site/](https://www.qgis.org/en/site/)
 1. Open QGIS, navigate to the "Plugins" tab and select the "Manage and Install Plugins…" option from the drop-down menu.
 
 <p align="center">
-  <img src="https://github.com/worldbank/GEOE3/raw/main/docs/pictures/installORS.jpg" alt="install ORS">
+  <img src="../pictures/installORS.jpg" alt="install ORS">
 </p>
 
 2. The "Plugins" pop-up window should appear as seen in the image below.
@@ -186,7 +186,7 @@ Examples of files that can be used as input at a particular step as per the Pilo
 ### SETUP TAB {: #setup-tab }
 
 <p align="center">
-  <img src="https://github.com/worldbank/GEOE3/raw/main/docs/pictures/setupTab.jpg" alt="Setup Tab">
+  <img src="../pictures/setupTab.jpg" alt="Setup Tab">
 </p>
 
 1.	Create a project folder that will be used to store all tool outputs.
@@ -202,7 +202,7 @@ Examples of files that can be used as input at a particular step as per the Pilo
 5.	Copy and paste the EPSG code for your specific country and paste it in the Filter bar as seen in the image below.
 
 <p align="center">
-  <img src="https://github.com/worldbank/GEOE3/raw/main/docs/pictures/CRS.jpg" alt="CRS">
+  <img src="../pictures/CRS.jpg" alt="CRS">
 </p>
 
 6.	Select the CRS from the list and click “OK”.
@@ -215,7 +215,7 @@ Examples of files that can be used as input at a particular step as per the Pilo
 #### Workplace Discrimination {: #workplace-discrimination }
 
 <p align="center">
-  <img src="https://github.com/worldbank/GEOE3/raw/main/docs/pictures/WD.jpg" alt="picture">
+  <img src="../pictures/WD.jpg" alt="picture">
 </p>
 
 1.	Navigate to the WBL (Women, Business and the Law) report and input the WBL index score representing the value from 0 to 100. This value represents data at the national level and must be standardized on a scale ranging from 0 to 5. This indicator is composed by the Workplace Index score of the WBL. The data is already formatted on a scale from 1 to 100.
@@ -230,7 +230,7 @@ Examples of files that can be used as input at a particular step as per the Pilo
 #### Regulatory Frameworks {: #regulatory-frameworks }
 
 <p align="center">
-  <img src="https://github.com/worldbank/GEOE3/raw/main/docs/pictures/RF.jpg" alt="picture">
+  <img src="../pictures/RF.jpg" alt="picture">
 </p>
 
 1.	Navigate to the WBL (Women, Business and the Law) report and input the WBL Pay and Parenthood index scores, values ranging from 0 to 100. This value represents data at the national level and must be standardized on a scale ranging from 0 to 5. This indicator is composed by aggregating the Parenthood and Pay Index scores of the WBL. The data is already formatted on a scale from 1 to 100.
@@ -244,7 +244,7 @@ Examples of files that can be used as input at a particular step as per the Pilo
 #### Financial Inclusion {: #financial-inclusion }
 
 <p align="center">
-  <img src="https://github.com/worldbank/GEOE3/raw/main/docs/pictures/FI.jpg" alt="picture">
+  <img src="../pictures/FI.jpg" alt="picture">
 </p>
 
 1.	Navigate to the WBL (Women, Business and the Law) report and input the WBL Entrepreneurship index score, value ranging from 0 to 100. This value represents data at the national level and must be standardized on a scale ranging from 0 to 5. The data is already formatted on a scale from 1 to 100. It comes from the Entrepreneurship rating of the WBL Index.
@@ -258,7 +258,7 @@ Examples of files that can be used as input at a particular step as per the Pilo
 #### Aggregate {: #aggregate }
 
 <p align="center">
-  <img src="https://github.com/worldbank/GEOE3/raw/main/docs/pictures/WDAG.jpg" alt="picture">
+  <img src="../pictures/WDAG.jpg" alt="picture">
 </p>
 
 1.	Load the raster outputs generated in each of the previous factor tabs for the Contextual Dimension.
@@ -284,7 +284,7 @@ If a factor was executed in the same work session, its file path will automatica
 #### Women's Travel Patterns {: #women-s-travel-patterns }
 
 <p align="center">
-  <img src="https://github.com/worldbank/GEOE3/raw/main/docs/pictures/WTP.jpg" alt="picture">
+  <img src="../pictures/WTP.jpg" alt="picture">
 </p>
 
 1.	Navigate to and select point shapefile input of facilities related to women’s role as caregivers. This includes green spaces, grocery stores, pharmacies, kindergartens and schools.
@@ -311,7 +311,7 @@ If a factor was executed in the same work session, its file path will automatica
 #### Access to Public Transport {: #access-to-public-transport }
 
 <p align="center">
-  <img src="https://github.com/worldbank/GEOE3/raw/main/docs/pictures/APT.jpg" alt="picture">
+  <img src="../pictures/APT.jpg" alt="picture">
 </p>
 
 1.	Navigate to and select point shapefile input for public transport stops, including both land and maritime stops.
@@ -332,7 +332,7 @@ If a factor was executed in the same work session, its file path will automatica
 #### Access to Education and Training Facilities {: #access-to-education-and-training-facilities }
 
 <p align="center">
-  <img src="https://github.com/worldbank/GEOE3/raw/main/docs/pictures/ETF.jpg" alt="picture">
+  <img src="../pictures/ETF.jpg" alt="picture">
 </p>
 
 1.	Navigate to and select point shapefile input of education and training facilities (colleges, training facilities and universities).
@@ -353,7 +353,7 @@ If a factor was executed in the same work session, its file path will automatica
 #### Access to Health Facilities {: #access-to-health-facilities }
 
 <p align="center">
-  <img src="https://github.com/worldbank/GEOE3/raw/main/docs/pictures/HEF.jpg" alt="picture">
+  <img src="../pictures/HEF.jpg" alt="picture">
 </p>
 
 1.	Navigate to and select point shapefile input of health facilities (hospitals and clinics as the points of interest).
@@ -374,7 +374,7 @@ If a factor was executed in the same work session, its file path will automatica
 #### Access to Financial Facilities {: #access-to-financial-facilities }
 
 <p align="center">
-  <img src="https://github.com/worldbank/GEOE3/raw/main/docs/pictures/FIF.jpg" alt="picture">
+  <img src="../pictures/FIF.jpg" alt="picture">
 </p>
 
 1.	Navigate to and select point shapefile input of financial facilities (location of banks and other financial facilities except for ATMs).
@@ -396,7 +396,7 @@ If a factor was executed in the same work session, its file path will automatica
 #### Aggregate {: #ad-aggregation-tab }
 
 <p align="center">
-  <img src="https://github.com/worldbank/GEOE3/raw/main/docs/pictures/AGGACC.jpg" alt="picture">
+  <img src="../pictures/AGGACC.jpg" alt="picture">
 </p>
 
 1.	Load the raster outputs generated in each of the previous factor tabs for the Accessibility Dimension.
@@ -423,7 +423,7 @@ If a factor was executed in the same work session, its file path will automatica
 #### Active Transport {: #active-transport }
 
 <p align="center">
-  <img src="https://github.com/worldbank/GEOE3/raw/main/docs/pictures/AT.jpg" alt="picture">
+  <img src="../pictures/AT.jpg" alt="picture">
 </p>
 
 1.	Navigate to and select point shapefile for crosswalks, polyline shapefiles for cycle paths and for footpaths and polygon shapefile for block lengths.
@@ -444,7 +444,7 @@ If a factor was executed in the same work session, its file path will automatica
 #### Safety {: #safety }
 
 <p align="center">
-  <img src="https://github.com/worldbank/GEOE3/raw/main/docs/pictures/SAF.jpg" alt="picture">
+  <img src="../pictures/SAF.jpg" alt="picture">
 </p>
 
 1.	Navigate to and select
@@ -472,7 +472,7 @@ If a factor was executed in the same work session, its file path will automatica
 #### Digital Inclusion {: #digital-inclusion }
 
 <p align="center">
-  <img src="https://github.com/worldbank/GEOE3/raw/main/docs/pictures/DIG.jpg" alt="picture">
+  <img src="../pictures/DIG.jpg" alt="picture">
 </p>
 
 1.	Navigate to and select
@@ -489,7 +489,7 @@ If a factor was executed in the same work session, its file path will automatica
 #### Environmental Hazards {: #environmental-hazards }
 
 <p align="center">
-  <img src="https://github.com/worldbank/GEOE3/raw/main/docs/pictures/ENV.jpg" alt="picture">
+  <img src="../pictures/ENV.jpg" alt="picture">
 </p>
 
 1. Navigate to and select raster hazard event.
@@ -517,7 +517,7 @@ If a factor was executed in the same work session, its file path will automatica
 #### Education {: #education }
 
 <p align="center">
-  <img src="https://github.com/worldbank/GEOE3/raw/main/docs/pictures/EDU.jpg" alt="picture">
+  <img src="../pictures/EDU.jpg" alt="picture">
 </p>
 
 1. Navigate to and select
@@ -535,7 +535,7 @@ If a factor was executed in the same work session, its file path will automatica
 #### Fragility, conflict, and violence (FCV) {: #fragility-conflict-and-violence-fcv }
 
 <p align="center">
-  <img src="https://github.com/worldbank/GEOE3/raw/main/docs/pictures/FCV.jpg" alt="picture">
+  <img src="../pictures/FCV.jpg" alt="picture">
 </p>
 
 1.	Navigate to and select the csv data for Fragility, conflict and violence (FCV-ACLED data).
@@ -552,7 +552,7 @@ If a factor was executed in the same work session, its file path will automatica
 #### Water Sanitation {: #water-sanitation }
 
 <p align="center">
-  <img src="https://github.com/worldbank/GEOE3/raw/main/docs/pictures/WAS.jpg" alt="picture">
+  <img src="../pictures/WAS.jpg" alt="picture">
 </p>
 
 1.	Navigate to and select point shapefile for water points, catch basins, water valves and fire hydrants.
@@ -568,7 +568,7 @@ If a factor was executed in the same work session, its file path will automatica
 #### Aggregate {: #pd-aggregation-tab }
 
 <p align="center">
-  <img src="https://github.com/worldbank/GEOE3/raw/main/docs/pictures/AGGPD.jpg" alt="picture">
+  <img src="../pictures/AGGPD.jpg" alt="picture">
 </p>
 
 1.	Load the raster outputs generated in each of the previous factor tabs for the Place Characterization Dimension.
@@ -593,7 +593,7 @@ If a factor is missing it needs to be given a weighting of 0%. All factors shoul
 ### DIMENSION AGGREGATION TAB {: #dimension-aggregation-tab }
 
 <p align="center">
-  <img src="https://github.com/worldbank/GEOE3/raw/main/docs/pictures/AGGALL.jpg" alt="picture">
+  <img src="../pictures/AGGALL.jpg" alt="picture">
 </p>
 
 1.	Load each dimension’s aggregated raster outputs of previous domains (Contextual, Accessibility and Place Characterization).
@@ -617,7 +617,7 @@ If a dimension is missing it needs to be given a weighting of 0%. All domains sh
 ### ABOUT TAB {: #about-tab }
 
 <p align="center">
-  <img src="https://github.com/worldbank/GEOE3/raw/main/docs/pictures/abou.jpg" alt="picture">
+  <img src="../pictures/abou.jpg" alt="picture">
 </p>
 
 Information on the tool, its framework, scoring system, and how results should or can be interpreted.
@@ -626,7 +626,7 @@ Information on the tool, its framework, scoring system, and how results should o
 #### Enablement {: #enablement }
 
 <p align="center">
-  <img src="https://github.com/worldbank/GEOE3/raw/main/docs/pictures/ENA.jpg" alt="picture">
+  <img src="../pictures/ENA.jpg" alt="picture">
 </p>
 
 ### Step 1: Classify into discrete classes
@@ -669,7 +669,7 @@ Information on the tool, its framework, scoring system, and how results should o
 #### RE Zone Raster Locations {: #re-zone-raster-locations }
 
 <p align="center">
-  <img src="https://github.com/worldbank/GEOE3/raw/main/docs/pictures/REzone.jpg" alt="picture">
+  <img src="../pictures/REzone.jpg" alt="picture">
 </p>
 
 1. Navigate to and select the combined classification input file produced in step 2.3 of the “Enablement” tab (WEE_pop_score.tif). This file path will be automatically populated if step 2.3 of the “Enablement” tab was executed in the same work session.
@@ -688,7 +688,7 @@ Information on the tool, its framework, scoring system, and how results should o
 #### RE Point Locations {: #re-point-locations }
 
 <p align="center">
-  <img src="https://github.com/worldbank/GEOE3/raw/main/docs/pictures/REpoint.jpg" alt="picture">
+  <img src="../pictures/REpoint.jpg" alt="picture">
 </p>
 
 1.	Navigate to and select the combined classification input file produced in step 2.3 of the “Enablement” tab (WEE_pop_score.tif). This file path will be automatically populated if step 2.3 of the “Enablement” tab was executed in the same work session.

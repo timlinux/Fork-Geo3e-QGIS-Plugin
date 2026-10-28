@@ -148,18 +148,21 @@ plugins:
 
 nav:
   - Home: index.md
-  - Getting Started:
-    - getting-started/index.md
-    - Installation: getting-started/installation.md
   - Training Walkthrough:
     - training/index.md
+    - Installation: training/installation.md
+    - The Interface: training/interface.md
+    - The Model: training/the-model.md
+    - Processor Types: training/processor-types.md
     - Getting Data: training/datacollection.md
-    - Project Setup: training/navigation.md
+    - Configuring Items: training/configuring-items.md
     - Contextual Dimension: training/contextual.md
     - Accessibility Dimension: training/accessibility.md
     - Place Characterization Dimension: training/placecharacterization.md
-    - Exploring Your Results: training/insights.md
-    - The Analysis Report &amp; Raw Data: training/report.md
+    - Running the Analysis: training/running-the-analysis.md
+    - Viewing Your Results: training/insights.md
+    - The Analysis Report: training/report.md
+    - Sharing Your Results: training/sharing.md
   - About:
     - about/index.md
     - Background &amp; Framework: about/background.md
