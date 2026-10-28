@@ -482,6 +482,35 @@ body,
     }
 }
 
+/* mkdocs-material's admonition title icon is a masked ::before, absolutely
+   positioned into the title's left padding — WeasyPrint doesn't honour
+   that positioning, so the icon collides with the title text instead of
+   sitting beside it. And its ul/li bullets (• ) render as stray dots that
+   don't line up with the hanging-indent spacing meant for them. Rather
+   than chase exact pixel offsets in a renderer we can't preview directly,
+   drop the icon and switch admonition lists to plain unmarked paragraphs
+   for print; the colour-coded left rule still identifies the admonition
+   type on its own. Screen readers keep both, unaffected. */
+@media print {
+    .md-typeset .admonition-title::before,
+    .md-typeset summary::before {
+        display: none;
+    }
+    .md-typeset .admonition-title,
+    .md-typeset summary {
+        padding-left: 0.6rem;
+    }
+    .md-typeset .admonition ul,
+    .md-typeset .admonition ol {
+        list-style: none;
+        margin-left: 0;
+        padding-left: 0;
+    }
+    .md-typeset .admonition li {
+        margin-left: 0;
+    }
+}
+
 /* The home page's hero already has a proper cover page ahead of it
    (#doc-cover, from mkdocs-with-pdf's own cover: true setting) — its
    "Get Started" / "Training Walkthrough" / "GitHub" buttons are
