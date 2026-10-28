@@ -193,7 +193,7 @@ class TestItemInfoPanelMethodologySlideOver(unittest.TestCase):
         self.panel.more_link.click()
 
         self.assertEqual(self.panel.stack.currentIndex(), 1)
-        self.assertEqual(self.panel.methodology_heading_label.text(), "Counting What's Nearby")
+        self.assertEqual(self.panel.methodology_heading_label.text(), "Feature Count")
 
     def test_header_label_returns_to_item_page(self):
         self.panel.more_link.click()
@@ -324,7 +324,7 @@ class TestItemInfoPanelScaleAwareMethodology(unittest.TestCase):
 
         self.panel.more_link.click()
 
-        self.assertEqual(self.panel.methodology_heading_label.text(), "A Score Weighted Toward the Best Infrastructure")
+        self.assertEqual(self.panel.methodology_heading_label.text(), "Weighted Infrastructure Score")
         self.assertEqual(
             self.panel.methodology_body_label.toPlainText(),
             TECHNIQUES["weighted_feature_average"]["description"],
