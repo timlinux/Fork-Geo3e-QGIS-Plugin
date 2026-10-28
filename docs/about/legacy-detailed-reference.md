@@ -10,58 +10,58 @@
 
 This tool employs a multicriteria evaluation (MCE) framework to spatially describe womens' access to formal employment and business opportunities in the renewable energy sector in Small Island Developing States (SIDS). The MCE framework allows for the incorporation and assessment of dimensions, factors, and indicators to identify where the enabling environments (or lack thereof) are located for women to secure employment opportunities in SIDS.
 
-- The spatial GDBs for all SIDS can be accessed [here](https://datacatalog.worldbank.org/search/collections/genderspatial).
-- The methodology report can be accessed [here](https://documents.worldbank.org/en/publication/documents-reports/documentdetail/099121123091527675/p1792120dc820d04409928040a279022b42).
+(The spatial GDBs for all SIDS and the methodology report are linked from [Getting Data](../training/datacollection.md#pre-built-geodatabases-for-sids-countries) and [About](index.md#the-theory-behind) respectively.)
 
 ## User Manual
 
 **Gender Enabling Environments Spatial Tool (GEOE3) User Manual**
+
 1. [Install QGIS](#install-qgis)
 2. [Install Open Route Service (ORS) plugin](#install-open-route-service-ors-plugin)
 3. [Installing Plugin on local device](#installing-plugin-on-local-device)
 4. [Using the Plugin](#using-the-plugin)
-  - 4.1. [SETUP TAB](#setup-tab)
-  - 4.2. [CONTEXTUAL TAB](#contextual-tab)
-    - 4.2.1. [Workplace Discrimination](#workplace-discrimination)
-    - 4.2.2. [Regulatory Frameworks](#regulatory-frameworks)
-    - 4.2.3. [Financial Inclusion](#financial-inclusion)
-    - 4.2.4. [Aggregate](#aggregate)
-  - 4.3. [ACCESSIBILITY TAB](#accessibility-tab)
-    - 4.3.1. [Women's Travel Patterns](#women-s-travel-patterns)
-    - 4.3.2. [Access to Public Transport](#access-to-public-transport)
-    - 4.3.3. [Access to Education and Training Facilities](#access-to-education-and-training-facilities)
-    - 4.3.4. [Access to Health Facilities](#access-to-health-facilities)
-    - 4.3.5. [Access to Financial Facilities](#access-to-financial-facilities)
-    - 4.3.6. [Aggregate](#ad-aggregation-tab)
-  - 4.4. [PLACE CHARACTERIZATION TAB](#place-characterization-tab)
-    - 4.4.1. [Active Transport](#active-transport)
-    - 4.4.2. [Safety](#safety)
-    - 4.4.3. [Digital Inclusion](#digital-inclusion)
-    - 4.4.4. [Environmental Hazards](#environmental-hazards)
-    - 4.4.5. [Education](#education)
-    - 4.4.6. [Fragility, conflict, and violence (FCV)](#fragility-conflict-and-violence-fcv)
-    - 4.4.7. [Water Sanitation](#water-sanitation)
-    - 4.4.8. [Aggregate](#pd-aggregation-tab)
-  - 4.5. [DIMENSION AGGREGATION TAB](#dimension-aggregation-tab)
-  - 4.6. [ABOUT TAB](#about-tab)
-  - 4.7. [INSIGHTS TAB](#insights-tab)
-    - 4.7.1. [Enablement](#enablement)
-    - 4.7.2. [RE Zone Raster Locations](#re-zone-raster-locations)
-    - 4.7.3. [RE Point Locations](#re-point-locations)
+    - 4.1. [Setup Tab](#setup-tab)
+    - 4.2. [Contextual Tab](#contextual-tab)
+        - 4.2.1. [Workplace Discrimination](#workplace-discrimination)
+        - 4.2.2. [Regulatory Frameworks](#regulatory-frameworks)
+        - 4.2.3. [Financial Inclusion](#financial-inclusion)
+        - 4.2.4. [Aggregate](#aggregate)
+    - 4.3. [Accessibility Tab](#accessibility-tab)
+        - 4.3.1. [Women's Travel Patterns](#women-s-travel-patterns)
+        - 4.3.2. [Access to Public Transport](#access-to-public-transport)
+        - 4.3.3. [Access to Education and Training Facilities](#access-to-education-and-training-facilities)
+        - 4.3.4. [Access to Health Facilities](#access-to-health-facilities)
+        - 4.3.5. [Access to Financial Facilities](#access-to-financial-facilities)
+        - 4.3.6. [Aggregate](#ad-aggregation-tab)
+    - 4.4. [Place Characterization Tab](#place-characterization-tab)
+        - 4.4.1. [Active Transport](#active-transport)
+        - 4.4.2. [Safety](#safety)
+        - 4.4.3. [Digital Inclusion](#digital-inclusion)
+        - 4.4.4. [Environmental Hazards](#environmental-hazards)
+        - 4.4.5. [Education](#education)
+        - 4.4.6. [Fragility, conflict, and violence (FCV)](#fragility-conflict-and-violence-fcv)
+        - 4.4.7. [Water Sanitation](#water-sanitation)
+        - 4.4.8. [Aggregate](#pd-aggregation-tab)
+    - 4.5. [Dimension Aggregation Tab](#dimension-aggregation-tab)
+    - 4.6. [About Tab](#about-tab)
+    - 4.7. [Insights Tab](#insights-tab)
+        - 4.7.1. [Enablement](#enablement)
+        - 4.7.2. [RE Zone Raster Locations](#re-zone-raster-locations)
+        - 4.7.3. [RE Point Locations](#re-point-locations)
 5. [Troubleshooting](#troubleshooting)
-  - 5.1. [ACCESSIBILTY TABS PERMISSIONS ERROR](#accessibilty-permissions-error)
-  - 5.2. [QGIS PLUGIN/INTERFACE WIDGETS AND TEXT ARE DISTORTED AND SCALED INCORRECTLY](#distorted)
-  - 5.3. [RASTER OUTPUTS NOT BEING LOADED AND DISPLAYING CORRECTLY](#raster-outputs)
-  - 5.4. [ERROR: OUTPUT DIRECTORY NOT SET](#output-directory)
-  - 5.5. [ERROR: COUNTRY BOUNDARY POLYGON NOT SET](#country-boundary)
-  - 5.6. [ERROR: CO-ORDINATE REFERENCE SYSTEM (CRS) NOT SET](#crs)
-  - 5.7. [ALTERNATIVE WAY TO REFRESH THE PLUGIN IF IT FREEZES OR DOES NOT RUN AS EXPECTED](#alternative)
-- [List of CRSs for SIDS](#list-of-crss-for-sids)
-- [License](#license)
+    - 5.1. [Accessibility Tabs Permissions Error](#accessibilty-permissions-error)
+    - 5.2. [QGIS Plugin/Interface Widgets and Text Are Distorted and Scaled Incorrectly](#distorted)
+    - 5.3. [Raster Outputs Not Being Loaded and Displaying Correctly](#raster-outputs)
+    - 5.4. [Error: Output Directory Not Set](#output-directory)
+    - 5.5. [Error: Country Boundary Polygon Not Set](#country-boundary)
+    - 5.6. [Error: Co-ordinate Reference System (CRS) Not Set](#crs)
+    - 5.7. [Alternative Way to Refresh the Plugin if It Freezes or Does Not Run as Expected](#alternative)
+6. [List of CRSs for SIDS](#list-of-crss-for-sids)
+7. [License](#license)
 
 ## Install QGIS {: #install-qgis }
 
-1. 1.	The link below will take you to the QGIS website where you will be able to download the QGIS installation file. Note that it is possible to use older versions of QGIS, e.g. Version 3.32 - Lima.
+1. The link below will take you to the QGIS website where you will be able to download the QGIS installation file. Note that it is possible to use older versions of QGIS, e.g. Version 3.32 - Lima.
 
 QGIS website: [https://www.qgis.org/en/site/](https://www.qgis.org/en/site/)
 
@@ -183,7 +183,7 @@ support@openrouteservice.heigit.org
 ## Using the Plugin {: #using-the-plugin }
 Examples of files that can be used as input at a particular step as per the Pilot Country Database will be indicated at the end of the step.
 
-### SETUP TAB {: #setup-tab }
+### Setup Tab {: #setup-tab }
 
 <p align="center">
   <img src="../pictures/setupTab.jpg" alt="Setup Tab">
@@ -210,7 +210,7 @@ Examples of files that can be used as input at a particular step as per the Pilo
 7.	Set your preferred output raster output resolution in meters squared.
 
 
-### CONTEXTUAL TAB {: #contextual-tab }
+### Contextual Tab {: #contextual-tab }
 
 #### Workplace Discrimination {: #workplace-discrimination }
 
@@ -279,7 +279,7 @@ If a factor was executed in the same work session, its file path will automatica
 8.	The aggregated output raster file will be stored in the project folder specified in the “Setup” tab, under the “Contextual” folder. (Project_Folder/Contextual/ Contextual_score.tif). The user can rename the output file to preferred filename.
 
 
-### ACCESSIBILITY TAB {: #accessibility-tab }
+### Accessibility Tab {: #accessibility-tab }
 
 #### Women's Travel Patterns {: #women-s-travel-patterns }
 
@@ -392,7 +392,6 @@ If a factor was executed in the same work session, its file path will automatica
 7.	The output raster file will be stored in the project folder specified in the “Setup” tab, under the “Accessibility” folder. (Project_Folder/Accessibility/FIF.tif). The user can rename the output file to preferred filename.
 
 
-(ad-aggregation-tab)=
 #### Aggregate {: #ad-aggregation-tab }
 
 <p align="center">
@@ -418,7 +417,7 @@ If a factor was executed in the same work session, its file path will automatica
 8.	The aggregated output raster file will be stored in the project folder specified in the “Setup” tab, under the “Accessibility” folder (Project_Folder/Accessibility/Accessibility_score.tif). The user can rename the output file to preferred filename.
 
 
-### PLACE CHARACTERIZATION TAB {: #place-characterization-tab }
+### Place Characterization Tab {: #place-characterization-tab }
 
 #### Active Transport {: #active-transport }
 
@@ -564,7 +563,6 @@ If a factor was executed in the same work session, its file path will automatica
 4.	The output raster file will be stored in the project folder specified in the “Setup” tab, under the “Place Characterization” folder (Project_Folder/Place Characterization/WAS.tif). The user can rename the output file to preferred filename.
 
 
-(pd-aggregation-tab)=
 #### Aggregate {: #pd-aggregation-tab }
 
 <p align="center">
@@ -590,7 +588,7 @@ If a factor is missing it needs to be given a weighting of 0%. All factors shoul
 8.	The aggregated output raster file will be stored in the project folder specified in the “Setup” tab, under the “Place Characterization” folder (Project_Folder/Place Characterization/Place_score.tif). The user can rename the output file to preferred filename.
 
 
-### DIMENSION AGGREGATION TAB {: #dimension-aggregation-tab }
+### Dimension Aggregation Tab {: #dimension-aggregation-tab }
 
 <p align="center">
   <img src="../pictures/AGGALL.jpg" alt="picture">
@@ -614,7 +612,7 @@ If a dimension is missing it needs to be given a weighting of 0%. All domains sh
 7.	The aggregated output raster file will be stored in the project folder specified in the “Setup” tab, under the “Final_output” folder (*Project_Folder/Final_Output/WEE.tif). The user can rename the output file to preferred filename.
 
 
-### ABOUT TAB {: #about-tab }
+### About Tab {: #about-tab }
 
 <p align="center">
   <img src="../pictures/abou.jpg" alt="picture">
@@ -622,7 +620,7 @@ If a dimension is missing it needs to be given a weighting of 0%. All domains sh
 
 Information on the tool, its framework, scoring system, and how results should or can be interpreted.
 
-### INSIGHTS TAB {: #insights-tab }
+### Insights Tab {: #insights-tab }
 #### Enablement {: #enablement }
 
 <p align="center">
@@ -706,7 +704,7 @@ Information on the tool, its framework, scoring system, and how results should o
 
 ## Troubleshooting {: #troubleshooting }
 
-### ACCESSIBILTY TABS PERMISSIONS ERROR {: #accessibilty-permissions-error }
+### Accessibility Tabs Permissions Error {: #accessibilty-permissions-error }
 
 ![image](https://github.com/worldbank/GEOE3/assets/120469484/63edfc18-8294-478c-bcc5-1a4f28c07711)
 
@@ -718,7 +716,7 @@ If the file is not produced you can try the following:
 - Delete the *temp* folder in the working directory
 - If you cannot delete the *temp* folder you will have to close QGIS and open it again, complete the setup tab, go back to the tab where the error occurred and re-run the tab again.
 
-### QGIS PLUGIN/INTERFACE WIDGETS AND TEXT ARE DISTORTED AND SCALED INCORRECTLY {: #distorted }
+### QGIS Plugin/Interface Widgets and Text Are Distorted and Scaled Incorrectly {: #distorted }
 ![image](https://github.com/worldbank/GEOE3/assets/120469484/e195416b-ee86-4998-9ca5-a4784f7c724e)
 
 This is a problem linked to display settings caused by the connection of multiple monitors and/or varying display scales and resolutions, rather than a QGIS or plugin-related issue. This is backed by a Microsoft support post, linked [here](https://support.microsoft.com/en-gb/topic/windows-scaling-issues-for-high-dpi-devices-508483cd-7c59-0d08-12b0-960b99aa347d), highlighting the issues that may be experienced when using a high-DPI device, such as a 4k monitor. Additionally, in the scaling display setting, Microsoft indicates that entering a custom scaling size between 100% - 500% is not recommended as "...it can cause text and apps to become unreadable."
@@ -729,31 +727,31 @@ Possible solutions to this are:
 - Adjust the scale for all monitors to 100%.
 - Ensure that the display resolution is the same for both monitors. i.e. If the smallest monitor is set to 1920 x 1080 set the 4k monitor to this display resolution as well.
 
-### RASTER OUTPUTS NOT BEING LOADED AND DISPLAYING CORRECTLY {: #raster-outputs }
+### Raster Outputs Not Being Loaded and Displaying Correctly {: #raster-outputs }
 
 ![image](https://github.com/worldbank/GEOE3/assets/120469484/10de6c72-f8f6-47b8-adb3-930f5c625f66)
 
 Occasionally, some of the outputs automatically loaded to the QGIS table of contents do not display correctly. To correct this, try removing the layer that is displayed incorrectly and add it again to QGIS.
 
-### ERROR: OUTPUT DIRECTORY NOT SET {: #output-directory }
+### Error: Output Directory Not Set {: #output-directory }
 
 ![image](https://github.com/worldbank/GEOE3/assets/120469484/b2f2959e-85c4-4e89-8493-dac2b9a20f07)
 
 If you see the following error message, please check if your output directory has been set in the "Setup" tab.
 
-### ERROR: COUNTRY BOUNDARY POLYGON NOT SET {: #country-boundary }
+### Error: Country Boundary Polygon Not Set {: #country-boundary }
 
 ![image](https://github.com/worldbank/GEOE3/assets/120469484/75882e9d-a9af-43fc-9f68-0293c75b49b3)
 
 If you see the following error message, please check if you're country boundary polygon layer has been set in the "Setup" tab.
 
-### ERROR: CO-ORDINATE REFERENCE SYSTEM (CRS) NOT SET {: #crs }
+### Error: Co-ordinate Reference System (CRS) Not Set {: #crs }
 
 ![image](https://github.com/worldbank/GEOE3/assets/120469484/120c0cf9-e526-4d8b-adff-de3a9d2f7fb8)
 
 If you see the following error message, please check if you're CRS has been set in the "Setup" tab.
 
-### ALTERNATIVE WAY TO REFRESH THE PLUGIN IF IT FREEZES OR DOES NOT RUN AS EXPECTED {: #alternative }
+### Alternative Way to Refresh the Plugin if It Freezes or Does Not Run as Expected {: #alternative }
 
 1. Install the "Plugin Reloader" plugin.
 

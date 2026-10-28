@@ -21,6 +21,16 @@ There are three distinct ways that data gets into your project:
 This page works through each one as a short, self-contained tutorial. Skip
 to whichever source you need.
 
+## Pre-built geodatabases for SIDS countries
+
+If the country you're analysing is one of the Small Island Developing
+States (SIDS) covered by the World Bank's original GeoWEAF pilot, you may
+not need to assemble your own data at all: a ready-made geodatabase
+already exists. The [World Bank Gender Spatial data
+catalogue](https://datacatalog.worldbank.org/search/collections/genderspatial)
+collects the spatial GDBs for every SIDS pilot country, pre-built for use
+with this tool.
+
 ## Tutorial: automatic downloads built into GeoE3
 
 There's another way to get data besides going and fetching it yourself:
