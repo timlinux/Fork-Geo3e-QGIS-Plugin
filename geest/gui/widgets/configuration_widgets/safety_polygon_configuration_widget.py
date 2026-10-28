@@ -1,14 +1,24 @@
-import os
+# -*- coding: utf-8 -*-
+"""📦 Safety Polygon Configuration Widget module.
+
+This module contains functionality for safety polygon configuration widget.
+"""
+
+from qgis.core import Qgis
 from qgis.PyQt.QtWidgets import (
+    QAbstractSpinBox,
+    QHeaderView,
     QLabel,
+    QSizePolicy,
+    QSpinBox,
+    QStyleFactory,
     QTableWidget,
     QTableWidgetItem,
-    QSpinBox,
 )
-from qgis.PyQt.QtWidgets import QSizePolicy
-from qgis.core import Qgis
-from .base_configuration_widget import BaseConfigurationWidget
+
 from geest.utilities import log_message
+
+from .base_configuration_widget import BaseConfigurationWidget
 
 
 class SafetyPolygonConfigurationWidget(BaseConfigurationWidget):
@@ -28,6 +38,16 @@ class SafetyPolygonConfigurationWidget(BaseConfigurationWidget):
         polygon_shapefile_line_edit (QLineEdit): Line edit for entering/selecting a polygon layer shapefile.
     """
 
+    def _set_spinbox_style(self, spin_box: QSpinBox, warning: bool) -> None:
+        """Apply minimal styling while preserving native arrow rendering."""
+        text_color = "#d11" if warning else "#000"
+        fusion_style = QStyleFactory.create("Fusion")
+        if fusion_style is not None:
+            spin_box.setStyle(fusion_style)
+        spin_box.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.UpDownArrows)
+        if spin_box.lineEdit() is not None:
+            spin_box.lineEdit().setStyleSheet(f"color: {text_color};")
+
     def add_internal_widgets(self) -> None:
         """
         Adds the internal widgets required for selecting polygon layers and their corresponding shapefiles.
@@ -37,18 +57,20 @@ class SafetyPolygonConfigurationWidget(BaseConfigurationWidget):
             self.info_label = QLabel("Classify polygons according to safety levels")
             self.internal_layout.addWidget(self.info_label)
             self.table_widget = QTableWidget()
-            self.table_widget.setSizePolicy(
-                QSizePolicy.Expanding, QSizePolicy.Expanding
-            )
+            self.table_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             # Stop the label being editable
-            self.table_widget.setEditTriggers(QTableWidget.NoEditTriggers)
+            self.table_widget.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+            self.table_widget.verticalHeader().setVisible(True)
+            self.table_widget.verticalHeader().setDefaultSectionSize(24)
+            self.table_widget.verticalHeader().setMinimumSectionSize(20)
+            self.table_widget.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+            self.table_widget.verticalHeader().setFixedWidth(28)
             self.internal_layout.addWidget(self.table_widget)
             self.table_widget.setColumnCount(2)
-            self.table_widget.setColumnWidth(1, 80)
+            self.table_widget.setColumnWidth(1, 110)
             self.table_widget.horizontalHeader().setStretchLastSection(False)
-            self.table_widget.horizontalHeader().setSectionResizeMode(
-                0, self.table_widget.horizontalHeader().Stretch
-            )
+            self.table_widget.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+            self.table_widget.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
 
             return self.populate_table()
             self.internal_layout.addWidget(self.table_widget)
@@ -60,11 +82,14 @@ class SafetyPolygonConfigurationWidget(BaseConfigurationWidget):
             log_message(traceback.format_exc(), level=Qgis.Critical)
 
     def populate_table(self):
+        """⚙️ Populate table.
+
+        Returns:
+            The result of the operation.
+        """
 
         self.table_widget.setHorizontalHeaderLabels(["Name", "Value 0-100"])
-        safety_classes = self.attributes.get(
-            f"classify_safety_polygon_into_classes_unique_values", {}
-        )
+        safety_classes = self.attributes.get("classify_safety_polygon_into_classes_unique_values", {})
         if not isinstance(safety_classes, dict):
             safety_classes = {}
             # remove any item from the safety_classes where the key is not a string
@@ -72,6 +97,14 @@ class SafetyPolygonConfigurationWidget(BaseConfigurationWidget):
         self.table_widget.setRowCount(len(safety_classes))
 
         def validate_value(value):
+            """🔄 Validate value.
+
+            Args:
+                value: Value.
+
+            Returns:
+                The result of the operation.
+            """
             return 0 <= value <= 100
 
         log_message(f"Classes: {safety_classes}")
@@ -91,15 +124,21 @@ class SafetyPolygonConfigurationWidget(BaseConfigurationWidget):
             self.table_widget.setItem(row, 0, name_item)
             value_item.setRange(0, 100)  # Set spinner range
             value_item.setValue(value)  # Default value
+            self._set_spinbox_style(value_item, warning=False)
             self.table_widget.setCellWidget(row, 1, value_item)
 
-            def on_value_changed(value):
+            def on_value_changed(value, spin_box=value_item):
+                """🔄 On value changed.
+
+                Args:
+                    value: Value.
+                """
                 # Color handling for current cell
                 if value is None or not (0 <= value <= 100):
-                    value_item.setStyleSheet("color: red;")
-                    value_item.setValue(0)
+                    self._set_spinbox_style(spin_box, warning=True)
+                    spin_box.setValue(0)
                 else:
-                    value_item.setStyleSheet("color: black;")
+                    self._set_spinbox_style(spin_box, warning=False)
                 self.update_cell_colors()
                 self.update_data()
 
@@ -109,6 +148,7 @@ class SafetyPolygonConfigurationWidget(BaseConfigurationWidget):
             self.update_cell_colors()
 
     def update_cell_colors(self):
+        """⚙️ Update cell colors."""
         # Check if all values are zero
         all_zeros = True
         for r in range(self.table_widget.rowCount()):
@@ -121,11 +161,14 @@ class SafetyPolygonConfigurationWidget(BaseConfigurationWidget):
         for r in range(self.table_widget.rowCount()):
             spin_widget = self.table_widget.cellWidget(r, 1)
             if spin_widget:
-                spin_widget.setStyleSheet(
-                    "color: red;" if all_zeros else "color: black;"
-                )
+                self._set_spinbox_style(spin_widget, warning=all_zeros)
 
     def table_to_dict(self):
+        """⚙️ Table to dict.
+
+        Returns:
+            The result of the operation.
+        """
         updated_attributes = {}
         for row in range(self.table_widget.rowCount()):
             spin_widget = self.table_widget.cellWidget(row, 1)
@@ -152,9 +195,7 @@ class SafetyPolygonConfigurationWidget(BaseConfigurationWidget):
         # Serialize the self.table_widget back into the classify_polygon_into_classes_unique_values attribute
         updated_attributes = self.table_to_dict()
 
-        self.attributes["classify_safety_polygon_into_classes_unique_values"] = (
-            updated_attributes
-        )
+        self.attributes["classify_safety_polygon_into_classes_unique_values"] = updated_attributes
         # log_message("------------------------------------")
         # log_message("------------------------------------")
         # log_message(f"Attributes: {self.attributes}")
@@ -174,7 +215,7 @@ class SafetyPolygonConfigurationWidget(BaseConfigurationWidget):
         except Exception as e:
             log_message(
                 f"Error in set_internal_widgets_enabled: {e}",
-                tag="Geest",
+                tag="GeoE3",
                 level=Qgis.Critical,
             )
 

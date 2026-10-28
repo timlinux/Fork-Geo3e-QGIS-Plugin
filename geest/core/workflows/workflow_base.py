@@ -1,33 +1,60 @@
+# -*- coding: utf-8 -*-
+"""📦 Workflow Base module.
+
+This module contains functionality for workflow base.
+"""
+
 import datetime
 import os
-import shutil
 import traceback
-from abc import ABC, abstractmethod
-from qgis.core import (
-    QgsFeedback,
-    QgsVectorLayer,
-    Qgis,
-    QgsProcessingContext,
-    QgsProcessingFeedback,
-    QgsGeometry,
-    QgsProcessingFeedback,
-    QgsProcessingException,
-    QgsVectorLayer,
-    Qgis,
-)
+from abc import abstractmethod
+from typing import Optional
+
 from qgis import processing
-from qgis.PyQt.QtCore import QSettings, pyqtSignal, QObject
+from qgis.core import (
+    Qgis,
+    QgsCoordinateReferenceSystem,
+    QgsCoordinateTransform,
+    QgsFeedback,
+    QgsField,
+    QgsGeometry,
+    QgsProcessingContext,
+    QgsProcessingException,
+    QgsProcessingFeedback,
+    QgsProject,
+    QgsRasterLayer,
+    QgsRectangle,
+    QgsVectorLayer,
+)
+from qgis.PyQt.QtCore import QObject, QSettings, QVariant, pyqtSignal
+
 from geest.core import JsonTreeItem, setting
-from geest.utilities import resources_path
 from geest.core.algorithms import (
     AreaIterator,
-    subset_vector_layer,
-    geometry_to_memory_layer,
+    GHSLDownloader,
+    GHSLProcessor,
     check_and_reproject_layer,
     combine_rasters_to_vrt,
+    geometry_to_memory_layer,
+    subset_vector_layer,
 )
 from geest.core.constants import GDAL_OUTPUT_DATA_TYPE
-from geest.utilities import log_message, log_layer_count
+from geest.core.grid_column_utils import (
+    clear_grid_column,
+    fill_grid_column_zero_for_area,
+    rasterize_grid_column,
+    write_raster_values_to_grid,
+)
+from geest.utilities import log_layer_count, log_message, resources_path
+
+
+class WorkflowNotConfiguredError(RuntimeError):
+    """Raised by a workflow's __init__ when its data source is missing/invalid.
+
+    A plain ``return False`` inside ``__init__`` is a TypeError in Python;
+    this exception lets the queue manager decline the job gracefully and
+    tell the user which indicator still needs configuring.
+    """
 
 
 class WorkflowBase(QObject):
@@ -37,30 +64,42 @@ class WorkflowBase(QObject):
     """
 
     # Signal for progress changes - will be propagated to the task that owns this workflow
-    progressChanged = pyqtSignal(int)
+    progressChanged = pyqtSignal(float)
+    # Signal for status message changes - shows what step is currently running
+    statusChanged = pyqtSignal(str)
+    # Signal emitted when the workflow fails - propagated to the UI as an error notification
+    workflowError = pyqtSignal(str)
 
     def __init__(
         self,
         item: JsonTreeItem,
-        cell_size_m: 100.0,
+        cell_size_m: float,
+        analysis_scale: str,  # local or national
         feedback: QgsFeedback,
         context: QgsProcessingContext,
-        working_directory: str = None,
+        working_directory: Optional[str],
     ):
         """
         Initialize the workflow with attributes and feedback.
-        :param item: JsonTreeItem object representing the task.
-        :param cell_size_m: The cell size in meters for the analysis.
-        :param feedback: QgsFeedback object for progress reporting and cancellation.
-        :context: QgsProcessingContext object for processing. This can be used to pass objects to the thread. e.g. the QgsProject Instance
-        :working_directory: Folder containing study_area.gpkg and where the outputs will be placed. If not set will be taken from QSettings.
+
+        Args:
+            item: JsonTreeItem object representing the task.
+            cell_size_m: The cell size in meters for the analysis.
+            analysis_scale: Analysis scale string to determine the workflow e.g. local, national.
+            feedback: QgsFeedback object for progress reporting and cancellation.
+            context: QgsProcessingContext object for processing. This can be used to pass objects to the thread. e.g. the QgsProject Instance
+            working_directory: Folder containing study_area.gpkg and where the outputs will be placed. If not set will be taken from QSettings.
+
+        Raises:
+            ValueError: If working directory is not set or study area geopackage is not found.
         """
         super().__init__()
         log_layer_count()  # For performance tuning, write the number of open layers to a log file
         # we will log the layer count again at then end of the workflow
         self.item = item  # ⭐️ This is a reference - whatever you change in this item will directly update the tree
         self.cell_size_m = cell_size_m
-        self.feedback = feedback
+        self.analysis_scale = analysis_scale
+        self.feedback = feedback  # we connect this to the QgsTask progressUpdated signal
         self.context = context  # QgsProcessingContext
         self.workflow_name = None  # This is set in the concrete class
         # This is set in the setup panel
@@ -70,22 +109,17 @@ class WorkflowBase(QObject):
             log_message(f"Working directory set to {working_directory}")
             self.working_directory = working_directory
         else:
-            log_message(
-                "Working directory not set. Using last working directory from settings."
-            )
+            log_message("Working directory not set. Using last working directory from settings.")
             self.working_directory = self.settings.value("last_working_directory", "")
         if not self.working_directory:
             raise ValueError("Working directory not set.")
         # This is the lower level directory for this workflow's outputs
         self.workflow_directory = self._create_workflow_directory()
-        self.gpkg_path: str = os.path.join(
-            self.working_directory, "study_area", "study_area.gpkg"
-        )
+        self.gpkg_path: str = os.path.join(self.working_directory, "study_area", "study_area.gpkg")
         if not os.path.exists(self.gpkg_path):
             raise ValueError(f"Study area geopackage not found at {self.gpkg_path}.")
-        self.bboxes_layer = QgsVectorLayer(
-            f"{self.gpkg_path}|layername=study_area_bboxes", "study_area_bboxes", "ogr"
-        )
+        self.bbox_layer = QgsVectorLayer(f"{self.gpkg_path}|layername=study_area_bbox", "study_area_bbox", "ogr")
+        self.bboxes_layer = QgsVectorLayer(f"{self.gpkg_path}|layername=study_area_bboxes", "study_area_bboxes", "ogr")
         self.areas_layer = QgsVectorLayer(
             f"{self.gpkg_path}|layername=study_area_polygons",
             "study_area_polygons",
@@ -96,23 +130,336 @@ class WorkflowBase(QObject):
             "study_area_clip_polygons",
             "ogr",
         )
-        self.grid_layer = QgsVectorLayer(
-            f"{self.gpkg_path}|layername=study_area_grid", "study_area_grid", "ogr"
-        )
+        self.grid_layer = QgsVectorLayer(f"{self.gpkg_path}|layername=study_area_grid", "study_area_grid", "ogr")
         self.features_layer = None  # set in concrete class if needed
         self.raster_layer = None  # set in concrete class if needed
-        self.target_crs = self.bboxes_layer.crs()
+        self.target_crs = self._resolve_target_crs()
 
         self.result_file_key = "result_file"
         self.result_key = "result"
+        self.supports_empty_features_fallback = False
 
-        # Will be populated by the workflow
+        # Will be populated by the workflow - use atomic update for thread safety
         self.attributes = self.item.attributes()
-        self.layer_id = self.attributes.get("id", "").lower().replace(" ", "_")
+        with self.item.atomicAttributeUpdate() as attrs:
+            attrs["error"] = None
+            attrs["error_file"] = None
+            attrs["execution_start_time"] = None
+            attrs["execution_end_time"] = None
+        # Add prefix based on item role to avoid namespace collisions
+        raw_id = self.attributes.get("id", "").lower().replace(" ", "_")
+        role = self.item.role if hasattr(self.item, "role") else ""
+        if role == "dimension":
+            self.layer_id = f"dim_{raw_id}"
+        elif role == "factor":
+            self.layer_id = f"fac_{raw_id}"
+        else:
+            self.layer_id = raw_id  # indicators keep raw ID
         self.aggregation = False
         self.analysis_mode = self.item.attribute("analysis_mode", "")
-        self.progressChanged.emit(0)
+        # Grid-first mode: if True, skip raster-to-grid sampling since grid is already populated
+        self.use_grid_first = False
+        # Track if grid column has been cleared (for fallback paths that skip _process_grid_first)
+        self._grid_column_cleared = False
+        self.updateProgress(0.0)
         self.output_filename = self.attributes.get("output_filename", "")
+        self.feedback.progressChanged.connect(self.updateProgress)
+
+    def _study_area_bbox(self) -> QgsRectangle:
+        """
+        Get the study area bounding box geometry.
+
+        Returns:
+            The bounding box QgsRectangle.
+        """
+
+        bbox = self.bbox_layer.extent()
+
+        return bbox
+
+    def _study_area_bbox_4326(self) -> QgsRectangle:
+        """
+        Get the study area bounding box geometry in EPSG:4326.
+
+        Returns:
+            The bounding box QgsRectangle.
+        """
+        transform = QgsCoordinateTransform(
+            self.bbox_layer.crs(),
+            QgsCoordinateReferenceSystem("EPSG:4326"),
+            QgsProject.instance(),
+        )
+        bbox = self.bbox_layer.extent()
+        bbox = QgsCoordinateTransform.transformBoundingBox(transform, bbox)
+        return bbox
+
+    def _resolve_target_crs(self) -> QgsCoordinateReferenceSystem:
+        """Resolve the target CRS from the study area GeoPackage.
+
+        First tries ``self.bboxes_layer.crs()``.  If the QGIS OGR provider
+        returns an invalid/empty CRS (which can happen when WAL journal files
+        leave stale shared-memory state), falls back to reading the CRS
+        directly from the ``gpkg_geometry_columns`` / ``gpkg_spatial_ref_sys``
+        metadata tables via OGR SQL.
+        """
+        crs = self.bboxes_layer.crs()
+        if crs.isValid() and crs.authid():
+            return crs
+
+        log_message(
+            "bboxes_layer CRS is invalid or empty — reading CRS from gpkg metadata",
+            tag="GeoE3",
+            level=Qgis.Warning,
+        )
+        metadata_crs = self._read_crs_from_gpkg_metadata()
+        if metadata_crs is not None:
+            crs = metadata_crs
+
+        if not crs.isValid():
+            # The GeoPackage may be corrupt (e.g. duplicated rtree triggers
+            # from a past write race). Attempt an in-place self-heal, then
+            # retry the metadata read once before giving up.
+            from geest.core.gpkg_doctor import heal_geopackage
+
+            report = heal_geopackage(
+                self.gpkg_path,
+                log=lambda message: log_message(message, tag="GeoE3", level=Qgis.Warning),
+            )
+            if report.was_corrupt and report.healthy:
+                log_message(
+                    f"Study area GeoPackage self-healed: {report.summary()}",
+                    tag="GeoE3",
+                    level=Qgis.Warning,
+                )
+                metadata_crs = self._read_crs_from_gpkg_metadata()
+                if metadata_crs is not None:
+                    crs = metadata_crs
+
+        if not crs.isValid():
+            integrity_status = self._quick_check_gpkg()
+            raise ValueError(
+                f"Could not determine CRS for study area from {self.gpkg_path}. "
+                f"GeoPackage integrity check: {integrity_status}."
+            )
+        return crs
+
+    def _read_crs_from_gpkg_metadata(self) -> Optional[QgsCoordinateReferenceSystem]:
+        """Read the study area CRS directly from the GeoPackage metadata tables.
+
+        Returns:
+            A valid QgsCoordinateReferenceSystem, or None if it could not be read.
+        """
+        try:
+            from osgeo import ogr
+
+            ds = ogr.Open(self.gpkg_path, 0)
+            if ds:
+                result = ds.ExecuteSQL(
+                    "SELECT gc.srs_id, srs.organization, srs.organization_coordsys_id "
+                    "FROM gpkg_geometry_columns gc "
+                    "JOIN gpkg_spatial_ref_sys srs ON gc.srs_id = srs.srs_id "
+                    "WHERE gc.table_name = 'study_area_bboxes' LIMIT 1"
+                )
+                crs = None
+                if result:
+                    feat = result.GetNextFeature()
+                    if feat:
+                        org = feat.GetField("organization")
+                        org_id = feat.GetField("organization_coordsys_id")
+                        if org and org_id:
+                            crs = QgsCoordinateReferenceSystem(f"{org}:{org_id}")
+                            log_message(
+                                f"Recovered CRS from gpkg metadata: {crs.authid()}",
+                                tag="GeoE3",
+                                level=Qgis.Info,
+                            )
+                    ds.ReleaseResultSet(result)
+                ds = None
+                if crs is not None and crs.isValid():
+                    return crs
+        except Exception as e:
+            log_message(
+                f"Failed to read CRS from gpkg metadata: {e}",
+                tag="GeoE3",
+                level=Qgis.Critical,
+            )
+        return None
+
+    def _quick_check_gpkg(self) -> str:
+        """Run SQLite quick_check on the study area GeoPackage."""
+        from geest.core.gpkg_doctor import quick_check
+
+        return quick_check(self.gpkg_path)
+
+    def _check_ghsl_layer_exists(self) -> bool:
+        """Check if the GHSL settlements layer exists in the study area GeoPackage.
+
+        Returns:
+            True if GHSL layer exists and has features, False otherwise.
+        """
+        ghsl_layer_path = f"{self.gpkg_path}|layername=ghsl_settlements"
+        ghsl_layer = QgsVectorLayer(ghsl_layer_path, "ghsl_check", "ogr")
+        if ghsl_layer.isValid() and ghsl_layer.featureCount() > 0:
+            log_message(f"GHSL layer found with {ghsl_layer.featureCount()} features")
+            return True
+        log_message("GHSL layer not found or empty in study_area.gpkg", level="WARNING")
+        return False
+
+    def _download_ghsl_data(self) -> bool:
+        """Download and process GHSL data for the study area if not already present.
+
+        This method will download GHSL tiles that intersect the study area,
+        process them, and add the results to the study_area.gpkg.
+
+        Returns:
+            True if GHSL data was successfully downloaded/processed, False otherwise.
+        """
+        try:
+            log_message("Attempting to download GHSL data...")
+
+            # Get study area extent in EPSG:4326 for GHSL download
+            extent_4326 = self._study_area_bbox_4326()
+            log_message(f"Study area extent (EPSG:4326): {extent_4326.toString()}")
+
+            study_area_dir = os.path.join(self.working_directory, "study_area")
+
+            # Download GHSL tiles
+            downloader = GHSLDownloader(
+                extents=extent_4326,
+                output_path=study_area_dir,
+                filename="ghsl_temp",
+                use_cache=True,
+                delete_existing=False,  # Don't delete if already exists
+                feedback=self.feedback,
+            )
+
+            tiles = downloader.tiles_intersecting_bbox()
+            if not tiles:
+                log_message("No GHSL tiles intersect study area", level="WARNING")
+                return False
+
+            log_message(f"Downloading {len(tiles)} GHSL tiles...")
+            tile_paths = []
+            for tile_id in tiles:
+                paths = downloader.download_and_unpack_tile(tile_id)
+                tile_paths.extend(paths)
+
+            if not tile_paths:
+                log_message("No GHSL tiles downloaded", level="WARNING")
+                return False
+
+            # Process tiles
+            log_message("Processing GHSL tiles...")
+            processor = GHSLProcessor(input_raster_paths=tile_paths)
+
+            # Reclassify
+            reclassified = processor.reclassify_rasters(suffix="reclass")
+
+            # Polygonize
+            polygonized = processor.polygonize_rasters(reclassified)
+
+            # Get extent in Mollweide for combining
+            transform_to_mollweide = QgsCoordinateTransform(
+                QgsCoordinateReferenceSystem("EPSG:4326"),
+                QgsCoordinateReferenceSystem("ESRI:54009"),
+                QgsProject.instance(),
+            )
+            extent_mollweide = transform_to_mollweide.transformBoundingBox(extent_4326)
+
+            # Combine to temporary file
+            temp_parquet = os.path.join(study_area_dir, "ghsl_temp.parquet")
+            processor.combine_vectors(polygonized, temp_parquet, extent=extent_mollweide)
+
+            # Import to GeoPackage using GDAL
+            from osgeo import gdal, ogr
+
+            ghsl_layer_name = "ghsl_settlements"
+            translate_options = gdal.VectorTranslateOptions(
+                format="GPKG",
+                accessMode="append",
+                srcSRS="ESRI:54009",
+                dstSRS=self.target_crs.authid(),
+                layerName=ghsl_layer_name,
+                geometryType="PROMOTE_TO_MULTI",
+            )
+
+            result = gdal.VectorTranslate(
+                self.gpkg_path,
+                temp_parquet,
+                options=translate_options,
+            )
+
+            if result is None:
+                log_message("GDAL VectorTranslate failed for GHSL", level="WARNING")
+                return False
+
+            result = None  # Close to flush
+
+            # Cleanup temp file
+            try:
+                if os.path.exists(temp_parquet):
+                    os.remove(temp_parquet)
+            except OSError:
+                pass
+
+            # Verify layer was created
+            ds = ogr.Open(self.gpkg_path, 0)
+            if ds:
+                layer = ds.GetLayerByName(ghsl_layer_name)
+                if layer:
+                    feature_count = layer.GetFeatureCount()
+                    log_message(f"Successfully added {feature_count} GHSL features to GeoPackage")
+                    ds = None
+                    return True
+                ds = None
+
+            return False
+
+        except Exception as e:
+            log_message(f"Error downloading GHSL data: {str(e)}", level="WARNING")
+            log_message(traceback.format_exc(), level="WARNING")
+            return False
+
+    def ensure_ghsl_data(self) -> bool:
+        """Ensure GHSL data is available, downloading if necessary.
+
+        This is a public method that workflows can call to ensure GHSL data
+        is present before processing.
+
+        Returns:
+            True if GHSL data is available, False otherwise.
+        """
+        if self._check_ghsl_layer_exists():
+            return True
+
+        log_message("GHSL data not found, attempting to download...")
+        self.updateStatus("Downloading GHSL settlement data...")
+
+        if self._download_ghsl_data():
+            return self._check_ghsl_layer_exists()
+
+        log_message("Could not obtain GHSL data", level="WARNING")
+        return False
+
+    def updateProgress(self, progress: float):
+        """
+        Used by the workflow to set the progress of the task.
+
+        Args:
+            progress: The progress value
+        """
+        log_message(f"Progress in workflow is : {progress}")  # noqa E203
+        self.progressChanged.emit(progress)
+
+    def updateStatus(self, status: str):
+        """
+        Used by the workflow to set the status message for the task.
+
+        Args:
+            status: A short description of the current operation
+        """
+        log_message(f"Status: {status}")
+        self.statusChanged.emit(status)
 
     #
     # Every concrete subclass needs to implement these three methods
@@ -126,18 +473,22 @@ class WorkflowBase(QObject):
         current_bbox: QgsGeometry,
         area_features: QgsVectorLayer,
         index: int,
+        area_name: Optional[str] = None,
     ) -> str:
         """
         Executes the actual workflow logic for a single area
         Must be implemented by subclasses.
 
-        :current_area: Current polygon from our study area.
-        :clip_area: Current area but expanded to coincide with grid cell boundaries.
-        :current_bbox: Bounding box of the above area.
-        :area_features: A vector layer of features to analyse that includes only features in the study area.
-        :index: Iteration / number of area being processed.
+        Args:
+            current_area: Current polygon from our study area.
+            clip_area: Current area but expanded to coincide with grid cell boundaries.
+            current_bbox: Bounding box of the above area.
+            area_features: A vector layer of features to analyse that includes only features in the study area.
+            index: Iteration / number of area being processed.
+            area_name: Name of the area being processed (for grid-first mode).
 
-        :return: A raster layer file path if processing completes successfully, False if canceled or failed.
+        Returns:
+            A raster layer file path if processing completes successfully, False if canceled or failed.
         """
         pass
 
@@ -149,17 +500,21 @@ class WorkflowBase(QObject):
         current_bbox: QgsGeometry,
         area_raster: str,
         index: int,
+        area_name: Optional[str] = None,
     ):
         """
         Executes the actual workflow logic for a single area using a raster.
 
-        :current_area: Current polygon from our study area.
-        :clip_area: Polygon to clip the raster to which is aligned to cell edges.
-        :current_bbox: Bounding box of the above area.
-        :area_raster: A raster layer of features to analyse that includes only bbox pixels in the study area.
-        :index: Index of the current area.
+        Args:
+            current_area: Current polygon from our study area.
+            clip_area: Polygon to clip the raster to which is aligned to cell edges.
+            current_bbox: Bounding box of the above area.
+            area_raster: A raster layer of features to analyse that includes only bbox pixels in the study area.
+            index: Index of the current area.
+            area_name: Name of the area being processed (for grid-first mode).
 
-        :return: Path to the reclassified raster.
+        Returns:
+            Path to the reclassified raster.
         """
         pass
 
@@ -170,15 +525,20 @@ class WorkflowBase(QObject):
         clip_area: QgsGeometry,
         current_bbox: QgsGeometry,
         index: int,
+        area_name: Optional[str] = None,
     ):
         """
         Executes the actual workflow logic for a single area using an aggregate.
 
-        :current_area: Current polygon from our study area.
-        :current_bbox: Bounding box of the above area.
-        :index: Index of the current area.
+        Args:
+            current_area: Current polygon from our study area.
+            clip_area: Polygon to clip the raster to which is aligned to cell edges.
+            current_bbox: Bounding box of the above area.
+            index: Index of the current area.
+            area_name: Name of the area being processed (for grid-first mode).
 
-        :return: Path to the reclassified raster.
+        Returns:
+            Path to the reclassified raster.
         """
         pass
 
@@ -192,9 +552,6 @@ class WorkflowBase(QObject):
         the provided input layers (features, grid). It applies the steps of selecting intersecting
         features, then passes them to process area for further processing.
 
-        Raises:
-            QgsProcessingException: If any processing step fails during the execution.
-
         Returns:
             True if the workflow completes successfully, False if canceled or failed.
         """
@@ -202,6 +559,9 @@ class WorkflowBase(QObject):
         # Do this here rather than in the ctor in case the result key is changed
         # in the concrete class
         self.attributes[self.result_key] = "Not Run"
+        # Clear any stale advisory from a previous run; workflows set this
+        # when they complete with a caveat the user should see (tooltip).
+        self.attributes["warning"] = ""
 
         log_message(f"Executing {self.workflow_name}")
         log_message("----------------------------------")
@@ -210,21 +570,38 @@ class WorkflowBase(QObject):
             log_message(self.item.attributesAsMarkdown())
             log_message("----------------------------------")
 
-        self.attributes["execution_start_time"] = datetime.datetime.now().isoformat()
+        with self.item.atomicAttributeUpdate() as attrs:
+            attrs["execution_start_time"] = datetime.datetime.now().isoformat()
 
         log_message("Processing Started")
+        self.updateStatus(f"Starting {self.workflow_name}")
+
+        # Grid-first workflows write scores into study_area_grid: with an
+        # empty grid every downstream step 'succeeds' while producing empty
+        # rasters — a silent failure seen in the field. Fail loudly instead.
+        if getattr(self, "use_grid_first", False):
+            from geest.core.grid_column_utils import grid_cell_count
+
+            if grid_cell_count(self.gpkg_path) == 0:
+                message = (
+                    "The analysis grid (study_area_grid) is empty, so this indicator cannot "
+                    "be scored. Re-create the study area to regenerate the grid, then run "
+                    "the analysis again."
+                )
+                log_message(message, tag="GeoE3", level=Qgis.Critical)
+                with self.item.atomicAttributeUpdate() as attrs:
+                    attrs["error"] = message
+                    attrs[self.result_key] = f"{self.workflow_name} Workflow Error"
+                return False
 
         feedback = QgsProcessingFeedback()
         output_rasters = []
 
         try:
-            if self.features_layer and type(self.features_layer) == QgsVectorLayer:
-                log_message(
-                    f"Features layer for {self.workflow_name} is {self.features_layer.source()}"
-                )
-                self.features_layer = check_and_reproject_layer(
-                    self.features_layer, self.target_crs
-                )
+            if self.features_layer and type(self.features_layer) is QgsVectorLayer:
+                self.updateStatus("Reprojecting features layer...")
+                log_message(f"Features layer for {self.workflow_name} is {self.features_layer.source()}")
+                self.features_layer = check_and_reproject_layer(self.features_layer, self.target_crs)
         except Exception as e:
             error_file = os.path.join(self.workflow_directory, "error.txt")
             if os.path.exists(error_file):
@@ -237,136 +614,331 @@ class WorkflowBase(QObject):
 
             log_message(
                 f"Failed to reproject features layer for {self.workflow_name}: {e}",
-                tag="Geest",
+                tag="GeoE3",
                 level=Qgis.Critical,
             )
             log_message(
                 traceback.format_exc(),
-                tag="Geest",
+                tag="GeoE3",
                 level=Qgis.Critical,
             )
-            self.attributes[self.result_key] = f"{self.workflow_name} Workflow Error"
-            self.attributes[self.result_file_key] = ""
-            self.attributes["error_file"] = error_path
-            self.attributes["error"] = (
-                f"Failed to reproject features layer for {self.workflow_name}: {e}"
-            )
+            with self.item.atomicAttributeUpdate() as attrs:
+                attrs[self.result_key] = f"{self.workflow_name} Workflow Error"
+                attrs[self.result_file_key] = ""
+                attrs["error_file"] = error_path
+                attrs["error"] = f"Failed to reproject features layer for {self.workflow_name}: {e}"
             return False
 
-        area_iterator = AreaIterator(self.gpkg_path)
-        log_layer_count()  # For performance tuning, write the number of open layers to a log file
-        try:
-            for index, (current_area, clip_area, current_bbox, progress) in enumerate(
-                area_iterator
-            ):
-                feedback.pushInfo(
-                    f"{self.workflow_name} Processing area {index} with progress {progress:.2f}%"
+        # Use AreaIterator as context manager to ensure cleanup
+        with AreaIterator(self.gpkg_path) as area_iterator:
+            log_layer_count()  # For performance tuning, write the number of open layers to a log file
+
+            areas_processed = 0
+            failed_areas = []  # [(area_name, index, error_message), ...]
+
+            try:
+                total_areas = area_iterator.area_count()
+                for index, (current_area, clip_area, current_bbox, progress, area_name) in enumerate(area_iterator):
+                    if self.feedback.isCanceled():
+                        log_message(
+                            f"{self.class_name} Processing was canceled by the user.",
+                            tag="GeoE3",
+                            level=Qgis.Warning,
+                        )
+                        break
+
+                    areas_processed += 1
+                    message = f"{self.workflow_name} Processing area {index} with progress {progress:.2f}%"  # noqa E231
+                    self.updateStatus(f"Processing area {index + 1}/{total_areas}")
+                    feedback.pushInfo(message)
+                    log_message(message)
+
+                    # Isolate each area: an unexpected failure here (a bad
+                    # geometry, a GDAL/GEOS error, a transient data-source
+                    # issue, ...) must not discard every other area already
+                    # processed nor skip every area still to come. Log it
+                    # clearly against this specific area and move on - the
+                    # final VRT/grid is built from whatever areas succeeded,
+                    # and failed_areas is surfaced to the user afterwards.
+                    try:
+                        raster_output = None
+                        # Step 1: Select features that intersect with the current area
+                        if self.features_layer:  # we are processing a vector input
+                            area_features = self._subset_vector_layer(
+                                current_area,
+                                output_prefix=f"{self.layer_id}_area_features_{index}",
+                            )
+                            raster_output = None
+                            # Some workflows do not take in vector data (a features layer)
+                            # but are not raster based. e.g. index_score_workflow
+                            # Logic below is a check for that
+                            if (
+                                not isinstance(self.features_layer, bool)  # noqa W503
+                                and area_features.featureCount() == 0  # noqa W503
+                            ):
+                                if self.supports_empty_features_fallback:
+                                    log_message(
+                                        f"No area features for {self.workflow_name} in area {area_name}; using neutral fallback output.",
+                                        tag="GeoE3",
+                                        level=Qgis.Warning,
+                                    )
+                                    raster_output = self._build_empty_features_neutral_raster(
+                                        current_area=current_area,
+                                        current_bbox=current_bbox,
+                                        index=index,
+                                        area_name=area_name,
+                                    )
+                                    if self.use_grid_first and area_name:
+                                        self._apply_grid_column_zero_fallback(area_name)
+                                    if not raster_output:
+                                        log_message(
+                                            f"Neutral fallback failed for {self.workflow_name} in area {area_name}; skipping area.",
+                                            tag="GeoE3",
+                                            level=Qgis.Warning,
+                                        )
+                                        continue
+                                else:
+                                    log_message(
+                                        "No area features ... skipping",
+                                        tag="GeoE3",
+                                        level=Qgis.Warning,
+                                    )
+                                    continue
+
+                            # Step 2: Process the area features - work happens in concrete class
+                            if raster_output is None:
+                                raster_output = self._process_features_for_area(
+                                    current_area=current_area,
+                                    clip_area=clip_area,
+                                    current_bbox=current_bbox,
+                                    area_features=area_features,
+                                    index=index,
+                                    area_name=area_name,
+                                )
+                        elif not self.aggregation:  # assumes we are processing a raster input
+                            area_raster = self._subset_raster_layer(bbox=current_bbox, index=index)
+                            raster_output = self._process_raster_for_area(
+                                current_area=current_area,
+                                clip_area=clip_area,
+                                current_bbox=current_bbox,
+                                area_raster=area_raster,
+                                index=index,
+                                area_name=area_name,
+                            )
+                        elif self.aggregation:  # we are processing an aggregate
+                            raster_output = self._process_aggregate_for_area(
+                                current_area=current_area,
+                                clip_area=clip_area,
+                                current_bbox=current_bbox,
+                                index=index,
+                                area_name=area_name,
+                            )
+
+                        if not raster_output and self.supports_empty_features_fallback:
+                            # e.g. points exist but none are reachable from the road
+                            # network, so no isochrones/buffers could be produced.
+                            log_message(
+                                f"{self.workflow_name} produced no raster output for area {area_name} "
+                                f"(index {index}); using neutral (0 score) fallback output.",
+                                tag="GeoE3",
+                                level=Qgis.Warning,
+                            )
+                            raster_output = self._build_empty_features_neutral_raster(
+                                current_area=current_area,
+                                current_bbox=current_bbox,
+                                index=index,
+                                area_name=area_name,
+                            )
+                            if self.use_grid_first and area_name:
+                                self._apply_grid_column_zero_fallback(area_name)
+                        if not raster_output:
+                            raise RuntimeError(
+                                f"{self.workflow_name} produced no raster output for area {area_name} (index {index})."
+                            )
+
+                        # clip the area by its matching mask layer in study_area geopackage
+                        self.updateStatus(f"Masking area {index + 1}...")
+                        masked_layer = self._mask_raster(
+                            raster_path=raster_output,
+                            area_geometry=clip_area,
+                            index=index,
+                        )
+                        output_rasters.append(masked_layer)
+
+                        # Write raster values to grid for this area
+                        # Skip this step for grid-first workflows since grid was already populated
+                        if not self.use_grid_first and masked_layer and os.path.exists(masked_layer):
+                            self.updateStatus(f"Writing grid values for area {index + 1}...")
+                            updated_cells = write_raster_values_to_grid(
+                                gpkg_path=self.gpkg_path,
+                                raster_path=masked_layer,
+                                column_name=self.layer_id,
+                                area_name=area_name,
+                            )
+                            if updated_cells >= 0:
+                                log_message(
+                                    f"Updated {updated_cells} grid cells for {self.layer_id} in area {area_name}",
+                                    tag="GeoE3",
+                                    level=Qgis.Info,
+                                )
+                            else:
+                                log_message(
+                                    f"Failed to update grid cells for {self.layer_id} in area {area_name}",
+                                    tag="GeoE3",
+                                    level=Qgis.Warning,
+                                )
+
+                        # Note: We don't emit area iterator progress here because it would
+                        # override the sub-task progress in the Task Progress bar.
+                        # The sub-task progress (0-100%) is more useful to the user.
+
+                    except Exception as area_error:
+                        failed_areas.append((area_name, index, str(area_error)))
+                        log_message(
+                            f"{self.workflow_name} failed on area {area_name} (index {index}): "
+                            f"{area_error}. Skipping this area; the rest of the run continues.",
+                            tag="GeoE3",
+                            level=Qgis.Critical,
+                        )
+                        log_message(traceback.format_exc(), tag="GeoE3", level=Qgis.Critical)
+                        continue
+
+                # Combine all area rasters into a VRT
+                self.updateStatus("Combining area rasters...")
+                vrt_filepath = self._combine_rasters_to_vrt(output_rasters)
+
+                if not vrt_filepath and not output_rasters:
+                    # Every area failed (or none existed) - this is a real
+                    # failure, not a completion, even though the per-area
+                    # try/except above kept the loop running to the end.
+                    failure_summary = "; ".join(f"{name} (index {idx}): {err}" for name, idx, err in failed_areas)
+                    raise RuntimeError(
+                        f"{self.workflow_name} produced no usable output for any area "
+                        f"({len(failed_areas)} area(s) failed: {failure_summary})"
+                    )
+
+                with self.item.atomicAttributeUpdate() as attrs:
+                    attrs[self.result_file_key] = vrt_filepath
+                    if failed_areas:
+                        failed_names = ", ".join(f"{name} ({err})" for name, _idx, err in failed_areas)
+                        attrs[self.result_key] = (
+                            f"{self.workflow_name} Workflow Completed with {len(failed_areas)} area(s) skipped"
+                        )
+                        attrs["warning"] = f"Skipped areas: {failed_names}"
+                        log_message(
+                            f"{self.workflow_name} completed with {len(failed_areas)} area(s) skipped: {failed_names}",
+                            tag="GeoE3",
+                            level=Qgis.Warning,
+                        )
+                    else:
+                        attrs[self.result_key] = f"{self.workflow_name} Workflow Completed"
+
+                self.updateStatus(f"{self.workflow_name} complete")
+                log_message(
+                    f"{self.workflow_name} Completed. Output VRT: {vrt_filepath}",
+                    tag="GeoE3",
+                    level=Qgis.Info,
                 )
-                if self.feedback.isCanceled():
+
+                # Log processing summary
+                if areas_processed > 0:
                     log_message(
-                        f"{self.class_name} Processing was canceled by the user.",
-                        tag="Geest",
-                        level=Qgis.Warning,
+                        f"Processing Summary - Areas processed: {areas_processed}, "
+                        f"succeeded: {areas_processed - len(failed_areas)}, failed: {len(failed_areas)}",
+                        tag="GeoE3",
+                        level=Qgis.Info,
                     )
-                raster_output = None
-                # Step 1: Select features that intersect with the current area
-                if self.features_layer:  # we are processing a vector input
-                    area_features = self._subset_vector_layer(
-                        current_area,
-                        output_prefix=f"{self.layer_id}_area_features_{index}",
-                    )
-                    # if area_features.featureCount() == 0:
-                    #    continue
+                with self.item.atomicAttributeUpdate() as attrs:
+                    attrs["execution_end_time"] = datetime.datetime.now().isoformat()
+                    attrs["error_file"] = None
+                log_layer_count()  # For performance tuning, write the number of open layers to a log file
+                return True
 
-                    # Step 2: Process the area features - work happens in concrete class
-                    raster_output = self._process_features_for_area(
-                        current_area=current_area,
-                        clip_area=clip_area,
-                        current_bbox=current_bbox,
-                        area_features=area_features,
-                        index=index,
-                    )
-                elif (
-                    self.aggregation == False
-                ):  # assumes we are processing a raster input
-                    area_raster = self._subset_raster_layer(
-                        bbox=current_bbox, index=index
-                    )
-                    raster_output = self._process_raster_for_area(
-                        current_area=current_area,
-                        clip_area=clip_area,
-                        current_bbox=current_bbox,
-                        area_raster=area_raster,
-                        index=index,
-                    )
-                elif self.aggregation == True:  # we are processing an aggregate
-                    raster_output = self._process_aggregate_for_area(
-                        current_area=current_area,
-                        clip_area=clip_area,
-                        current_bbox=current_bbox,
-                        index=index,
-                    )
+            except Exception as e:
+                # remove error.txt if it exists
+                error_file = os.path.join(self.workflow_directory, "error.txt")
+                if os.path.exists(error_file):
+                    os.remove(error_file)
 
-                # clip the area by its matching mask layer in study_area geopackage
-                masked_layer = self._mask_raster(
-                    raster_path=raster_output,
-                    area_geometry=clip_area,
-                    index=index,
+                log_message(
+                    f"Failed to process {self.workflow_name}: {e}",
+                    tag="GeoE3",
+                    level=Qgis.Critical,
                 )
-                output_rasters.append(masked_layer)
-                self.progressChanged.emit(int(progress))
-            # Combine all area rasters into a VRT
-            vrt_filepath = self._combine_rasters_to_vrt(output_rasters)
-            self.attributes[self.result_file_key] = vrt_filepath
-            self.attributes[self.result_key] = (
-                f"{self.workflow_name} Workflow Completed"
-            )
+                log_message(
+                    traceback.format_exc(),
+                    tag="GeoE3",
+                    level=Qgis.Critical,
+                )
+                with self.item.atomicAttributeUpdate() as attrs:
+                    attrs[self.result_key] = f"{self.workflow_name} Workflow Error"
+                    attrs[self.result_file_key] = ""
 
+                # Write the traceback to error.txt in the workflow_directory
+                error_path = os.path.join(self.workflow_directory, "error.txt")
+                with open(error_path, "w") as f:
+                    f.write(f"Failed to process {self.workflow_name}: {e}\n")
+                    f.write(traceback.format_exc())
+                with self.item.atomicAttributeUpdate() as attrs:
+                    attrs["error_file"] = error_path
+                    attrs["error"] = f"Failed to process {self.workflow_name}: {e}"
+                log_layer_count()  # For performance tuning, write the number of open layers to a log file
+                self.workflowError.emit(f"Failed to process {self.workflow_name}: {e}")
+                return False
+
+    def _build_empty_features_neutral_raster(
+        self,
+        current_area: QgsGeometry,
+        current_bbox: QgsGeometry,
+        index: int,
+        area_name: Optional[str] = None,
+    ) -> Optional[str]:
+        """Create a neutral raster output when an area has no input features."""
+        _ = area_name
+        try:
+            neutral_layer = geometry_to_memory_layer(current_area, self.target_crs, f"{self.layer_id}_neutral_{index}")
+            neutral_layer.startEditing()
+            neutral_layer.dataProvider().addAttributes([QgsField("value", QVariant.Int)])
+            neutral_layer.updateFields()
+            for feature in neutral_layer.getFeatures():
+                feature.setAttribute("value", 0)
+                neutral_layer.updateFeature(feature)
+            neutral_layer.commitChanges()
+            return self._rasterize(neutral_layer, current_bbox, index, value_field="value", default_value=0)
+        except Exception as error:
             log_message(
-                f"{self.workflow_name} Completed. Output VRT: {vrt_filepath}",
-                tag="Geest",
-                level=Qgis.Info,
+                f"Failed to build neutral fallback raster for {self.workflow_name}: {error}",
+                tag="GeoE3",
+                level=Qgis.Warning,
             )
-            self.attributes["execution_end_time"] = datetime.datetime.now().isoformat()
-            self.attributes["error_file"] = None
-            log_layer_count()  # For performance tuning, write the number of open layers to a log file
-            return True
+            return None
 
-        except Exception as e:
-            # remove error.txt if it exists
-            error_file = os.path.join(self.workflow_directory, "error.txt")
-            if os.path.exists(error_file):
-                os.remove(error_file)
+    def _apply_grid_column_zero_fallback(self, area_name: str) -> None:
+        """Fill grid column with 0 for an area when no features are present.
 
-            log_message(
-                f"Failed to process {self.workflow_name}: {e}",
-                tag="Geest",
-                level=Qgis.Critical,
-            )
-            log_message(
-                traceback.format_exc(),
-                tag="Geest",
-                level=Qgis.Critical,
-            )
-            self.attributes[self.result_key] = f"{self.workflow_name} Workflow Error"
-            self.attributes[self.result_file_key] = ""
+        Called from neutral fallback paths when use_grid_first is True.
+        Clears the column once per workflow run, then sets 0 for the area's cells.
 
-            # Write the traceback to error.txt in the workflow_directory
-            error_path = os.path.join(self.workflow_directory, "error.txt")
-            with open(error_path, "w") as f:
-                f.write(f"Failed to process {self.workflow_name}: {e}\n")
-                f.write(traceback.format_exc())
-            self.attributes["error_file"] = error_path
-            self.attributes["error"] = f"Failed to process {self.workflow_name}: {e}"
-            log_layer_count()  # For performance tuning, write the number of open layers to a log file
-            return False
+        Args:
+            area_name: The area_name identifying which grid cells to update.
+        """
+        if not self._grid_column_cleared:
+            clear_grid_column(self.gpkg_path, self.layer_id)
+            self._grid_column_cleared = True
+
+        fill_grid_column_zero_for_area(
+            gpkg_path=self.gpkg_path,
+            column_name=self.layer_id,
+            area_name=area_name,
+        )
 
     def _create_workflow_directory(self) -> str:
         """
         Creates the directory for this workflow if it doesn't already exist.
         It will be in the scheme of working_dir/dimension/factor/indicator
 
-        :return: The path to the workflow directory
+        Returns:
+            The path to the workflow directory
         """
         paths = self.item.getPaths()
         directory = os.path.join(self.working_directory, *paths)
@@ -376,9 +948,7 @@ class WorkflowBase(QObject):
 
         return directory
 
-    def _subset_vector_layer(
-        self, area_geom: QgsGeometry, output_prefix: str
-    ) -> QgsVectorLayer:
+    def _subset_vector_layer(self, area_geom: QgsGeometry, output_prefix: str) -> QgsVectorLayer:
         """
         Select features from the features layer that intersect with the given area geometry.
 
@@ -389,48 +959,92 @@ class WorkflowBase(QObject):
         Returns:
             QgsVectorLayer: A new temporary layer containing features that intersect with the given area geometry.
         """
-        if type(self.features_layer) != QgsVectorLayer:
+        if type(self.features_layer) is not QgsVectorLayer:
             return None
         log_message(
             f"{self.workflow_name} Select Features Started",
-            tag="Geest",
+            tag="GeoE3",
             level=Qgis.Info,
         )
-        layer = subset_vector_layer(
-            self.workflow_directory, self.features_layer, area_geom, output_prefix
-        )
+        layer = subset_vector_layer(self.workflow_directory, self.features_layer, area_geom, output_prefix)
         return layer
 
     def _subset_raster_layer(self, bbox: QgsGeometry, index: int):
-        """
-        Reproject and clip the raster to the bounding box of the current area.
+        """Reproject and clip the raster to the bounding box of the current area.
 
-        :param bbox: The bounding box of the current area.
-        :param index: The index of the current area.
+        Args:
+            bbox: The bounding box of the current area.
+            index: The index of the current area.
 
-        :return: The path to the reprojected and clipped raster.
+        Returns:
+            The path to the reprojected and clipped raster.
+
+        Raises:
+            QgsProcessingException: If raster layer is None or invalid.
         """
-        # Convert the bbox to QgsRectangle
-        bbox = bbox.boundingBox()
+        raster_source = self._resolve_raster_source_for_processing()
+
+        if self.cell_size_m <= 0:
+            raise QgsProcessingException(
+                f"Invalid cell size ({self.cell_size_m}) for workflow '{self.workflow_name}'. "
+                "Expected a positive value."
+            )
+
+        bbox_rect = bbox.boundingBox()
+        if bbox_rect.isEmpty() or bbox_rect.width() <= 0 or bbox_rect.height() <= 0:
+            raise QgsProcessingException(
+                f"Invalid area extent for workflow '{self.workflow_name}' at index {index}. "
+                "Cannot process empty raster subset extent."
+            )
 
         reprojected_raster_path = os.path.join(
             self.workflow_directory,
             f"{self.layer_id}_clipped_and_reprojected_{index}.tif",
         )
 
+        warped_raster_path = os.path.join(
+            self.workflow_directory,
+            f"{self.layer_id}_warp_tmp_{index}.tif",
+        )
+
+        target_extent = (
+            f"{bbox_rect.xMinimum()},{bbox_rect.xMaximum()},"
+            f"{bbox_rect.yMinimum()},{bbox_rect.yMaximum()} [{self.target_crs.authid()}]"
+        )
+
         params = {
-            "INPUT": self.raster_layer,
+            "INPUT": raster_source,
             "TARGET_CRS": self.target_crs,
             "RESAMPLING": 0,
             "TARGET_RESOLUTION": self.cell_size_m,
             "NODATA": -9999,
-            "OUTPUT": "TEMPORARY_OUTPUT",
-            "TARGET_EXTENT": f"{bbox.xMinimum()},{bbox.xMaximum()},{bbox.yMinimum()},{bbox.yMaximum()} [{self.target_crs.authid()}]",
+            "OUTPUT": warped_raster_path,
+            "TARGET_EXTENT": target_extent,
         }
+        log_message(
+            (
+                f"Warping raster for {self.workflow_name} area {index}: "
+                f"input={raster_source}, extent={target_extent}, "
+                f"target_crs={self.target_crs.authid()}, resolution={self.cell_size_m}"
+            ),
+            tag="GeoE3",
+            level=Qgis.Info,
+        )
 
-        aoi = processing.run(
-            "gdal:warpreproject", params, feedback=QgsProcessingFeedback()
-        )["OUTPUT"]
+        try:
+            aoi = processing.run(
+                "gdal:warpreproject",
+                params,
+                context=self.context,
+                feedback=QgsProcessingFeedback(),
+            )["OUTPUT"]
+        except Exception as error:
+            log_message(
+                f"Failed warpreproject for {self.workflow_name} area {index}: {error}",
+                tag="GeoE3",
+                level=Qgis.Critical,
+            )
+            raise
 
         params = {
             "INPUT": aoi,
@@ -438,8 +1052,55 @@ class WorkflowBase(QObject):
             "FILL_VALUE": 0,
             "OUTPUT": reprojected_raster_path,
         }
-        processing.run("native:fillnodata", params)
+        try:
+            processing.run(
+                "native:fillnodata",
+                params,
+                context=self.context,
+                feedback=QgsProcessingFeedback(),
+            )
+        except Exception as error:
+            log_message(
+                f"Failed fillnodata for {self.workflow_name} area {index}: {error}",
+                tag="GeoE3",
+                level=Qgis.Critical,
+            )
+            raise
         return reprojected_raster_path
+
+    def _resolve_raster_source_for_processing(self) -> str:
+        """Resolve raster input to a stable source path for processing calls."""
+        if self.raster_layer is None:
+            raise QgsProcessingException(
+                f"Raster layer is not set for workflow '{self.workflow_name}'. "
+                "Please configure the raster layer in the workflow settings."
+            )
+
+        raster_source = None
+        if isinstance(self.raster_layer, QgsRasterLayer):
+            if not self.raster_layer.isValid():
+                raise QgsProcessingException(
+                    f"Raster layer '{self.raster_layer.source()}' is not valid for workflow '{self.workflow_name}'. "
+                    "Please check that the file exists and is a valid raster format."
+                )
+            raster_source = self.raster_layer.source()
+        elif isinstance(self.raster_layer, str):
+            raster_source = self.raster_layer
+        else:
+            raise QgsProcessingException(
+                f"Unsupported raster layer type '{type(self.raster_layer).__name__}' for workflow "
+                f"'{self.workflow_name}'."
+            )
+
+        raster_source = str(raster_source or "").strip()
+        if not raster_source:
+            raise QgsProcessingException(f"Raster source is empty for workflow '{self.workflow_name}'.")
+        if not os.path.exists(raster_source):
+            raise QgsProcessingException(
+                f"Raster file '{raster_source}' does not exist for workflow '{self.workflow_name}'. "
+                "Please check the file path in the workflow settings."
+            )
+        return raster_source
 
     def _rasterize(
         self,
@@ -469,11 +1130,13 @@ class WorkflowBase(QObject):
         Returns:
             str: The file path to the rasterized output.
         """
-        if not input_layer or not input_layer.isValid():
-            return False
         log_message("--- Rasterizing geometry")
         log_message(f"--- bbox {bbox}")
         log_message(f"--- index {index}")
+        if not input_layer or not input_layer.isValid():
+            log_message("--- ERROR: Feature layer is not valid!")
+            return ""
+        log_message(f"--- input_layer {input_layer.source()}")
 
         output_path = os.path.join(
             self.workflow_directory,
@@ -481,13 +1144,18 @@ class WorkflowBase(QObject):
         )
         if not input_layer.isValid():
             log_message(f"Layer failed to load! {input_layer}")
-            return
+            return ""
         else:
             log_message(f"Rasterizing {input_layer}")
 
         # Ensure resolution parameters are properly formatted as float values
-        x_res = self.cell_size_m  # pixel size in X direction
-        y_res = self.cell_size_m  # pixel size in Y direction
+        # For Regional scale (H3 L6), use smaller cell size for better resolution
+        if hasattr(self, "analysis_scale") and self.analysis_scale == "regional":
+            x_res = 500  # Smaller cell size for H3 hexagons (H3 L6 edge ~3229m)
+            y_res = 500
+        else:
+            x_res = self.cell_size_m  # pixel size in X direction
+            y_res = self.cell_size_m  # pixel size in Y direction
         bbox = bbox.boundingBox()
         # Define rasterization parameters for the temporary layer
         params = {
@@ -498,7 +1166,7 @@ class WorkflowBase(QObject):
             "UNITS": 1,
             "WIDTH": x_res,
             "HEIGHT": y_res,
-            "EXTENT": f"{bbox.xMinimum()},{bbox.xMaximum()},{bbox.yMinimum()},{bbox.yMaximum()} [{self.target_crs.authid()}]",
+            "EXTENT": f"{bbox.xMinimum()},{bbox.xMaximum()},{bbox.yMinimum()},{bbox.yMaximum()} [{self.target_crs.authid()}]",  # noqa E231
             "NODATA": 255,
             "OPTIONS": "",
             "DATA_TYPE": GDAL_OUTPUT_DATA_TYPE,
@@ -506,52 +1174,57 @@ class WorkflowBase(QObject):
             "INVERT": False,
             "EXTRA": f"-a_srs {self.target_crs.authid()} -at",  # Assign all touched pixels
             "OUTPUT": output_path,
+            "PROGRESS": self.feedback,
         }
+        log_message(f"Rasterize parameters: {params}")
+        # 'OUTPUT':'TEMPORARY_OUTPUT'})
 
-        #'OUTPUT':'TEMPORARY_OUTPUT'})
-
-        processing.run("gdal:rasterize", params)
+        processing.run(
+            "gdal:rasterize",
+            params,
+            context=self.context,
+            feedback=QgsProcessingFeedback(),
+        )
         log_message(f"Rasterize Parameter: {params}")
         log_message(f"Rasterize complete for: {output_path}")
         log_message(f"Created raster: {output_path}")
         return output_path
 
-    def _mask_raster(
-        self, raster_path: str, area_geometry: QgsGeometry, index: int
-    ) -> str:
+    def _mask_raster(self, raster_path: str, area_geometry: QgsGeometry, index: int) -> Optional[str]:
         """
         Multiply the raster by the area geometry to mask the raster to the area.
 
         Args:
-            raster_path (str): The path to the raster file.
-            area_geometry (QgsGeometry): The geometry to use as a mask.
-            index (int): The index of the current area.
+            raster_path: The path to the raster file.
+            area_geometry: The geometry to use as a mask.
+            index: The index of the current area.
 
         Returns:
-            str: The path to the masked raster.
+            The path to the masked raster or None if there is an error.
+
+        Raises:
+            QgsProcessingException: If the raster file is not found at the specified path.
         """
         if not raster_path:
-            return False
+            return None
         output_name = f"{self.layer_id}_masked_{index}.tif"
         output_path = os.path.join(self.workflow_directory, output_name)
         log_message(
             f"Masking raster {raster_path} for area {index} to {output_path}",
-            tag="Geest",
+            tag="GeoE3",
             level=Qgis.Info,
         )
         # verify the raster path exists
         if not os.path.exists(raster_path):
             log_message(
                 f"Raster file not found at {raster_path}",
-                tag="Geest",
+                tag="GeoE3",
                 level=Qgis.Warning,
             )
             raise QgsProcessingException(f"Raster file not found at {raster_path}")
         # Convert the geometry to a memory layer in the self.target_crs
         log_message(f"Creating mask layer for area from polygon {index}")
-        mask_layer = geometry_to_memory_layer(
-            area_geometry, self.target_crs, f"mask_layer_{index}"
-        )
+        mask_layer = geometry_to_memory_layer(area_geometry, self.target_crs, f"mask_layer_{index}")
         log_message(f"Mask layer created: {mask_layer}")
         # Clip the raster by the mask layer
         params = {
@@ -573,7 +1246,36 @@ class WorkflowBase(QObject):
             "DATA_TYPE": GDAL_OUTPUT_DATA_TYPE,
             "EXTRA": "",
         }
-        processing.run("gdal:cliprasterbymasklayer", params)
+        processing.run(
+            "gdal:cliprasterbymasklayer",
+            params,
+            context=self.context,
+            feedback=QgsProcessingFeedback(),
+        )
+        if not os.path.exists(output_path) or not QgsRasterLayer(output_path).isValid():
+            # CROP_TO_CUTLINE snaps the crop window to pixel boundaries. For a
+            # geometrically thin area (narrow coastal strip, sliver islet) that
+            # window can round down to zero rows/columns even though the
+            # source raster itself is fine, and gdalwarp then refuses to
+            # create a 0-sized dataset. Retrying without cropping keeps the
+            # source raster's own extent (already known to be valid) and just
+            # masks values outside the polygon to nodata, so the area isn't
+            # silently dropped from the combined VRT.
+            log_message(
+                f"Crop-to-cutline produced no valid raster for area {index} "
+                "(area narrower than one pixel); retrying without cropping.",
+                tag="GeoE3",
+                level=Qgis.Warning,
+            )
+            params["CROP_TO_CUTLINE"] = False
+            processing.run(
+                "gdal:cliprasterbymasklayer",
+                params,
+                context=self.context,
+                feedback=QgsProcessingFeedback(),
+            )
+            if not os.path.exists(output_path) or not QgsRasterLayer(output_path).isValid():
+                raise QgsProcessingException(f"Masking raster for area {index} failed to produce a valid output")
         log_message(f"Masked raster created: {output_path}")
         return output_path
 
@@ -594,7 +1296,116 @@ class WorkflowBase(QObject):
         )
         role = self.item.role
         source_qml = resources_path("resources", "qml", f"{role}.qml")
-        vrt_filepath = combine_rasters_to_vrt(
-            rasters, self.target_crs, vrt_filepath, source_qml
-        )
+        vrt_filepath = combine_rasters_to_vrt(rasters, self.target_crs, vrt_filepath, source_qml)
+        # if debug mode is off, remove all intermediate files
+        if not int(setting(key="developer_mode", default=0)):
+            log_message("Debug mode is off. Removing intermediate files, keeping only VRT-referenced rasters.")
+            # Build set of TIF filenames referenced by VRTs in this directory
+            # VRTs are locally generated XML — extract SourceFilename values via regex
+            import re
+
+            referenced_tifs = set()
+            all_files = os.listdir(self.workflow_directory)
+            source_pattern = re.compile(r"<SourceFilename[^>]*>([^<]+)</SourceFilename>")
+            for file in all_files:
+                if file.endswith(".vrt"):
+                    try:
+                        vrt_path = os.path.join(self.workflow_directory, file)
+                        with open(vrt_path, "r") as f:
+                            for match in source_pattern.finditer(f.read()):
+                                referenced_tifs.add(os.path.basename(match.group(1)))
+                    except Exception:  # nosec B110
+                        pass  # If VRT can't be read, keep all TIFs as fallback
+
+            for file in all_files:
+                file_path = os.path.join(self.workflow_directory, file)
+                # Keep: VRTs, QMLs, error logs, and TIFs referenced by VRTs
+                if file.endswith(".vrt") or file.endswith(".qml") or file.endswith("error.txt"):
+                    continue
+                if file.endswith(".tif") and file in referenced_tifs:
+                    continue
+                # Keep per-area aggregated rasters: they are consumed by the
+                # downstream insights (opportunities mask, by-population score).
+                if file.endswith(".tif") and file.startswith(f"{self.layer_id}_aggregated_"):
+                    continue
+                # Skip subdirectories — they contain child workflow outputs
+                if os.path.isdir(file_path):
+                    continue
+                # Delete intermediate files (unreferenced TIFs, shapefiles, etc.)
+                log_message(f"Removing {file_path}")
+                try:
+                    os.remove(file_path)
+                except Exception as e:
+                    log_message(
+                        f"Failed to remove {file_path}: {e}",
+                        tag="GeoE3",
+                        level=Qgis.Warning,
+                    )
+        else:
+            log_message("Debug mode is on. Keeping all files in the workflow directory.")
+
         return vrt_filepath
+
+    def _rasterize_grid_column(
+        self,
+        column_name: str,
+        bbox: QgsGeometry,
+        area_name: str,
+        index: int,
+        nodata: float = -9999.0,
+    ) -> Optional[str]:
+        """Rasterize a grid column to create a raster output.
+
+        This method creates a raster from the study_area_grid column using
+        gdal_rasterize. It is used for grid-first workflows where results
+        are written to grid columns first, then rasterized for VRT generation.
+
+        Args:
+            column_name: Name of the grid column to rasterize.
+            bbox: Bounding box geometry for the output raster extent.
+            area_name: Name of the area being processed.
+            index: Index of the area being processed (for output filename).
+            nodata: NoData value for the output raster.
+
+        Returns:
+            Path to the output raster, or None on error.
+        """
+        output_path = os.path.join(
+            self.workflow_directory,
+            f"{column_name}_from_grid_{index}.tif",
+        )
+
+        # Get extent from bbox
+        rect = bbox.boundingBox()
+        extent = (rect.xMinimum(), rect.yMinimum(), rect.xMaximum(), rect.yMaximum())
+
+        log_message(
+            f"Rasterizing grid column {column_name} for area {area_name}",
+            tag="GeoE3",
+            level=Qgis.Info,
+        )
+
+        success = rasterize_grid_column(
+            gpkg_path=self.gpkg_path,
+            column_name=column_name,
+            output_raster_path=output_path,
+            cell_size=self.cell_size_m,
+            extent=extent,
+            nodata=nodata,
+            area_name=area_name,
+        )
+
+        if success:
+            log_message(
+                f"Rasterized grid column {column_name} to {output_path}",
+                tag="GeoE3",
+                level=Qgis.Info,
+            )
+            return output_path
+        else:
+            log_message(
+                f"Failed to rasterize grid column {column_name}",
+                tag="GeoE3",
+                level=Qgis.Warning,
+            )
+            return None

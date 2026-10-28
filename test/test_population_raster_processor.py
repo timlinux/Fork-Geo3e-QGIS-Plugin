@@ -1,10 +1,13 @@
+# -*- coding: utf-8 -*-
 import os
+import tempfile
 import unittest
-import unittest
-import os
-from qgis.core import QgsProcessingContext, QgsProject, QgsCoordinateReferenceSystem
-from geest.core.algorithms import PopulationRasterProcessingTask
+
+from qgis.core import QgsProcessingContext, QgsProject
 from utilities_for_testing import prepare_fixtures
+
+from geest.core.algorithms import PopulationRasterProcessingTask
+from geest.core.algorithms.wee_by_population_score_processor import WEEByPopulationScoreProcessingTask
 
 
 class TestPopulationRasterProcessingTask(unittest.TestCase):
@@ -26,12 +29,8 @@ class TestPopulationRasterProcessingTask(unittest.TestCase):
             os.makedirs(self.output_directory)
 
         # Define paths to test layers
-        self.input_raster_path = os.path.join(
-            self.test_data_directory, "population", "population.tif"
-        )
-        self.gpkg_path = os.path.join(
-            self.test_data_directory, "study_area", "study_area.gpkg"
-        )
+        self.input_raster_path = os.path.join(self.test_data_directory, "population", "population.tif")
+        self.gpkg_path = os.path.join(self.test_data_directory, "study_area", "study_area.gpkg")
 
     @unittest.skip("Skip this test for now")
     def test_population_raster_processing(self):
@@ -59,9 +58,7 @@ class TestPopulationRasterProcessingTask(unittest.TestCase):
             any(f.startswith("reclassified_") for f in output_files),
             "Reclassified rasters not created.",
         )
-        self.assertTrue(
-            "clipped_population.vrt" in output_files, "Clipped VRT not created."
-        )
+        self.assertTrue("clipped_population.vrt" in output_files, "Clipped VRT not created.")
         self.assertTrue(
             "reclassified_population.vrt" in output_files,
             "Reclassified VRT not created.",
@@ -73,6 +70,31 @@ class TestPopulationRasterProcessingTask(unittest.TestCase):
             task.global_max,
             "Global min should be less than global max.",
         )
+
+    def test_missing_population_raster_fails(self):
+        """A missing input raster must fail instead of silently succeeding."""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            task = PopulationRasterProcessingTask(
+                population_raster_path="/does/not/exist.tif",
+                study_area_gpkg_path=self.gpkg_path,
+                working_directory=temporary_directory,
+                cell_size_m=100,
+            )
+
+            self.assertFalse(task.run())
+
+    def test_missing_population_score_output_fails(self):
+        """A missing population-score VRT must make processing fail."""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            task = WEEByPopulationScoreProcessingTask(
+                study_area_gpkg_path=self.gpkg_path,
+                working_directory=temporary_directory,
+            )
+            task.output_rasters = ["output.tif"]
+            task.calculate_score = lambda: None
+            task.generate_vrt = lambda: None
+
+            self.assertFalse(task.run())
 
 
 if __name__ == "__main__":

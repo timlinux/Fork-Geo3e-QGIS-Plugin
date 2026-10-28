@@ -1,7 +1,7 @@
+# -*- coding: utf-8 -*-
 import unittest
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QColor
 from uuid import UUID
+
 from geest.core.json_tree_item import JsonTreeItem
 
 
@@ -84,6 +84,61 @@ class TestJsonTreeItem(unittest.TestCase):
         self.assertIsNotNone(dimension.getIcon())
         self.assertIsNotNone(factor.getIcon())
         self.assertIsNotNone(indicator.getIcon())
+
+    def test_grid_column_name(self):
+        """gridColumnName() must match the sanitisation add_model_columns_to_grid()
+        applies when the column is first created: spaces and hyphens both
+        become underscores, with the dim_/fac_ role prefix workflows use
+        for their own layer_id (indicators keep the bare, unprefixed id)."""
+        data = [
+            "Workplace Discrimination",
+            "Configured",
+            1.0,
+            {"id": "Workplace-Discrimination Risk"},
+        ]
+        dimension = JsonTreeItem(data, role="dimension")
+        factor = JsonTreeItem(data, role="factor")
+        indicator = JsonTreeItem(data, role="indicator")
+
+        self.assertEqual(dimension.gridColumnName(), "dim_workplace_discrimination_risk")
+        self.assertEqual(factor.gridColumnName(), "fac_workplace_discrimination_risk")
+        self.assertEqual(indicator.gridColumnName(), "workplace_discrimination_risk")
+
+    def test_invalidate_ancestors_clears_every_ancestor_up_to_the_root(self):
+        """A factor/dimension aggregate is only as fresh as the children it
+        was computed from - if a child indicator is re-run afterwards,
+        every ancestor's cached result is stale even though it may still
+        show "Completed successfully" (worldbank/GeoE3 field report,
+        2026-10-23: a factor aggregated hours before its own child
+        indicator was re-run stayed stuck at a stale value forever)."""
+        dimension = JsonTreeItem(
+            ["Dimension", "Configured", 1.0, {"id": "dim", "result": "dimension_aggregation Workflow Completed"}],
+            role="dimension",
+        )
+        factor = JsonTreeItem(
+            ["Factor", "Configured", 1.0, {"id": "fac", "result": "factor_aggregation Workflow Completed"}],
+            role="factor",
+            parent=dimension,
+        )
+        indicator = JsonTreeItem(
+            ["Indicator", "Configured", 1.0, {"id": "ind", "result": "multi_buffer_point Workflow Completed"}],
+            role="indicator",
+            parent=factor,
+        )
+        dimension.appendChild(factor)
+        factor.appendChild(indicator)
+
+        indicator.invalidateAncestors()
+
+        self.assertEqual(factor.attribute("result"), "")
+        self.assertEqual(dimension.attribute("result"), "")
+        # The indicator's own, freshly-computed result must be untouched -
+        # only ANCESTORS are invalidated, never the item that just ran.
+        self.assertEqual(indicator.attribute("result"), "multi_buffer_point Workflow Completed")
+
+    def test_invalidate_ancestors_on_a_root_item_is_a_safe_no_op(self):
+        root = JsonTreeItem(["Analysis", "Configured", 1.0, {"id": "analysis"}], role="analysis")
+        root.invalidateAncestors()  # must not raise - no parent to invalidate
 
     def test_fonts(self):
         """Test getFont method for different roles."""
@@ -169,6 +224,15 @@ class TestJsonTreeItem(unittest.TestCase):
         self.assertEqual(item.attribute("analysis_mode"), "")
         self.assertEqual(item.attribute("factor_weighting"), 1.0)
 
+    def test_disable_factor_preserves_exclusion_state(self):
+        """Test disabling a factor records its zero weighting and mode."""
+        factor = JsonTreeItem(self.test_data, role="factor")
+
+        factor.disable()
+
+        self.assertEqual(factor.attribute("analysis_mode"), "Do Not Use")
+        self.assertEqual(factor.attribute("dimension_weighting"), 0.0)
+
     def test_update_weighting(self):
         """Test updating weighting methods."""
         parent = JsonTreeItem(self.test_data, role="dimension")
@@ -184,50 +248,36 @@ class TestJsonTreeItem(unittest.TestCase):
         item = JsonTreeItem(self.test_data, role="indicator")
         item.setAttribute("factor_weighting", 1.0)  # Ensure valid weight
         item.enable()
-        self.assertEqual(
-            item.getStatus(), "Excluded from analysis", msg=item.attributesAsMarkdown()
-        )
+        self.assertEqual(item.getStatus(), "Excluded from analysis", msg=item.attributesAsMarkdown())
 
         # Test "Excluded from analysis"
         item.setAttribute("factor_weighting", 0.0)
-        self.assertEqual(
-            item.getStatus(), "Excluded from analysis", msg=item.attributesAsMarkdown()
-        )
+        self.assertEqual(item.getStatus(), "Excluded from analysis", msg=item.attributesAsMarkdown())
 
         # Test "Completed successfully"
         item.setAttribute("result", "Workflow Completed")
         item.setAttribute("result_file", "test_file.tif")
-        self.assertEqual(
-            item.getStatus(), "Completed successfully", msg=item.attributesAsMarkdown()
-        )
+        self.assertEqual(item.getStatus(), "Completed successfully", msg=item.attributesAsMarkdown())
 
         # Test "Workflow failed"
         item.setAttribute("analysis_mode", "use_csv_to_point_layer")
         item.setAttribute("result", "Error occurred")
-        self.assertEqual(
-            item.getStatus(), "Excluded from analysis", msg=item.attributesAsMarkdown()
-        )
+        self.assertEqual(item.getStatus(), "Excluded from analysis", msg=item.attributesAsMarkdown())
 
         # Test "Required and not configured"
         item.setAttribute("analysis_mode", "Do Not Use")
         item.setAttribute("factor_weighting", 1.0)
-        self.assertEqual(
-            item.getStatus(), "Excluded from analysis", msg=item.attributesAsMarkdown()
-        )
+        self.assertEqual(item.getStatus(), "Excluded from analysis", msg=item.attributesAsMarkdown())
 
         # Test "Not configured (optional)"
         item.setAttribute("factor_weighting", 0.0)
-        self.assertEqual(
-            item.getStatus(), "Excluded from analysis", msg=item.attributesAsMarkdown()
-        )
+        self.assertEqual(item.getStatus(), "Excluded from analysis", msg=item.attributesAsMarkdown())
 
         # Test recursive weight checks
         parent = JsonTreeItem(self.test_data, role="factor")
         parent.setAttribute("dimension_weighting", 0.0)
         item.parentItem = parent
-        self.assertEqual(
-            item.getStatus(), "Excluded from analysis", msg=item.attributesAsMarkdown()
-        )
+        self.assertEqual(item.getStatus(), "Excluded from analysis", msg=item.attributesAsMarkdown())
 
     def test_paths(self):
         """Test getPaths method."""
@@ -267,9 +317,7 @@ class TestJsonTreeItem(unittest.TestCase):
         # Debugging: ensure childItems is populated
         self.assertEqual(len(analysis.childItems), 1)
 
-        descendants = analysis.getDescendantDimensions(
-            include_completed=False, include_disabled=True
-        )
+        descendants = analysis.getDescendantDimensions(include_completed=False, include_disabled=True)
         self.assertEqual(len(descendants), 1)
         self.assertIs(descendants[0], dimension)
 
@@ -286,9 +334,7 @@ class TestJsonTreeItem(unittest.TestCase):
         # Debugging: ensure childItems is populated
         self.assertEqual(len(dimension.childItems), 1)
 
-        descendants = dimension.getDescendantFactors(
-            include_completed=False, include_disabled=True
-        )
+        descendants = dimension.getDescendantFactors(include_completed=False, include_disabled=True)
         self.assertEqual(len(descendants), 1)
         self.assertIs(descendants[0], factor)
 

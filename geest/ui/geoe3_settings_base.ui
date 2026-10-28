@@ -1,0 +1,352 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>geest_settings_base</class>
+ <widget class="QWidget" name="geest_settings_base">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>873</width>
+    <height>654</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>GeoE3 Settings</string>
+  </property>
+  <layout class="QGridLayout" name="gridLayout_2">
+   <item row="0" column="0">
+    <widget class="QLabel" name="label">
+     <property name="text">
+      <string># GeoE3 Settings</string>
+     </property>
+     <property name="textFormat">
+      <enum>Qt::MarkdownText</enum>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignCenter</set>
+     </property>
+    </widget>
+   </item>
+   <item row="1" column="0" colspan="2">
+    <widget class="QGroupBox" name="groupBox_3">
+     <property name="title">
+      <string>Study Area Preparation Options</string>
+     </property>
+     <layout class="QGridLayout" name="gridLayout_3">
+      <item row="0" column="0">
+       <widget class="QLabel" name="label_6">
+        <property name="text">
+         <string>Chunk size (10 would process in chunks of 10x10 cells)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QSpinBox" name="chunk_size">
+        <property name="maximum">
+         <number>10000</number>
+        </property>
+        <property name="singleStep">
+         <number>10</number>
+        </property>
+        <property name="value">
+         <number>100</number>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="label_grid_workers">
+        <property name="text">
+         <string>Grid creation workers (1=sequential, 2-8=parallel, default 4)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QSpinBox" name="grid_creation_workers">
+        <property name="minimum">
+         <number>1</number>
+        </property>
+        <property name="maximum">
+         <number>8</number>
+        </property>
+        <property name="singleStep">
+         <number>1</number>
+        </property>
+        <property name="value">
+         <number>4</number>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item row="2" column="0" colspan="2">
+    <widget class="QGroupBox" name="groupBox_4">
+     <property name="title">
+      <string>Analysis Options</string>
+     </property>
+     <layout class="QGridLayout" name="gridLayout_5">
+      <item row="0" column="0">
+       <widget class="QCheckBox" name="default_raster_to_0">
+        <property name="text">
+         <string>Assign 0 to cells by default (if unchecked will assign nodata by default)</string>
+        </property>
+        <property name="checked">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+        <item row="1" column="0">
+         <widget class="QCheckBox" name="filter_study_areas_by_ghsl">
+          <property name="text">
+           <string>Filter study areas by GHSL settlements (skip areas without settlements)</string>
+          </property>
+          <property name="checked">
+           <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QLabel" name="label_ghsl_attribution">
+          <property name="text">
+           <string>Source: GHSL (Global Human Settlement Layer), European Commission JRC.</string>
+          </property>
+          <property name="wordWrap">
+           <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+        <item row="2" column="0" colspan="2">
+         <widget class="QCheckBox" name="include_subnational_score_matrix">
+          <property name="text">
+           <string>Include Subnational Score Matrix in the analysis report (can add many pages for projects with a large number of zones)</string>
+          </property>
+          <property name="checked">
+           <bool>false</bool>
+          </property>
+         </widget>
+        </item>
+       <item row="3" column="0" colspan="2">
+        <widget class="QGroupBox" name="groupBox_ookla">
+         <property name="title">
+          <string>Ookla Speed Test Thresholds (Digital Inclusion)</string>
+        </property>
+        <layout class="QGridLayout" name="gridLayout_ookla">
+         <item row="0" column="0" colspan="2">
+          <widget class="QCheckBox" name="ookla_use_thresholds">
+           <property name="text">
+            <string>Filter Ookla data by speed thresholds</string>
+           </property>
+           <property name="checked">
+            <bool>false</bool>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0">
+          <widget class="QLabel" name="label_ookla_mobile">
+           <property name="text">
+            <string>Mobile speed threshold (Mbps):</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="1">
+          <widget class="QDoubleSpinBox" name="ookla_mobile_threshold">
+           <property name="maximum">
+            <double>1000.000000000000000</double>
+           </property>
+           <property name="value">
+            <double>0.000000000000000</double>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="0">
+          <widget class="QLabel" name="label_ookla_fixed">
+           <property name="text">
+            <string>Fixed broadband threshold (Mbps):</string>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="1">
+          <widget class="QDoubleSpinBox" name="ookla_fixed_threshold">
+           <property name="maximum">
+            <double>1000.000000000000000</double>
+           </property>
+           <property name="value">
+            <double>0.000000000000000</double>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="0" colspan="2">
+          <widget class="QCheckBox" name="ookla_use_local_cache">
+           <property name="text">
+            <string>Cache Ookla parquet locally</string>
+           </property>
+           <property name="checked">
+            <bool>false</bool>
+           </property>
+          </widget>
+         </item>
+          <item row="4" column="0" colspan="2">
+           <widget class="QLabel" name="label_ookla_cache_note">
+            <property name="text">
+             <string>Note: First run downloads large files; later runs reuse the cache.</string>
+            </property>
+            <property name="wordWrap">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item row="6" column="0" colspan="3">
+           <widget class="QLabel" name="label_ookla_attribution">
+            <property name="text">
+             <string>Source: Ookla Open Data (Speedtest Global Performance), subject to provider terms.</string>
+            </property>
+            <property name="wordWrap">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+         <item row="5" column="0">
+          <widget class="QLabel" name="label_ookla_cache_dir">
+           <property name="text">
+            <string>Local cache directory:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="5" column="1">
+          <widget class="QLineEdit" name="ookla_cache_dir"/>
+         </item>
+         <item row="5" column="2">
+          <widget class="QToolButton" name="ookla_cache_dir_browse">
+           <property name="text">
+            <string>...</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item row="3" column="0" colspan="2">
+    <widget class="QGroupBox" name="groupBox_5">
+     <property name="title">
+      <string>User Interface Options</string>
+     </property>
+     <layout class="QGridLayout" name="gridLayout_6">
+      <item row="0" column="0">
+       <widget class="QCheckBox" name="show_layer_on_click">
+        <property name="text">
+         <string>Show layer when clicking an item in the GeoE3 tree</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QCheckBox" name="show_pie_overlay">
+        <property name="text">
+         <string>Show pie chart overlay with summary for current layer (experimental, not production ready)</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item row="4" column="1">
+    <spacer name="verticalSpacer">
+     <property name="orientation">
+      <enum>Qt::Vertical</enum>
+     </property>
+     <property name="sizeHint" stdset="0">
+      <size>
+       <width>20</width>
+       <height>40</height>
+      </size>
+     </property>
+    </spacer>
+   </item>
+   <item row="5" column="0" colspan="2">
+    <widget class="QGroupBox" name="groupBox">
+     <property name="title">
+      <string>Advanced Options</string>
+     </property>
+     <layout class="QGridLayout" name="gridLayout">
+      <item row="0" column="0">
+       <layout class="QHBoxLayout" name="horizontalLayout">
+        <item>
+         <widget class="QLabel" name="label_thread_pool_size">
+          <property name="text">
+           <string>Concurrent Tasks</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QSpinBox" name="spin_thread_pool_size"/>
+        </item>
+       </layout>
+      </item>
+      <item row="0" column="1">
+       <widget class="QLabel" name="thread_pool_description">
+        <property name="text">
+         <string>The maximum number of concurrent threads to allow during analysis. Setting to the same number of CPU cores you have would be a good conservative approach.  If you want to produce your analysis faster, you could probably run 4 or more on a decently specced machine.</string>
+        </property>
+        <property name="wordWrap">
+         <bool>true</bool>
+        </property>
+        <property name="margin">
+         <number>0</number>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QCheckBox" name="developer_mode_checkbox">
+        <property name="text">
+         <string>Enable developer mode</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QLabel" name="developer_mode_description">
+        <property name="text">
+         <string>This provides advanced options for developers like remote debugging access, persistence of intermediate files etc.</string>
+        </property>
+        <property name="wordWrap">
+         <bool>true</bool>
+        </property>
+        <property name="margin">
+         <number>0</number>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QCheckBox" name="verbose_mode_checkbox">
+        <property name="text">
+         <string>Verbose logging mode</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QLabel" name="verbose_mode_description">
+        <property name="text">
+         <string>Adds verbose log message, useful for diagnostics.</string>
+        </property>
+        <property name="wordWrap">
+         <bool>true</bool>
+        </property>
+        <property name="margin">
+         <number>0</number>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <tabstops>
+  <tabstop>spin_thread_pool_size</tabstop>
+  <tabstop>developer_mode_checkbox</tabstop>
+  <tabstop>verbose_mode_checkbox</tabstop>
+ </tabstops>
+ <resources/>
+ <connections/>
+</ui>

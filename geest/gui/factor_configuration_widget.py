@@ -1,9 +1,17 @@
-from qgis.PyQt.QtWidgets import QWidget, QVBoxLayout, QButtonGroup
+# -*- coding: utf-8 -*-
+"""📦 Factor Configuration Widget module.
+
+This module contains functionality for factor configuration widget.
+"""
+
 from qgis.core import Qgis
 from qgis.PyQt.QtCore import pyqtSignal
-from .configuration_widget_factory import ConfigurationWidgetFactory
+from qgis.PyQt.QtWidgets import QButtonGroup, QVBoxLayout, QWidget
+
 from geest.core import JsonTreeItem
 from geest.utilities import log_message
+
+from .configuration_widget_factory import ConfigurationWidgetFactory
 
 
 class FactorConfigurationWidget(QWidget):
@@ -22,13 +30,15 @@ class FactorConfigurationWidget(QWidget):
     def __init__(self, item: JsonTreeItem, guids: list) -> None:
         """
         Initialize the widget with the item and guids.
-        :param item: Item containing the factor configuration.
-        :param guids: List of guids for the indicators that the settings in the config will be applied to.
+
+        Args:
+            item: Item containing the factor configuration.
+            guids: List of guids for the indicators that the settings in the config will be applied to.
         """
         super().__init__()
         log_message(
             f"Creating FactorConfigurationWidget for guids: {guids}",
-            tag="Geest",
+            tag="GeoE3",
             level=Qgis.Info,
         )
         self.guids = guids  # List of guids for the indicators that the settings in the config will be applied to
@@ -40,6 +50,13 @@ class FactorConfigurationWidget(QWidget):
         # We work with a copy so any changes you make to attributes
         # will NOT update the indicator item
         attributes = item.getItemByGuid(guids[0]).attributes().copy()
+        # Include factor metadata so configuration widgets don't need to read model.json.
+        attributes["factor_id"] = item.attribute("id", "")
+        attributes["factor_name"] = item.attribute("name", "")
+        # Include analysis scale from the analysis item for scale-aware rendering.
+        analysis_item = item.parentItem.parentItem if item.parentItem and item.parentItem.parentItem else None
+        if analysis_item:
+            attributes["analysis_scale"] = analysis_item.attribute("analysis_scale", "")
         self.attributes = attributes
         self.layout: QVBoxLayout = QVBoxLayout()
         self.layout.setContentsMargins(0, 0, 0, 0)
@@ -56,6 +73,9 @@ class FactorConfigurationWidget(QWidget):
     def create_radio_buttons(self, attributes: dict) -> None:
         """
         Uses the factory to create radio buttons from attributes dictionary.
+
+        Args:
+            attributes: Dictionary containing attributes for creating radio buttons.
         """
         analysis_mode = attributes.get("analysis_mode", "")
         log_message(f"Creating radio buttons for analysis mode: {analysis_mode}")
@@ -66,9 +86,7 @@ class FactorConfigurationWidget(QWidget):
                 # We pass a copy of the attributes dictionary to the widget factory
                 # so that we can update the attributes as needed
                 # The widget factory will update the attributes dictionary with new data
-                configuration_widget = ConfigurationWidgetFactory.create_widget(
-                    key, value, attributes.copy()
-                )
+                configuration_widget = ConfigurationWidgetFactory.create_widget(key, value, attributes.copy())
                 if configuration_widget:
                     self.widgets[key] = configuration_widget
                     widget_count += 1
@@ -90,6 +108,9 @@ class FactorConfigurationWidget(QWidget):
     def refresh_radio_buttons(self, attributes: dict) -> None:
         """
         Refreshes the radio buttons.
+
+        Args:
+            attributes: Dictionary containing updated attributes for refreshing radio buttons.
         """
         log_message("Refreshing radio buttons")
         for key, value in attributes.items():
@@ -102,7 +123,9 @@ class FactorConfigurationWidget(QWidget):
         """
         Slot called when the selection in the radio button group changes.
         Emits the selection_changed signal.
-        :param button: The button that was clicked.
+
+        Args:
+            button: The button that was clicked.
         """
         log_message("Radio button selection changed")
         self.update_attributes(self.button_group.checkedButton().parent().get_data())
@@ -119,10 +142,11 @@ class FactorConfigurationWidget(QWidget):
         - A key exists in `new_data` but not in `self.attributes`.
         - A key exists in both, but their values are different.
 
-        :param new_data: A dictionary containing the new attribute values to be updated.
+        Args:
+            new_data: A dictionary containing the new attribute values to be updated.
         """
         # Log the received data
-        # log_message(f"Received new data: {new_data}", tag="Geest", level=Qgis.Info)
+        # log_message(f"Received new data: {new_data}", tag="GeoE3", level=Qgis.Info)
 
         # Identify changed attributes: keys present in new_data with differing or new values
         if not new_data:
@@ -140,13 +164,9 @@ class FactorConfigurationWidget(QWidget):
 
         # Log the changes that will be applied
         if changed_attributes:
-            log_message(
-                f"\n\n\n\n\nUpdating attributes with the following changes: {changed_attributes}\n\n\n\n\n"
-            )
+            log_message(f"\n\n\n\n\nUpdating attributes with the following changes: {changed_attributes}\n\n\n\n\n")
         else:
-            log_message(
-                "\n\n\n\n\n\nNo changes detected in the new data. No updates will be applied.\n\n\n\n\n"
-            )
+            log_message("\n\n\n\n\n\nNo changes detected in the new data. No updates will be applied.\n\n\n\n\n")
             return  # Exit early if there are no changes
 
         # Apply the changes to each indicator associated with the GUIDs
@@ -155,11 +175,11 @@ class FactorConfigurationWidget(QWidget):
             if indicator is not None:
                 indicator_attributes = indicator.attributes()
                 indicator_attributes.update(changed_attributes)
-                log_message(f"Updated attributes for GUID {guid}:")
+                log_message(f"Updated attributes for GUID {guid}: ")
                 log_message(f"{indicator.attributesAsMarkdown()}")
             else:
                 log_message(
                     f"GUID {guid} could not be found. Skipping update.",
-                    tag="Geest",
+                    tag="GeoE3",
                     level=Qgis.Warning,
                 )

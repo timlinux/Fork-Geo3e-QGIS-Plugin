@@ -1,28 +1,36 @@
-import os
-import traceback
-from typing import Optional, List
-import shutil
+# -*- coding: utf-8 -*-
+"""📦 Wee By Population Score Processor module.
 
-from qgis.core import (
-    QgsTask,
-    QgsRasterLayer,
-    QgsVectorLayer,
-    QgsCoordinateReferenceSystem,
-)
+This module contains functionality for geoe3 by population score processor.
+"""
+
+import os
+import shutil
+import traceback
+from typing import List, Optional
+
 from qgis import processing
-from geest.utilities import log_message, resources_path
+from qgis.core import (
+    QgsCoordinateReferenceSystem,
+    QgsRasterLayer,
+    QgsTask,
+    QgsVectorLayer,
+)
+
 from geest.core.algorithms import AreaIterator
+from geest.core.grid_column_utils import clear_grid_column, write_raster_values_to_grid
+from geest.utilities import log_message, resources_path
 
 
 class WEEByPopulationScoreProcessingTask(QgsTask):
     """
-    A QgsTask subclass for calculating WEE x Population SCORE using raster algebra.
+    A QgsTask subclass for calculating GeoE3 x Population SCORE using raster algebra.
 
-    It iterates over study areas, calculates the WEE SCORE using aligned input rasters
-    (WEE and POP), combines the resulting rasters into a VRT, and applies a QML style.
+    It iterates over study areas, calculates the GeoE3 Score using aligned input rasters
+    (GeoE3 and POP), combines the resulting rasters into a VRT, and applies a QML style.
 
-    It takes as input a WEE Score layer (output as the result of Analysis level aggregation
-    of GEEST workflow). This WEE Score layer has the following classes:
+    It takes as input a GeoE3 Score layer (output as the result of Analysis level aggregation
+    of GEOE3 workflow). This GeoE3 Score layer has the following classes:
 
     | Range  | Description               | Color      |
     |--------|---------------------------|------------|
@@ -43,11 +51,11 @@ class WEEByPopulationScoreProcessingTask(QgsTask):
     | ![#800000](#) `#800000` | High Population     |
 
 
-    The output WEE x Population Score can be one of 15 classes calculated as
+    The output GeoE3 x Population Score can be one of 15 classes calculated as
 
     ((A - 1) * 3) + B
 
-    Where A is WEE Score and B is Population class. The output classes are as follows:
+    Where A is GeoE3 Score and B is Population class. The output classes are as follows:
 
     | Color      | Description                                 |
     |------------|---------------------------------------------|
@@ -92,15 +100,15 @@ class WEEByPopulationScoreProcessingTask(QgsTask):
         target_crs: Optional[QgsCoordinateReferenceSystem] = None,
         force_clear: bool = False,
     ):
-        super().__init__("WEE Score Processor", QgsTask.CanCancel)
+        super().__init__("GeoE3 Score Processor", QgsTask.CanCancel)
         self.study_area_gpkg_path = study_area_gpkg_path
 
-        self.output_dir = os.path.join(working_directory, "wee_by_population_score")
+        self.output_dir = os.path.join(working_directory, "geoe3_by_population_score")
         os.makedirs(self.output_dir, exist_ok=True)
 
         # These folders should already exist from the aggregation analysis and population raster processing
         self.population_folder = os.path.join(working_directory, "population")
-        self.wee_folder = os.path.join(working_directory, "wee_score")
+        self.geoe3_folder = os.path.join(working_directory, "geoe3_score")
 
         self.force_clear = force_clear
         if self.force_clear and os.path.exists(self.output_dir):
@@ -118,15 +126,22 @@ class WEEByPopulationScoreProcessingTask(QgsTask):
             del layer
         self.output_rasters: List[str] = []
 
-        log_message("Initialized WEE SCORE Processing Task")
+        log_message("Initialized GeoE3 Score Processing Task")
 
     def run(self) -> bool:
         """
-        Executes the WEE SCORE calculation task.
+        Executes the GeoE3 Score calculation task.
+
+        Returns:
+            bool: True if the task completed successfully, False otherwise.
         """
         try:
             self.calculate_score()
             self.generate_vrt()
+            if not self.output_rasters or not os.path.exists(
+                os.path.join(self.output_dir, "geoe3_by_population_score.vrt")
+            ):
+                raise ValueError("GeoE3 by population processing did not create an output raster.")
             return True
         except Exception as e:
             log_message(f"Task failed: {e}")
@@ -135,76 +150,77 @@ class WEEByPopulationScoreProcessingTask(QgsTask):
 
     def validate_rasters(
         self,
-        geest_raster: QgsRasterLayer,
+        geoe3_raster: QgsRasterLayer,
         pop_raster: QgsRasterLayer,
         dimension_check=False,
     ) -> None:
         """
-        Checks if GEEST and POP rasters have the same origin, dimensions, and pixel sizes.
-
-        Raises an exception if the check fails.
+        Checks if GEOE3 and POP rasters have the same origin, dimensions, and pixel sizes.
 
         Args:
-            geest_raster_path (QgsRasterLayer): Path to the GEEST raster.
-            pop_raster_path (QgsRasterLayer): Path to the POP raster.
-            dimension_check (bool): Flag to check if the rasters have the same dimensions.
-        returns:
-            None
+            geoe3_raster (QgsRasterLayer): The GEOE3 raster layer.
+            pop_raster (QgsRasterLayer): The population raster layer.
+            dimension_check (bool): Flag to check if the rasters have the same dimensions. Defaults to False.
+
+        Raises:
+            ValueError: If one or both input rasters are invalid, or if rasters don't share the same extent or dimensions when dimension_check is True.
         """
         log_message("Validating input rasters")
-        log_message(f"GEEST Raster: {geest_raster.source()}")
-        log_message(f"POP Raster  : {pop_raster.source()}")
+        log_message(f"GEOE3 Raster: {geoe3_raster.source()}")
+        log_message(f"POP Raster  : {pop_raster.source()}")  # noqa E203
 
-        if not geest_raster.isValid() or not pop_raster.isValid():
+        if not geoe3_raster.isValid() or not pop_raster.isValid():
             raise ValueError("One or both input rasters are invalid.")
 
         if not dimension_check:
             return
 
-        geest_provider = geest_raster.dataProvider()
+        geoe3_provider = geoe3_raster.dataProvider()
         pop_provider = pop_raster.dataProvider()
 
-        geest_extent = geest_provider.extent()
+        geoe3_extent = geoe3_provider.extent()
         pop_extent = pop_provider.extent()
-        if geest_extent != pop_extent:
+        if geoe3_extent != pop_extent:
             raise ValueError("Input rasters do not share the same extent.")
 
-        geest_size = geest_provider.xSize(), geest_provider.ySize()
+        geoe3_size = geoe3_provider.xSize(), geoe3_provider.ySize()
         pop_size = pop_provider.xSize(), pop_provider.ySize()
-        if geest_size != pop_size:
+        if geoe3_size != pop_size:
             raise ValueError("Input rasters do not share the same dimensions.")
 
         log_message("Validation successful: rasters are aligned.")
 
     def calculate_score(self) -> None:
         """
-        Calculates WEE by POP SCORE using raster algebra and saves the result for each area.
+        Calculates GeoE3 by POP SCORE using raster algebra and saves the result for each area.
+        Also writes the bivariate values to the study_area_grid column 'geoe3_by_population'.
         """
+        # Clear stale values before writing new scores
+        clear_grid_column(self.study_area_gpkg_path, "geoe3_by_population")
+
         area_iterator = AreaIterator(self.study_area_gpkg_path)
-        for index, (_, _, _, _) in enumerate(area_iterator):
+        for index, (_, _, _, _, area_name) in enumerate(area_iterator):
             if self.isCanceled():
                 return
 
-            wee_path = os.path.join(self.wee_folder, f"wee_masked_{index}.tif")
-            population_path = os.path.join(
-                self.population_folder, f"reclassified_{index}.tif"
-            )
-            wee_layer = QgsRasterLayer(wee_path, "WEE")
+            geoe3_path = os.path.join(self.geoe3_folder, f"geoe3_aggregated_{index}.tif")
+            population_path = os.path.join(self.population_folder, f"reclassified_{index}.tif")
+            geoe3_layer = QgsRasterLayer(geoe3_path, "GeoE3")
             pop_layer = QgsRasterLayer(population_path, "POP")
-            self.validate_rasters(wee_layer, pop_layer, dimension_check=False)
+            self.validate_rasters(geoe3_layer, pop_layer, dimension_check=False)
 
-            output_path = os.path.join(
-                self.output_dir, f"wee_by_population_score_{index}.tif"
-            )
+            output_path = os.path.join(self.output_dir, f"geoe3_by_population_score_{index}.tif")
             if not self.force_clear and os.path.exists(output_path):
                 log_message(f"Reusing existing raster: {output_path}")
                 self.output_rasters.append(output_path)
+                # Still write to grid even when reusing raster
+                self._write_to_grid(output_path, area_name)
                 continue
 
-            log_message(f"Calculating WEE by POP SCORE for area {index}")
+            log_message(f"Calculating GeoE3 by POP SCORE for area {index}")
 
             params = {
-                "INPUT_A": wee_layer,
+                "INPUT_A": geoe3_layer,
                 "BAND_A": 1,
                 "INPUT_B": pop_layer,
                 "BAND_B": 1,
@@ -221,15 +237,36 @@ class WEEByPopulationScoreProcessingTask(QgsTask):
             processing.run("gdal:rastercalculator", params)
             self.output_rasters.append(output_path)
 
-            log_message(f"WEE SCORE raster saved to {output_path}")
+            log_message(f"GeoE3 Score raster saved to {output_path}")
+
+            # Write results to grid column
+            self._write_to_grid(output_path, area_name)
+
+    def _write_to_grid(self, raster_path: str, area_name: str) -> None:
+        """Write bivariate score values to the geoe3_by_population column in the grid.
+
+        Args:
+            raster_path: Path to the bivariate score raster file.
+            area_name: Name of the area being processed.
+        """
+        updated = write_raster_values_to_grid(
+            gpkg_path=self.study_area_gpkg_path,
+            raster_path=raster_path,
+            column_name="geoe3_by_population",
+            area_name=area_name,
+        )
+        if updated >= 0:
+            log_message(f"Updated {updated} grid cells with geoe3_by_population values for area {area_name}")
+        else:
+            log_message(f"Failed to write geoe3_by_population values to grid for area {area_name}")
 
     def generate_vrt(self) -> None:
         """
-        Combines all WEE SCORE rasters into a single VRT and ap plies a QML style.
+        Combines all GeoE3 Score rasters into a single VRT and applies a QML style.
         """
-        vrt_path = os.path.join(self.output_dir, "wee_by_population_score.vrt")
-        qml_path = os.path.join(self.output_dir, "wee_by_population_score.qml")
-        source_qml = resources_path("resources", "qml", "wee_by_population_score.qml")
+        vrt_path = os.path.join(self.output_dir, "geoe3_by_population_score.vrt")
+        qml_path = os.path.join(self.output_dir, "geoe3_by_population_score.qml")
+        source_qml = resources_path("resources", "qml", "geoe3_by_population_score.qml")
 
         params = {
             "INPUT": self.output_rasters,
@@ -251,8 +288,11 @@ class WEEByPopulationScoreProcessingTask(QgsTask):
     def finished(self, result: bool) -> None:
         """
         Called when the task completes.
+
+        Args:
+            result (bool): The result of the task execution.
         """
         if result:
-            log_message("WEE SCORE calculation completed successfully.")
+            log_message("GeoE3 Score calculation completed successfully.")
         else:
-            log_message("WEE SCORE calculation failed.")
+            log_message("GeoE3 Score calculation failed.")

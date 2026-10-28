@@ -1,9 +1,28 @@
-from qgis.PyQt.QtWidgets import (
-    QLabel,
-)
+# -*- coding: utf-8 -*-
+"""GEOE3 GUI widgets."""
+
+__copyright__ = "Copyright 2022, Tim Sutton"
+__license__ = "GPL version 3"
+__email__ = "tim@kartoza.com"
+__revision__ = "$Format:%H$"
+
+# -----------------------------------------------------------
+# Copyright (C) 2022 Tim Sutton
+# -----------------------------------------------------------
+# Licensed under the terms of GNU GPL 3
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# ---------------------------------------------------------------------
+
 from qgis.core import Qgis
-from .base_configuration_widget import BaseConfigurationWidget
+from qgis.PyQt.QtWidgets import QLabel
+
 from geest.utilities import log_message
+
+from .base_configuration_widget import BaseConfigurationWidget
 
 
 class RasterReclassificationConfigurationWidget(BaseConfigurationWidget):
@@ -51,7 +70,7 @@ class RasterReclassificationConfigurationWidget(BaseConfigurationWidget):
         except Exception as e:
             log_message(
                 f"Error in set_internal_widgets_enabled: {e}",
-                tag="Geest",
+                tag="GeoE3",
                 level=Qgis.Critical,
             )
 

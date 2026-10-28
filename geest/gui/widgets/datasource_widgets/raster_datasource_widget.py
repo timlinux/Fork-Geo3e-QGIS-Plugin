@@ -1,20 +1,21 @@
+# -*- coding: utf-8 -*-
+"""📦 Raster Datasource Widget module.
+
+This module contains functionality for raster datasource widget.
+"""
+
 import os
-from qgis.PyQt.QtWidgets import (
-    QLineEdit,
-    QToolButton,
-    QFileDialog,
-)
-from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtCore import QSettings, Qt
+from urllib.parse import quote, unquote
+
+from qgis.core import Qgis, QgsMapLayerProxyModel, QgsProject
 from qgis.gui import QgsMapLayerComboBox
-from qgis.core import (
-    QgsMapLayerProxyModel,
-    QgsProject,
-    Qgis,
-)
+from qgis.PyQt.QtCore import QSettings, Qt
+from qgis.PyQt.QtGui import QFontMetrics, QIcon
+from qgis.PyQt.QtWidgets import QFileDialog, QLabel, QLineEdit, QSizePolicy, QStyle, QToolButton
+
+from geest.utilities import log_message, resources_path
 
 from .base_datasource_widget import BaseDataSourceWidget
-from geest.utilities import log_message, resources_path
 
 
 class RasterDataSourceWidget(BaseDataSourceWidget):
@@ -58,26 +59,19 @@ class RasterDataSourceWidget(BaseDataSourceWidget):
         """
         # Raster Layer ComboBox (Filtered to raster layers)
         self.raster_layer_combo = QgsMapLayerComboBox()
-        self.raster_layer_combo.setFilters(QgsMapLayerProxyModel.RasterLayer)
+        self.raster_layer_combo.setFilters(QgsMapLayerProxyModel.Filter.RasterLayer)
         self.raster_layer_combo.setAllowEmptyLayer(True)
+        self.raster_layer_combo.setMaximumWidth(420)
         # Insert placeholder text at the top (only visually, not as a selectable item)
         self.raster_layer_combo.setCurrentIndex(-1)  # Ensure no selection initially
-        self.raster_layer_combo.setEditable(
-            True
-        )  # Make editable temporarily for placeholder
-        self.raster_layer_combo.lineEdit().setPlaceholderText(
-            "Select item"
-        )  # Add placeholder text
+        self.raster_layer_combo.setEditable(True)  # Make editable temporarily for placeholder
+        self.raster_layer_combo.lineEdit().setPlaceholderText("Select item")  # Add placeholder text
 
         # Disable editing after setting placeholder (ensures only layer names are selectable)
         self.raster_layer_combo.lineEdit().setReadOnly(True)
-        self.raster_layer_combo.setEditable(
-            False
-        )  # Lock back to non-editable after setting placeholder
+        self.raster_layer_combo.setEditable(False)  # Lock back to non-editable after setting placeholder
 
-        self.raster_layer_combo.setToolTip(
-            "Raster chosen from file system will have preference"
-        )
+        self.raster_layer_combo.setToolTip("Raster chosen from file system will have preference")
         self.layout.addWidget(self.raster_layer_combo)
 
         # Restore previously selected raster layer
@@ -96,14 +90,12 @@ class RasterDataSourceWidget(BaseDataSourceWidget):
         clear_icon = QIcon(resources_path("resources", "icons", "clear.svg"))
         self.clear_button.setIcon(clear_icon)
         self.clear_button.setToolTip("Clear")
-        self.clear_button.setCursor(Qt.ArrowCursor)
+        self.clear_button.setCursor(Qt.CursorShape.ArrowCursor)
         self.clear_button.setStyleSheet("border: 0px; padding: 0px;")
         self.clear_button.clicked.connect(self.clear_raster)
         self.clear_button.setVisible(False)
 
-        self.raster_line_edit.textChanged.connect(
-            lambda text: self.clear_button.setVisible(bool(text))
-        )
+        self.raster_line_edit.textChanged.connect(lambda text: self.clear_button.setVisible(bool(text)))
         self.raster_line_edit.textChanged.connect(self.resize_clear_button)
 
         # File chooser button for Raster Layer
@@ -112,7 +104,7 @@ class RasterDataSourceWidget(BaseDataSourceWidget):
         self.raster_button.clicked.connect(self.select_raster)
 
         if self.attributes.get(f"{self.widget_key}_raster", False):
-            self.raster_line_edit.setText(self.attributes[f"{self.widget_key}_raster"])
+            self.raster_line_edit.setText(unquote(self.attributes[f"{self.widget_key}_raster"]))
             self.raster_line_edit.setVisible(True)
             self.raster_layer_combo.setVisible(False)
         else:
@@ -121,9 +113,49 @@ class RasterDataSourceWidget(BaseDataSourceWidget):
         self.resize_clear_button()
 
         self.layout.addWidget(self.raster_button)
-        self.raster_button.setToolTip(
-            "Raster chosen from file system will have preference"
+        self.raster_button.setToolTip("Raster chosen from file system will have preference")
+
+    def _add_source_link(self, url: str, label: str) -> None:
+        """Add a clickable hyperlink that opens the source dataset in a browser.
+
+        The link is laid out with a ``Preferred`` horizontal size policy and a
+        minimum width, so it reserves its text width and sits immediately after
+        the other controls without creating a large empty gap or widening the
+        table rows.
+
+        Args:
+            url: The URL to open when the link is clicked.
+            label: The link text shown to the user.
+        """
+        if not url:
+            return
+        self._source_link_url = url
+        self._source_link_text = label
+        self._source_link_label = QLabel(f'<a href="{url}">{label}</a>')
+        self._source_link_label.setOpenExternalLinks(True)
+        self._source_link_label.setWordWrap(False)
+        self._source_link_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self._source_link_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self._source_link_label.setMinimumWidth(160)
+        self._source_link_label.setStyleSheet("color: #2d5a75; font-size: 11px; padding: 0px;")
+        self._source_link_label.setToolTip(
+            f"Download {label} from the World Bank Data Catalog"
+            if label
+            else "Download source data from the World Bank Data Catalog"
         )
+        self.layout.addWidget(self._source_link_label)
+
+    def _elide_source_link(self) -> None:
+        """Render the source link text ellipsized to fit the available width."""
+        if not getattr(self, "_source_link_label", None):
+            return
+        width = max(20, self._source_link_label.width() - 4)
+        elided = QFontMetrics(self._source_link_label.font()).elidedText(
+            self._source_link_text,
+            Qt.TextElideMode.ElideRight,
+            width,
+        )
+        self._source_link_label.setText(f'<a href="{self._source_link_url}">{elided}</a>')
 
     def resizeEvent(self, event):
         """
@@ -134,28 +166,25 @@ class RasterDataSourceWidget(BaseDataSourceWidget):
         """
         super().resizeEvent(event)
         self.resize_clear_button()
+        self._elide_source_link()
 
     def resize_clear_button(self):
         """Reposition the clear button when the line edit is resized."""
         log_message("Resizing clear button")
         # Position the clear button inside the line edit
-        frame_width = self.raster_line_edit.style().pixelMetric(
-            self.raster_line_edit.style().PM_DefaultFrameWidth
-        )
+        frame_width = self.raster_line_edit.style().pixelMetric(QStyle.PixelMetric.PM_DefaultFrameWidth)
         self.raster_line_edit.setStyleSheet(
-            f"QLineEdit {{ padding-right: {self.clear_button.sizeHint().width() + frame_width}px; }}"
+            f"QLineEdit {{ padding-right: {self.clear_button.sizeHint().width() + frame_width}px; }}"  # noqa E702,E202,E201
         )
         sz = self.clear_button.sizeHint()
-        self.clear_button.move(
-            self.raster_line_edit.width() - sz.width() - frame_width - 5, 6
-        )
+        self.clear_button.move(self.raster_line_edit.width() - sz.width() - frame_width - 5, 6)
 
     def select_raster(self) -> None:
         """
         Opens a file dialog to select a for the raster (paths) layer and updates the QLineEdit with the file path.
         """
         try:
-            last_dir = self.settings.value("Geest/lastRasterDir", "")
+            last_dir = self.settings.value("GeoE3/lastRasterDir", "")
 
             file_path, _ = QFileDialog.getOpenFileName(
                 self, "Select Raster Layer", last_dir, "Rasters (*.vrt *.tif *.asc)"
@@ -170,9 +199,7 @@ class RasterDataSourceWidget(BaseDataSourceWidget):
                 # Trigger resize event explicitly
                 self.resizeEvent(None)
                 # Save the directory of the selected file to QSettings
-                self.settings.setValue(
-                    "Geest/lastRasterDir", os.path.dirname(file_path)
-                )
+                self.settings.setValue("GeoE3/lastRasterDir", os.path.dirname(file_path))
 
         except Exception as e:
             log_message(f"Error selecting raster: {e}", level=Qgis.Critical)
@@ -204,11 +231,7 @@ class RasterDataSourceWidget(BaseDataSourceWidget):
         if raster_layer:
             self.attributes[f"{self.widget_key}_layer_name"] = raster_layer.name()
             self.attributes[f"{self.widget_key}_layer_source"] = raster_layer.source()
-            self.attributes[f"{self.widget_key}_layer_provider_type"] = (
-                raster_layer.providerType()
-            )
-            self.attributes[f"{self.widget_key}_layer_crs"] = (
-                raster_layer.crs().authid()
-            )
+            self.attributes[f"{self.widget_key}_layer_provider_type"] = raster_layer.providerType()
+            self.attributes[f"{self.widget_key}_layer_crs"] = raster_layer.crs().authid()
             self.attributes[f"{self.widget_key}_layer_id"] = raster_layer.id()
-        self.attributes[f"{self.widget_key}_raster"] = self.raster_line_edit.text()
+        self.attributes[f"{self.widget_key}_raster"] = quote(self.raster_line_edit.text())

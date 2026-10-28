@@ -1,31 +1,30 @@
+# -*- coding: utf-8 -*-
+"""📦 Treeview module.
+
+This module contains functionality for treeview.
+"""
+
 import uuid
 
-# Change to this when implementing in QGIS
-from qgis.PyQt.QtWidgets import (
-    QAbstractItemDelegate,
-    QTreeView,
-    QMessageBox,
-)
-
-# Change to this when implementing in QGIS
-from qgis.PyQt.QtCore import (
-    QAbstractItemModel,
-    QModelIndex,
-    Qt,
-    pyqtSignal,
-)
+from qgis.core import Qgis, QgsProject
+from qgis.PyQt.QtCore import QAbstractItemModel, QModelIndex, Qt, pyqtSignal
 from qgis.PyQt.QtGui import QColor
-from qgis.PyQt.QtWidgets import QAbstractItemDelegate, QTreeView, QMessageBox
-from qgis.PyQt.QtCore import QAbstractItemModel, QModelIndex, Qt
-from qgis.core import Qgis
-from geest.utilities import log_message
+from qgis.PyQt.QtWidgets import QMessageBox, QTreeView
+
 from geest.core import JsonTreeItem
+from geest.core.constants import DEFAULT_S2S_POPULATION_FIELD
+from geest.utilities import log_message, title_case
 
 
 class JsonTreeModel(QAbstractItemModel):
-    collapseNodeRequested = pyqtSignal(
-        object
-    )  # Signal to notify the view to collapse a node
+    """🎯 Json Tree Model.
+
+    Attributes:
+        original_value: Original value.
+        rootItem: Rootitem.
+    """
+
+    collapseNodeRequested = pyqtSignal(object)  # Signal to notify the view to collapse a node
 
     """
     A custom tree model for managing hierarchical JSON data in a QTreeView, including an "Analysis" root item
@@ -49,9 +48,7 @@ class JsonTreeModel(QAbstractItemModel):
         """
         super().__init__(parent)
         guid = str(uuid.uuid4())
-        self.rootItem = JsonTreeItem(
-            ["GEEST2", "Status", "Weight"], role="root", guid=guid
-        )
+        self.rootItem = JsonTreeItem(["GeoE3", "Status", "Weight"], role="root", guid=guid)
         self.original_value = None  # To store the original value before editing
         self.loadJsonData(json_data)
 
@@ -66,12 +63,16 @@ class JsonTreeModel(QAbstractItemModel):
             json_data (dict): The JSON data representing the analysis and its hierarchical structure.
         """
         self.beginResetModel()
-        self.rootItem = JsonTreeItem(["GEEST2", "Status", "Weight"], "root")
+        self.rootItem = JsonTreeItem(["GeoE3", "Status", "Weight"], "root")
 
         # Create the 'Analysis' parent item
         analysis_name = json_data.get("analysis_name", "Analysis")
         analysis_description = json_data.get("description", "No Description")
+        analysis_scale = json_data.get("analysis_scale", "local")
         analysis_cell_size_m = json_data.get("analysis_cell_size_m", 100.0)
+        # START I don't love that this list of layer paths is hard coded here
+        road_network_layer_path = json_data.get("road_network_layer_path", "")
+        # END
         working_folder = json_data.get("working_folder", "Not Set")
         guid = json_data.get("guid", str(uuid.uuid4()))  # Deserialize UUID
         analysis_result = json_data.get("result", "")
@@ -80,46 +81,49 @@ class JsonTreeModel(QAbstractItemModel):
         analysis_execution_end_time = json_data.get("execution_end_time", "")
         analysis_error = json_data.get("error", "")
         analysis_error_file = json_data.get("error_file", "")
-        analysis_output_filename = json_data.get("output_filename", "WEE_Score")
+        analysis_output_filename = json_data.get("output_filename", "GeoE3_Score")
         mask_mode = json_data.get("mask_mode", "None")
         buffer_distance_m = json_data.get("buffer_distance_m", 0.0)
-        opportunities_mask_result_file = json_data.get(
-            "opportunities_mask_result_file", ""
-        )
+        opportunities_mask_result_file = json_data.get("opportunities_mask_result_file", "")
         opportunities_mask_result = json_data.get("opportunities_mask_result", "")
-        wee_by_opportunities_mask_result = json_data.get(
-            "wee_by_opportunities_mask_result", ""
+        # geoe3_score_ghsl_masked_result(_file) - NOT geoe3_by_opportunities_mask_result(_file),
+        # a superseded name no processor has written in a long time - is
+        # what OpportunitiesByWeeScoreProcessingTask actually sets
+        # (opportunities_by_wee_score_processor.py). Omitting these from
+        # the explicit reload whitelist meant loadJsonData() silently
+        # dropped them every time the model got rebuilt from saved JSON,
+        # even though they were correctly computed and briefly present
+        # (worldbank/GeoE3 field report, 2026-10-24: "GeoE3 x Opportunities
+        # Mask" always showed blank despite the underlying raster existing).
+        geoe3_score_ghsl_masked_result = json_data.get("geoe3_score_ghsl_masked_result", "")
+        geoe3_score_ghsl_masked_result_file = json_data.get("geoe3_score_ghsl_masked_result_file", "")
+        geoe3_by_population = json_data.get("geoe3_by_population", "")
+        geoe3_by_population_subnational_aggregation = json_data.get("geoe3_by_population_subnational_aggregation", "")
+        geoe3_score_subnational_aggregation = json_data.get("geoe3_score_subnational_aggregation", "")
+        geoe3_score_ghsl_masked_subnational_aggregation = json_data.get(
+            "geoe3_score_ghsl_masked_subnational_aggregation", ""
         )
-        wee_by_opportunities_mask_result_file = json_data.get(
-            "wee_by_opportunities_mask_result_file", ""
+        geoe3_score_by_population_ghsl_masked_subnational_aggregation = json_data.get(
+            "geoe3_score_by_population_ghsl_masked_subnational_aggregation", ""
         )
-        wee_by_population = json_data.get("wee_by_population", "")
-        wee_by_population_subnational_aggregation = json_data.get(
-            "wee_by_population_subnational_aggregation", ""
+        # Same rename as geoe3_score_ghsl_masked_result above, for the
+        # population-score variant (OpportunitiesByWeeScorePopulationProcessingTask).
+        geoe3_score_by_population_ghsl_masked_result_file = json_data.get(
+            "geoe3_score_by_population_ghsl_masked_result_file", ""
         )
-        wee_score_subnational_aggregation = json_data.get(
-            "wee_score_subnational_aggregation", ""
-        )
-        opportunities_by_wee_score_by_population_subnational_aggregation = (
-            json_data.get(
-                "opportunities_by_wee_score_by_population_subnational_aggregation", ""
-            )
-        )
-        opportunities_by_wee_score_subnational_aggregation = json_data.get(
-            "opportunities_by_wee_score_subnational_aggregation", ""
-        )
-        wee_by_population_by_opportunities_mask_result_file = json_data.get(
-            "wee_by_population_by_opportunities_mask_result_file", ""
-        )
-        wee_by_population_by_opportunities_mask_result = json_data.get(
-            "wee_by_population_by_opportunities_mask_result", ""
-        )
+        geoe3_score_by_population_ghsl_masked_result = json_data.get("geoe3_score_by_population_ghsl_masked_result", "")
+        qgis_project_path = json_data.get("qgis_project_path", "")
+        population_s2s_output_path = json_data.get("population_s2s_output_path") or ""
+        population_s2s_field = json_data.get("population_s2s_field") or DEFAULT_S2S_POPULATION_FIELD
+        population_source = json_data.get("population_source", "raster")
         # Store special properties in the attributes dictionary
         analysis_attributes = {
             "analysis_name": analysis_name,
             "description": analysis_description,
             "working_folder": working_folder,
             "analysis_cell_size_m": analysis_cell_size_m,
+            "analysis_scale": analysis_scale,
+            "road_network_layer_path": road_network_layer_path,
             "result": analysis_result,
             "result_file": analysis_result_file,
             "execution_start_time": analysis_execution_start_time,
@@ -131,16 +135,21 @@ class JsonTreeModel(QAbstractItemModel):
             "buffer_distance_m": buffer_distance_m,
             "opportunities_mask_result_file": opportunities_mask_result_file,
             "opportunities_mask_result": opportunities_mask_result,
-            "wee_by_opportunities_mask_result": wee_by_opportunities_mask_result,
-            "wee_by_opportunities_mask_result_file": wee_by_opportunities_mask_result_file,
-            "wee_by_population": wee_by_population,
-            "wee_by_population_subnational_aggregation": wee_by_population_subnational_aggregation,
-            "wee_score_subnational_aggregation": wee_score_subnational_aggregation,
-            "opportunities_by_wee_score_by_population_subnational_aggregation": opportunities_by_wee_score_by_population_subnational_aggregation,
-            "opportunities_by_wee_score_subnational_aggregation": opportunities_by_wee_score_subnational_aggregation,
-            "wee_by_population_by_opportunities_mask_result_file": wee_by_population_by_opportunities_mask_result_file,
-            "wee_by_population_by_opportunities_mask_result": wee_by_population_by_opportunities_mask_result,
+            "geoe3_score_ghsl_masked_result": geoe3_score_ghsl_masked_result,
+            "geoe3_score_ghsl_masked_result_file": geoe3_score_ghsl_masked_result_file,
+            "geoe3_by_population": geoe3_by_population,
+            "geoe3_by_population_subnational_aggregation": geoe3_by_population_subnational_aggregation,
+            "geoe3_score_subnational_aggregation": geoe3_score_subnational_aggregation,
+            "geoe3_score_ghsl_masked_subnational_aggregation": geoe3_score_ghsl_masked_subnational_aggregation,
+            "geoe3_score_by_population_ghsl_masked_subnational_aggregation": geoe3_score_by_population_ghsl_masked_subnational_aggregation,
+            "geoe3_score_by_population_ghsl_masked_result_file": geoe3_score_by_population_ghsl_masked_result_file,
+            "geoe3_score_by_population_ghsl_masked_result": geoe3_score_by_population_ghsl_masked_result,
+            "qgis_project_path": qgis_project_path,
+            "population_s2s_output_path": population_s2s_output_path,
+            "population_s2s_field": population_s2s_field,
+            "population_source": population_source,
         }
+
         for prefix in [
             "aggregation",
             "population",
@@ -148,35 +157,17 @@ class JsonTreeModel(QAbstractItemModel):
             "polygon_mask",
             "raster_mask",
         ]:
-            analysis_attributes[f"{prefix}_layer"] = json_data.get(
-                f"{prefix}_layer", ""
-            )
-            analysis_attributes[f"{prefix}_layer_name"] = json_data.get(
-                f"{prefix}_layer_name", ""
-            )
-            analysis_attributes[f"{prefix}_layer_source"] = json_data.get(
-                f"{prefix}_layer_source", ""
-            )
-            analysis_attributes[f"{prefix}_layer_provider_type"] = json_data.get(
-                f"{prefix}_layer_provider_type", ""
-            )
-            analysis_attributes[f"{prefix}_layer_crs"] = json_data.get(
-                f"{prefix}_layer_crs", ""
-            )
-            analysis_attributes[f"{prefix}_layer_wkb_type"] = json_data.get(
-                f"{prefix}_layer_wkb_type", ""
-            )
-            analysis_attributes[f"{prefix}_layer_id"] = json_data.get(
-                f"{prefix}_layer_id", ""
-            )
+            analysis_attributes[f"{prefix}_layer"] = json_data.get(f"{prefix}_layer", "")
+            analysis_attributes[f"{prefix}_layer_name"] = json_data.get(f"{prefix}_layer_name", "")
+            analysis_attributes[f"{prefix}_layer_source"] = json_data.get(f"{prefix}_layer_source", "")
+            analysis_attributes[f"{prefix}_layer_provider_type"] = json_data.get(f"{prefix}_layer_provider_type", "")
+            analysis_attributes[f"{prefix}_layer_crs"] = json_data.get(f"{prefix}_layer_crs", "")
+            analysis_attributes[f"{prefix}_layer_wkb_type"] = json_data.get(f"{prefix}_layer_wkb_type", "")
+            analysis_attributes[f"{prefix}_layer_id"] = json_data.get(f"{prefix}_layer_id", "")
             if prefix == "raster_mask":
-                analysis_attributes[f"{prefix}_raster"] = json_data.get(
-                    f"{prefix}_raster", ""
-                )
+                analysis_attributes[f"{prefix}_raster"] = json_data.get(f"{prefix}_raster", "")
             else:
-                analysis_attributes[f"{prefix}_shapefile"] = json_data.get(
-                    f"{prefix}_shapefile", ""
-                )
+                analysis_attributes[f"{prefix}_shapefile"] = json_data.get(f"{prefix}_shapefile", "")
 
         # Create the "Analysis" item
         status = ""
@@ -184,7 +175,7 @@ class JsonTreeModel(QAbstractItemModel):
         role = "analysis"
         analysis_item = JsonTreeItem(
             [
-                "WEE Score",
+                "Geo3E Score",
                 status,
                 weighting,
                 analysis_attributes,
@@ -229,17 +220,15 @@ class JsonTreeModel(QAbstractItemModel):
         Returns:
             JsonTreeItem: The created dimension item.
         """
-        dimension_name = dimension["name"].title()  # Title case for dimensions
+        dimension_name = title_case(dimension["name"])  # Title case for dimensions
         dimension_attributes = {
             "id": dimension.get("id", ""),
             "output_filename": dimension.get("output_filename", ""),
             "name": dimension.get("name", ""),
             "description": dimension.get("description", ""),
-            "default_analysis_weighting": dimension.get(
-                "default_analysis_weighting", 0.0
-            ),
+            "default_analysis_weighting": dimension.get("default_analysis_weighting", 0.0),
             "analysis_weighting": dimension.get("analysis_weighting", 0.0),
-            "analysis_mode": dimension.get("factor_aggregation", ""),
+            "analysis_mode": dimension.get("analysis_mode", dimension.get("factor_aggregation", "")),
             "result": dimension.get("result", ""),
             "execution_start_time": dimension.get("execution_start_time", ""),
             "result_file": dimension.get("result_file", ""),
@@ -279,21 +268,20 @@ class JsonTreeModel(QAbstractItemModel):
             "output_filename": factor.get("output_filename", ""),
             "name": factor.get("name", ""),
             "description": factor.get("description", ""),
-            "default_dimension_weighting": factor.get(
-                "default_dimension_weighting", 0.0
-            ),
+            "default_dimension_weighting": factor.get("default_dimension_weighting", 0.0),
             "dimension_weighting": factor.get("dimension_weighting", 0.0),
-            "analysis_mode": factor.get("factor_aggregation", ""),
+            "analysis_mode": factor.get("analysis_mode", factor.get("factor_aggregation", "")),
             "result": factor.get("result", ""),
             "execution_start_time": factor.get("execution_start_time", ""),
             "result_file": factor.get("result_file", ""),
             "execution_end_time": factor.get("execution_end_time", ""),
+            "women_enabling": factor.get("women_enabling", 0),
         }
         status = ""  # Use item.getStatus to get after constructing the item
         guid = factor.get("guid", str(uuid.uuid4()))  # Deserialize UUID
         factor_item = JsonTreeItem(
             [
-                factor["name"],
+                title_case(factor["name"]),
                 status,
                 factor.get("dimension_weighting", 0),
                 factor_attributes,
@@ -307,21 +295,17 @@ class JsonTreeModel(QAbstractItemModel):
         return factor_item
 
     def _create_indicator_item(self, indicator, parent_item):
-        """
-        Creates a new Indicator (layer) item under the specified Factor item and populates it with custom attributes.
+        """Create a new Indicator item under the specified Factor item.
 
         Args:
-            indicator (dict): The indicator (layer) data to be added to the tree.
-            parent_item (JsonTreeItem): The parent item (Factor) under which the indicator is added.
-
-        Returns:
-            None
+            indicator: The indicator (layer) data to be added to the tree.
+            parent_item: The parent item (Factor) under which the indicator is added.
         """
         status = ""  # Use item.getStatus to get after constructing the item
         guid = indicator.get("guid", str(uuid.uuid4()))  # Deserialize UUID
         indicator_item = JsonTreeItem(
             [
-                indicator["indicator"],
+                title_case(indicator["indicator"]),
                 status,
                 indicator.get("factor_weighting", 0),
                 indicator,
@@ -353,6 +337,53 @@ class JsonTreeModel(QAbstractItemModel):
         # Notify view about layout changes
         self.layoutChanged.emit()
 
+    def toggle_single_child_factors_visibility(self, hide_single_child: bool):
+        """
+        Toggles the visibility of factors that have only one child indicator.
+
+        When hide_single_child is True, factors with exactly one child indicator
+        are hidden, and their indicator is promoted to appear directly under
+        the dimension.
+
+        Args:
+            hide_single_child (bool): If True, hide factors with only one child.
+                                      If False, show all factors.
+        """
+        analysis_item = self.get_analysis_item()
+        if not analysis_item:
+            return
+
+        for dimension in analysis_item.childItems:
+            for factor in dimension.childItems:
+                # Check if factor has exactly one child indicator
+                if len(factor.childItems) == 1:
+                    # Hide the factor if hide_single_child is True
+                    factor.set_visibility(not hide_single_child)
+                else:
+                    # Always show factors with multiple children
+                    factor.set_visibility(True)
+
+        # Notify view about layout changes
+        self.layoutChanged.emit()
+
+    def are_single_child_factors_hidden(self) -> bool:
+        """
+        Check if single-child factors are currently hidden.
+
+        Returns:
+            bool: True if any single-child factor is hidden, False otherwise.
+        """
+        analysis_item = self.get_analysis_item()
+        if not analysis_item:
+            return False
+
+        for dimension in analysis_item.childItems:
+            for factor in dimension.childItems:
+                if len(factor.childItems) == 1:
+                    # Return visibility state of first single-child factor found
+                    return not factor.is_visible()
+        return False
+
     def data(self, index, role):
         """
         Provides data for the given index and role, including displaying custom attributes such as the font color,
@@ -360,7 +391,7 @@ class JsonTreeModel(QAbstractItemModel):
 
         Args:
             index (QModelIndex): The index for which data is requested.
-            role (int): The role (e.g., Qt.DisplayRole, Qt.ForegroundRole, etc.).
+            role (int): The role (e.g., Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.ForegroundRole, etc.).
 
         Returns:
             QVariant: The data for the given index and role.
@@ -375,50 +406,74 @@ class JsonTreeModel(QAbstractItemModel):
             return None
 
         # Existing data handling code
-        if role == Qt.DisplayRole:
+        if role == Qt.ItemDataRole.DisplayRole:
+            if index.column() == 0:
+                # Single-child factors are hidden, promoting their indicator to
+                # appear directly under the dimension; show the factor name
+                # in place of the indicator's long descriptive title.
+                if item.role == "indicator":
+                    parent = item.parent()
+                    if parent and parent.role == "factor" and not parent.is_visible():
+                        return parent.name()
             return item.data(index.column())
-
-        if role == Qt.DisplayRole:
-            return item.data(index.column())
-        elif role == Qt.ForegroundRole and index.column() == 2:
-            return item.font_color
-        elif (
-            role == Qt.DecorationRole and index.column() == 0
-        ):  # Icon for the name column
+        elif role == Qt.ItemDataRole.ForegroundRole:
+            # If item is disabled, show it greyed out
+            if not item.is_enabled():
+                return QColor(Qt.GlobalColor.gray)
+            # Otherwise, use the item's font color for column 2
+            elif index.column() == 2:
+                return item.font_color
+        elif role == Qt.ItemDataRole.DecorationRole and index.column() == 0:  # Icon for the name column
             return item.getIcon()
-        elif (
-            role == Qt.DecorationRole and index.column() == 1
-        ):  # Icon for the status column
+        elif role == Qt.ItemDataRole.DecorationRole and index.column() == 1:  # Icon for the status column
             return item.getStatusIcon()
-        elif role == Qt.ToolTipRole and index.column() == 1:
+        elif role == Qt.ItemDataRole.ToolTipRole and index.column() == 1:
             return item.getStatus()
-        elif role == Qt.ToolTipRole and index.column() == 0:
-            return item.getItemTooltip()
-        elif role == Qt.FontRole:
+        elif role == Qt.ItemDataRole.ToolTipRole and index.column() == 0:
+            # if the item role is "indicator" then use the
+            # description from its parent for the tooltip
+            # unless the indicator has an error in which case
+            # it uses its own tooltip
+            if item.role == "indicator":
+                if item.attribute("error"):
+                    # Force it to rich text so it doesn't get cut off
+                    return f"<p>{item.getItemTooltip()}</p>"
+                else:
+                    # Use the parent item's tooltip (dimension or factor)
+                    # to provide context for the indicator
+                    parent = item.parent()
+                    if parent and parent.role == "factor":
+                        # Force it to rich text so it doen't get cut off
+                        return f"<p>{parent.getItemTooltip()}</p>"
+            # Analysis, dimension and factor items use their own tooltip
+            # Force it to rich text so it doen't get cut off
+            return f"<p>{item.getItemTooltip()}</p>"
+
+        elif role == Qt.ItemDataRole.FontRole:
             return item.getFont()
 
         return None
 
-    def setData(self, index, value, role=Qt.EditRole):
+    def setData(self, index, value, role=Qt.ItemDataRole.EditRole):
         """
         Sets the data for the specified index and role, handling value validation (e.g., ensuring weightings are numbers).
 
         Args:
             index (QModelIndex): The index of the item being edited.
             value (any): The new value to set.
-            role (int): The role in which the value is being set (usually Qt.EditRole).
+            role (int): The role in which the value is being set (usually Qt.ItemDataRole.EditRole).
 
         Returns:
             bool: True if the value was successfully set, False otherwise.
         """
-        if role == Qt.EditRole:
+        if role == Qt.ItemDataRole.EditRole:
             item = index.internalPointer()
             column = index.column()
 
             if column == 2:  # tree_view column
                 try:
                     value = float(value)
-                    return item.setData(column, f"{value:.2f}")
+                    return item.setData(column, f"{value:.2f}")  # noqa E231
                 except ValueError:
                     QMessageBox.critical(
                         None,
@@ -441,31 +496,60 @@ class JsonTreeModel(QAbstractItemModel):
             Qt.ItemFlags: The flags that determine the properties of the item (editable, selectable, etc.).
         """
         if not index.isValid():
-            return Qt.NoItemFlags
+            return Qt.ItemFlag.NoItemFlags
 
         item = index.internalPointer()
-        if index.column() == 0 or index.column() == 1:
-            return Qt.ItemIsEditable | Qt.ItemIsSelectable | Qt.ItemIsEnabled
 
-        return Qt.ItemIsSelectable | Qt.ItemIsEnabled
+        # If item is disabled, return flags without ItemIsEnabled
+        if not item.is_enabled():
+            return Qt.ItemFlag.NoItemFlags
+
+        if index.column() == 0 or index.column() == 1:
+            return Qt.ItemFlag.ItemIsEditable | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
+
+        return Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
 
     def to_json(self):
-        """
-        Converts the tree structure back into a JSON document, recursively traversing the tree and including
-        the custom attributes stored in `attributes` for each item. UUIDs are serialized for all items.
+        """Convert the tree structure back into a JSON document.
+
+        Recursively traverses the tree and includes the custom attributes stored in
+        `attributes` for each item. UUIDs are serialized for all items.
 
         Returns:
             dict: The JSON representation of the tree structure.
+
+        Raises:
+            Exception: If an error occurs during conversion.
         """
 
         def recurse_tree(item):
+            """🔄 Recurse tree.
+
+            Args:
+                item: Item.
+
+            Returns:
+                The result of the operation.
+            """
             # Serialize each item, including UUID
+            # Note we store the road paths but not the cycle paths
+            # because the roads are used for native routing analysis
+            # by some of the algorithms
             if item.role == "analysis":
+                existing_qgis_path = item.attribute("qgis_project_path")
+                current_qgis_path = QgsProject.instance().fileName()
+                if not existing_qgis_path or (current_qgis_path and current_qgis_path == existing_qgis_path):
+                    qgis_project_path = current_qgis_path
+                else:
+                    qgis_project_path = existing_qgis_path
                 json_data = {
                     "analysis_name": item.attribute("analysis_name"),
                     "description": item.attribute("description"),
                     "working_folder": item.attribute("working_folder"),
                     "analysis_cell_size_m": item.attribute("analysis_cell_size_m"),
+                    "analysis_scale": item.attribute("analysis_scale"),
+                    "road_network_layer_path": item.attribute("road_network_layer_path"),
+                    "qgis_project_path": qgis_project_path,
                     "guid": item.guid,  # Serialize UUID
                     "dimensions": [recurse_tree(child) for child in item.childItems],
                 }
@@ -503,30 +587,27 @@ class JsonTreeModel(QAbstractItemModel):
 
             log_message(
                 f"Error converting tree to JSON: {e}",
-                tag="Geest",
+                tag="GeoE3",
                 level=Qgis.Critical,
             )
-            # Show the traceback tpp
+            # Show the trace back too
             log_message(f"{traceback.format_exc()}", level=Qgis.Critical)
             raise e
 
     def clear_factor_weightings(self, dimension_item):
-        """
-        Clears all weightings for factors under the given dimension item, setting them to "0.00".
-        Also updates the dimension's total weighting and font color to red.
+        """Clear all weightings for factors under the given dimension item.
+
+        Sets them to "0.00" and updates the dimension's total weighting and font color to red.
 
         Args:
-            dimension_item (JsonTreeItem): The dimension item whose factors will have their weightings cleared.
-
-        Returns:
-            None
+            dimension_item: The dimension item whose factors will have their weightings cleared.
         """
         for i in range(dimension_item.childCount()):
             factor_item = dimension_item.child(i)
             factor_item.setData(2, "0.00")
         # Update the dimension's total weighting
         dimension_item.setData(2, "0.00")
-        self.update_font_color(dimension_item, QColor(Qt.red))
+        self.update_font_color(dimension_item, QColor(Qt.GlobalColor.red))
         self.layoutChanged.emit()
 
     def auto_assign_factor_weightings(self, dimension_item):
@@ -546,29 +627,26 @@ class JsonTreeModel(QAbstractItemModel):
         factor_weighting = 1 / num_factors
         for i in range(num_factors):
             factor_item = dimension_item.child(i)
-            factor_item.setData(2, f"{factor_weighting:.2f}")
+            factor_item.setData(2, f"{factor_weighting:.2f}")  # noqa E231
         # Update the dimension's total weighting
         dimension_item.setData(2, "1.00")
-        # self.update_font_color(dimension_item, QColor(Qt.green))
+        # self.update_font_color(dimension_item, QColor(Qt.GlobalColor.green))
         self.layoutChanged.emit()
 
     def clear_layer_weightings(self, factor_item):
-        """
-        Clears all weightings for layers (indicators) under the given factor item, setting them to "0.00".
-        Also updates the factor's total weighting and font color to red.
+        """Clear all weightings for layers (indicators) under the given factor item.
+
+        Sets them to "0.00" and updates the factor's total weighting and font color to red.
 
         Args:
-            factor_item (JsonTreeItem): The factor item whose layers will have their weightings cleared.
-
-        Returns:
-            None
+            factor_item: The factor item whose layers will have their weightings cleared.
         """
         for i in range(factor_item.childCount()):
             layer_item = factor_item.child(i)
             layer_item.setData(2, "0.00")
         # Update the factor's total weighting
         factor_item.setData(2, "0.00")
-        self.update_font_color(factor_item, QColor(Qt.red))
+        self.update_font_color(factor_item, QColor(Qt.GlobalColor.red))
         self.layoutChanged.emit()
 
     def auto_assign_layer_weightings(self, factor_item):
@@ -588,49 +666,39 @@ class JsonTreeModel(QAbstractItemModel):
         layer_weighting = 1 / num_layers
         for i in range(num_layers):
             layer_item = factor_item.child(i)
-            layer_item.setData(2, f"{layer_weighting:.2f}")
+            layer_item.setData(2, f"{layer_weighting:.2f}")  # noqa E231
         # Update the factor's total weighting
         factor_item.setData(2, "1.00")
-        # self.update_font_color(factor_item, QColor(Qt.green))
+        # self.update_font_color(factor_item, QColor(Qt.GlobalColor.green))
         self.layoutChanged.emit()
 
     def add_factor(self, dimension_item):
-        """
-        Adds a new Factor item under the given Dimension item, allowing the user to define a new factor.
+        """Add a new Factor item under the given Dimension item.
 
         Args:
-            dimension_item (JsonTreeItem): The dimension item to which the new factor will be added.
-
-        Returns:
-            None
+            dimension_item: The dimension item to which the new factor will be added.
         """
         new_factor = JsonTreeItem(["New Factor", "x", ""], "factor", dimension_item)
         dimension_item.appendChild(new_factor)
         self.layoutChanged.emit()
 
     def add_indicator(self, factor_item):
-        """
-        Adds a new Indicator item under the given Factor item, allowing the user to define a new item.
+        """Add a new Indicator item under the given Factor item.
 
         Args:
-            factor_item (JsonTreeItem): The factor item to which the new layer will be added.
-
-        Returns:
-            None
+            factor_item: The factor item to which the new layer will be added.
         """
         indicator = JsonTreeItem(["New Layer", "x", "1.00"], "indicator", factor_item)
         factor_item.appendChild(indicator)
         self.layoutChanged.emit()
 
     def remove_item(self, item):
-        """
-        Removes the given item from its parent. If the item has children, they are also removed.
+        """Remove the given item from its parent.
+
+        If the item has children, they are also removed.
 
         Args:
-            item (JsonTreeItem): The item to be removed from the tree.
-
-        Returns:
-            None
+            item: The item to be removed from the tree.
         """
         parent = item.parent()
         if parent:
@@ -639,21 +707,25 @@ class JsonTreeModel(QAbstractItemModel):
 
     def rowCount(self, parent=QModelIndex()):
         """
-        Returns the number of child items for the given parent, excluding hidden items if visibility is off.
+        Returns the number of effective visible children for the given parent.
+
+        This uses get_effective_visible_children() which handles:
+        - Normal visible children
+        - Promotion of grandchildren when a child is hidden but has exactly one child
 
         Args:
             parent (QModelIndex): The parent index.
 
         Returns:
-            int: The number of visible child items under the parent.
+            int: The number of effective visible child items under the parent.
         """
         if not parent.isValid():
             parentItem = self.rootItem
         else:
             parentItem = parent.internalPointer()
 
-        # Count only visible items
-        return len([child for child in parentItem.childItems if child.is_visible()])
+        # Use effective visible children (handles hidden single-child factors)
+        return len(parentItem.get_effective_visible_children())
 
     def columnCount(self, parent=QModelIndex()):
         """
@@ -691,37 +763,50 @@ class JsonTreeModel(QAbstractItemModel):
         """
         return self._findIndexByGuid(self.rootItem, guid)
 
-    def _findIndexByGuid(self, parent_item, target_guid, parent_index=QModelIndex()):
+    def _findIndexByGuid(self, parent_item, target_guid):
         """
         Recursively searches for the target guid within the children of the given parent item.
+
+        Uses get_effective_visible_children() to calculate the correct visual row
+        position, accounting for hidden single-child factors.
 
         Args:
             parent_item (JsonTreeItem): The parent item to start searching from.
             target_guid (str): The GUID of the item to search for.
-            parent_index (QModelIndex): The QModelIndex of the parent item.
 
         Returns:
             QModelIndex: The QModelIndex of the target item, or an invalid QModelIndex if not found.
         """
-        for row in range(parent_item.childCount()):
-            child_item = parent_item.child(row)
+        # Get effective visible children for correct row calculation
+        effective_children = parent_item.get_effective_visible_children()
 
-            # If the item's UUID matches, return its QModelIndex
+        for row, child_item in enumerate(effective_children):
+            # If the item's GUID matches, return its QModelIndex
             if child_item.guid == target_guid:
                 return self.createIndex(row, 0, child_item)
 
             # Recursively search children
-            child_index = self._findIndexByGuid(
-                child_item, target_guid, self.createIndex(row, 0, parent_item)
-            )
+            child_index = self._findIndexByGuid(child_item, target_guid)
             if child_index.isValid():
                 return child_index
+
+        # Also search in hidden children (in case the item is under a hidden factor)
+        for child_item in parent_item.childItems:
+            if not child_item.is_visible():
+                # Search within hidden item's children
+                child_index = self._findIndexByGuid(child_item, target_guid)
+                if child_index.isValid():
+                    return child_index
 
         return QModelIndex()  # Return invalid QModelIndex if not found
 
     def index(self, row, column, parent=QModelIndex()):
         """
         Creates a QModelIndex for the specified row and column under the given parent.
+
+        Uses get_effective_visible_children() to handle:
+        - Normal visible children
+        - Promotion of grandchildren when a child is hidden but has exactly one child
 
         Args:
             row (int): The row of the child item.
@@ -739,14 +824,20 @@ class JsonTreeModel(QAbstractItemModel):
         else:
             parentItem = parent.internalPointer()
 
-        childItem = parentItem.child(row)
-        if childItem:
+        # Use effective visible children (handles hidden single-child factors)
+        effective_children = parentItem.get_effective_visible_children()
+        if row < len(effective_children):
+            childItem = effective_children[row]
             return self.createIndex(row, column, childItem)
         return QModelIndex()
 
     def parent(self, index):
         """
         Returns the parent index of the specified index.
+
+        Uses get_visual_parent() to handle the case where the actual parent
+        is hidden (e.g., a factor with only one child). In this case, the
+        visual parent is the grandparent (dimension).
 
         Args:
             index (QModelIndex): The child index.
@@ -758,14 +849,27 @@ class JsonTreeModel(QAbstractItemModel):
             return QModelIndex()
 
         childItem = index.internalPointer()
-        parentItem = childItem.parent()
+        # Use visual parent which skips hidden parents
+        parentItem = childItem.get_visual_parent()
 
-        if parentItem == self.rootItem:
+        if parentItem is None or parentItem == self.rootItem:
             return QModelIndex()
 
-        return self.createIndex(parentItem.row(), 0, parentItem)
+        # Calculate the visible row position of the parent
+        # We need to find the parent's position in its own parent's effective children
+        grandparent = parentItem.get_visual_parent()
+        if grandparent is None:
+            grandparent = self.rootItem
 
-    def headerData(self, section, orientation, role=Qt.DisplayRole):
+        effective_siblings = grandparent.get_effective_visible_children()
+        if parentItem in effective_siblings:
+            row = effective_siblings.index(parentItem)
+        else:
+            row = 0
+
+        return self.createIndex(row, 0, parentItem)
+
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
         """
         Provides the data for the header at the given section and orientation.
 
@@ -777,34 +881,28 @@ class JsonTreeModel(QAbstractItemModel):
         Returns:
             QVariant: The data for the header.
         """
-        if orientation == Qt.Horizontal and role == Qt.DisplayRole:
+        if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
             return self.rootItem.data(section)
         return None
 
     def add_dimension(self, name="New Dimension"):
-        """
-        Adds a new Dimension item to the root (under "Analysis") and allows the user to define a new dimension.
+        """Add a new Dimension item to the root (under "Analysis").
 
         Args:
-            name (str): The name of the new dimension.
-
-        Returns:
-            None
+            name: The name of the new dimension.
         """
         new_dimension = JsonTreeItem([name, "x", ""], "dimension", self.rootItem)
         self.rootItem.appendChild(new_dimension)
         self.layoutChanged.emit()
 
     def removeRow(self, row, parent=QModelIndex()):
-        """
-        Removes the specified row from the model. This is primarily used for removing dimensions.
+        """Remove the specified row from the model.
+
+        This is primarily used for removing dimensions.
 
         Args:
-            row (int): The row to be removed.
-            parent (QModelIndex): The parent index.
-
-        Returns:
-            bool: True if the row was successfully removed, False otherwise.
+            row: The row to be removed.
+            parent: The parent index.
         """
         parentItem = self.rootItem if not parent.isValid() else parent.internalPointer()
         parentItem.childItems.pop(row)
@@ -812,9 +910,14 @@ class JsonTreeModel(QAbstractItemModel):
 
 
 class JsonTreeView(QTreeView):
-    """Custom QTreeView for Geest."""
+    """Custom QTreeView for GeoE3."""
 
     def __init__(self, parent=None):
+        """🏗️ Initialize the instance.
+
+        Args:
+            parent: Parent.
+        """
         super().__init__(parent)
 
     def setModel(self, model: QAbstractItemModel):
@@ -849,20 +952,20 @@ class JsonTreeView(QTreeView):
                 self.collapse_single_nodes(child_item)
 
     def collapse_node_in_view(self, item):
+        """⚙️ Collapse node in view.
+
+        Args:
+            item: Item.
+        """
         index = self.treeView.model().indexFromItem(item)
         self.treeView.setExpanded(index, False)
 
     def toggle_only_child_indicator_nodes(self):
-        """Toggles visibility of indicator nodes if it has no siblings."""
-        indicators_visible = self._indicators_only_child()
-        self.model().toggle_indicator_visibility(not indicators_visible)
+        """Toggles visibility of factors that have only one child indicator.
 
-    def _indicators_only_child(self):
-        """Checks if indicators are currently the only one under the parent."""
+        When enabled, single-child factors are hidden and their indicator
+        is shown directly under the dimension.
+        """
         model = self.model()
-        analysis_item = model.get_analysis_item()
-        for dimension in analysis_item.childItems:
-            for factor in dimension.childItems:
-                for indicator in factor.childItems:
-                    return indicator.is_only_child()
-        return True
+        currently_hidden = model.are_single_child_factors_hidden()
+        model.toggle_single_child_factors_visibility(not currently_hidden)

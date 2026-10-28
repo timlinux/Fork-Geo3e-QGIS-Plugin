@@ -21,9 +21,8 @@ __revision__ = "$Format:%H$"
 import json
 from collections import OrderedDict
 
-from qgis.PyQt.QtCore import QSettings
-
 from qgis.core import QgsProject
+from qgis.PyQt.QtCore import QSettings
 
 from .constants import APPLICATION_NAME
 from .default_settings import default_settings
@@ -31,12 +30,13 @@ from .default_settings import default_settings
 
 def deep_convert_dict(value):
     """Converts any OrderedDict elements in a value to
-    ordinary dictionaries, safe for storage in QSettings
+    ordinary dictionaries, safe for storage in QSettings.
 
-    :param value: value to convert
-    :type value: Union[dict,OrderedDict]
+    Args:
+        value: value to convert.
 
-    :return: dict
+    Returns:
+        dict: Converted dictionary safe for QSettings storage.
     """
     to_ret = value
     if isinstance(value, OrderedDict):
@@ -54,49 +54,65 @@ def deep_convert_dict(value):
 def set_general_setting(key, value, qsettings=None):
     """Set value to QSettings based on key.
 
-    :param key: Unique key for setting.
-    :type key: basestring
-
-    :param value: Value to be saved.
-    :type value: QVariant
-
-    :param qsettings: A custom QSettings to use. If it's not defined, it will
-        use the default one.
-    :type qsettings: qgis.PyQt.QtCore.QSettings
+    Args:
+        key: Unique key for setting.
+        value: Value to be saved.
+        qsettings: A custom QSettings to use. If it's not defined, it will
+            use the default one.
     """
     if not qsettings:
         qsettings = QSettings()
 
     qsettings.setValue(key, deep_convert_dict(value))
+    # QSettings normally only flushes to disk when its destructor runs,
+    # which a short-lived local object like the one constructed above
+    # relies on garbage collection to trigger - not guaranteed to happen
+    # before QGIS's own shutdown sequence tears down the interpreter.
+    # Without an explicit sync() here, a value set right before closing
+    # QGIS (e.g. toggling an options checkbox and clicking OK) can be
+    # silently lost, reappearing as whatever was last durably on disk the
+    # next time QGIS starts (worldbank/GeoE3 field report, 2026-10-25 -
+    # "Include Subnational Score Matrix" reverting to checked after every
+    # restart despite being unchecked and OK'd every time).
+    qsettings.sync()
 
 
 def general_setting(key, default=None, expected_type=None, qsettings=None):
     """Helper function to get a value from settings.
 
-    :param key: Unique key for setting.
-    :type key: basestring
+    Args:
+        key: Unique key for setting.
+        default: The default value in case of the key is not found or there
+            is an error.
+        expected_type: The type of object expected.
+        qsettings: A custom QSettings to use. If it's not defined, it will
+            use the default one.
 
-    :param default: The default value in case of the key is not found or there
-        is an error.
-    :type default: basestring, None, boolean, int, float
-
-    :param expected_type: The type of object expected.
-    :type expected_type: type
-
-    :param qsettings: A custom QSettings to use. If it's not defined, it will
-        use the default one.
-    :type qsettings: qgis.PyQt.QtCore.QSettings
-
-    :returns: The value of the key in the setting.
-    :rtype: object
+    Returns:
+        object: The value of the key in the setting.
 
     Note:
-    The API for QSettings to get a value is different for PyQt and Qt C++.
-    In PyQt we can specify the expected type.
-    See: http://pyqt.sourceforge.net/Docs/PyQt4/qsettings.html#value
+        The API for QSettings to get a value is different for PyQt and Qt C++.
+        In PyQt we can specify the expected type.
+        See: http://pyqt.sourceforge.net/Docs/PyQt4/qsettings.html#value
     """
     if qsettings is None:
         qsettings = QSettings()
+    if expected_type is None and isinstance(default, (bool, int, float, str)):
+        # Without an explicit type=, QSettings.value()'s Python-side
+        # coercion is binding/platform-dependent: on at least one real
+        # QGIS 4 install, a bool written to an INI-format settings file
+        # comes back from value() as the literal string "false" rather
+        # than a native Python bool, and bool("false") is True in Python
+        # (any non-empty string is truthy) - so a checkbox explicitly
+        # unchecked and saved shows checked again the moment the
+        # settings page is reopened (worldbank/GeoE3 field report,
+        # 2026-10-25 - "Include Subnational Score Matrix"). Inferring
+        # the expected type from the caller's own default forces
+        # QSettings to do the conversion itself instead of leaving it to
+        # chance, covering every bool/int/float/str setting read this
+        # way without needing every call site to opt in individually.
+        expected_type = type(default)
     try:
         if isinstance(expected_type, type):
             return qsettings.value(key, default, type=expected_type)
@@ -111,37 +127,36 @@ def general_setting(key, default=None, expected_type=None, qsettings=None):
 def delete_general_setting(key, qsettings=None):
     """Delete setting from QSettings.
 
-    :param key: unique key for setting.
-    :type key: basestring
-
-    :param qsettings: A custom QSettings to use. If it's not defined, it will
-    use the default one.
-    :type qsettings: qgis.PyQt.QtCore.QSettings
+    Args:
+        key: unique key for setting.
+        qsettings: A custom QSettings to use. If it's not defined, it will
+            use the default one.
     """
     if not qsettings:
         qsettings = QSettings()
 
     qsettings.remove(key)
+    # Same reasoning as set_general_setting()'s own sync() call - a
+    # deletion right before QGIS closes must not depend on GC timing to
+    # actually reach disk.
+    qsettings.sync()
 
 
 def set_setting(key, value, qsettings=None, store_in_project=False):
     """Set value to QSettings based on key in workbench scope.
 
-    :param key: Unique key for setting.
-    :type key: basestring
-
-    :param value: Value to be saved.
-    :type value: QVariant
-
-    :param qsettings: A custom QSettings to use. If it's not defined, it will
-        use the default one.
-    :type qsettings: qgis.PyQt.QtCore.QSettings
+    Args:
+        key: Unique key for setting.
+        value: Value to be saved.
+        qsettings: A custom QSettings to use. If it's not defined, it will
+            use the default one.
+        store_in_project: Whether to store the setting in the project.
     """
     full_key = "%s/%s" % (APPLICATION_NAME, key)
     set_general_setting(full_key, value, qsettings)
 
     if store_in_project:
-        QgsProject.instance().writeEntry("geest", key, str(value))
+        QgsProject.instance().writeEntry("geoe3", key, str(value))
 
 
 def setting(
@@ -153,28 +168,23 @@ def setting(
 ):
     """Helper function to get a value from settings under workbench scope.
 
-    :param key: Unique key for setting.
-    :type key: basestring
+    Args:
+        key: Unique key for setting.
+        default: The default value in case of the key is not found or there
+            is an error.
+        expected_type: The type of object expected.
+        qsettings: A custom QSettings to use. If it's not defined, it will
+            use the default one.
+        prefer_project_setting: Whether to prefer project settings over general settings.
 
-    :param default: The default value in case of the key is not found or there
-        is an error.
-    :type default: basestring, None, boolean, int, float
-
-    :param expected_type: The type of object expected.
-    :type expected_type: type
-
-    :param qsettings: A custom QSettings to use. If it's not defined, it will
-        use the default one.
-    :type qsettings: qgis.PyQt.QtCore.QSettings
-
-    :returns: The value of the key in the setting.
-    :rtype: object
+    Returns:
+        object: The value of the key in the setting.
     """
     if default is None:
         default = default_settings.get(key, None)
 
     if prefer_project_setting:
-        val, ok = QgsProject.instance().readEntry("geest", key)
+        val, ok = QgsProject.instance().readEntry("geoe3", key)
         if ok:
             return val
 
@@ -185,12 +195,10 @@ def setting(
 def delete_setting(key, qsettings=None):
     """Delete setting from QSettings under workbench scope.
 
-    :param key: Unique key for setting.
-    :type key: basestring
-
-    :param qsettings: A custom QSettings to use. If it's not defined, it will
-        use the default one.
-    :type qsettings: qgis.PyQt.QtCore.QSettings
+    Args:
+        key: Unique key for setting.
+        qsettings: A custom QSettings to use. If it's not defined, it will
+            use the default one.
     """
     full_key = "%s/%s" % (APPLICATION_NAME, key)
     delete_general_setting(full_key, qsettings)
@@ -199,22 +207,20 @@ def delete_setting(key, qsettings=None):
 def export_setting(file_path, qsettings=None):
     """Export workbench's setting to a file.
 
-    :param file_path: The file to write the exported setting.
-    :type file_path: basestring
+    Args:
+        file_path: The file to write the exported setting.
+        qsettings: A custom QSettings to use. If it's not defined, it will
+            use the default one.
 
-    :param qsettings: A custom QSettings to use. If it's not defined, it will
-        use the default one.
-    :type qsettings: qgis.PyQt.QtCore.QSettings
-
-    :returns: A dictionary of the exported settings.
-    :rtype: dict
+    Returns:
+        dict: A dictionary of the exported settings.
     """
     settings = {}
 
     if not qsettings:
         qsettings = QSettings()
 
-    qsettings.beginGroup("geest")
+    qsettings.beginGroup("geoe3")
     all_keys = qsettings.allKeys()
     qsettings.endGroup()
 
@@ -222,6 +228,17 @@ def export_setting(file_path, qsettings=None):
         settings[key] = setting(key, qsettings=qsettings)
 
     def custom_default(obj):
+        """Custom default serializer for JSON export.
+
+        Args:
+            obj: Object to serialize.
+
+        Raises:
+            TypeError: If object cannot be serialized.
+
+        Returns:
+            str: Empty string for null objects.
+        """
         if obj is None or (hasattr(obj, "isNull") and obj.isNull()):
             return ""
         raise TypeError
@@ -235,15 +252,13 @@ def export_setting(file_path, qsettings=None):
 def import_setting(file_path, qsettings=None):
     """Import workbench's setting from a file.
 
-    :param file_path: The file to read the imported setting.
-    :type file_path: basestring
+    Args:
+        file_path: The file to read the imported setting.
+        qsettings: A custom QSettings to use. If it's not defined, it will
+            use the default one.
 
-    :param qsettings: A custom QSettings to use. If it's not defined, it will
-        use the default one.
-    :type qsettings: qgis.PyQt.QtCore.QSettings
-
-    :returns: A dictionary of the imported settings.
-    :rtype: dict
+    Returns:
+        dict: A dictionary of the imported settings.
     """
     with open(file_path, "r", encoding="utf8") as f:
         settings = json.load(f)
@@ -252,7 +267,7 @@ def import_setting(file_path, qsettings=None):
         qsettings = QSettings()
 
     # Clear the previous setting
-    qsettings.beginGroup("geest")
+    qsettings.beginGroup("geoe3")
     qsettings.remove("")
     qsettings.endGroup()
 

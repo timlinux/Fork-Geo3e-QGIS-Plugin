@@ -1,11 +1,31 @@
+# -*- coding: utf-8 -*-
+"""📦 Tree Panel module.
+
+This module contains functionality for tree panel.
+"""
+
 import json
 import os
 import shutil
 import traceback
+from functools import partial
 from logging import getLogger
-from typing import Union, Dict, List
-import platform
+from typing import Optional
 
+from qgis.core import (
+    Qgis,
+    QgsApplication,
+    QgsFeedback,
+    QgsLayerTreeGroup,
+    QgsProcessingContext,
+    QgsProject,
+    QgsTask,
+    QgsVectorLayer,
+)
+from qgis.gui import QgsMessageBar
+from qgis.PyQt import sip
+from qgis.PyQt.QtCore import QModelIndex, QPoint, QSettings, Qt, QTimer, pyqtSignal, pyqtSlot
+from qgis.PyQt.QtGui import QMovie
 from qgis.PyQt.QtWidgets import (
     QAction,
     QApplication,
@@ -14,10 +34,9 @@ from qgis.PyQt.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QMenu,
     QMessageBox,
-    QProgressBar,
     QPushButton,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QToolButton,
@@ -25,86 +44,167 @@ from qgis.PyQt.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from qgis.PyQt.QtCore import (
-    pyqtSlot,
-    QPoint,
-    Qt,
-    QSettings,
-    pyqtSignal,
-    QModelIndex,
-)
-from qgis.PyQt.QtGui import QMovie
-from qgis.PyQt.QtWidgets import QSizePolicy
-from qgis.core import (
-    Qgis,
-    QgsRasterLayer,
-    QgsProject,
-    QgsVectorLayer,
-    QgsLayerTreeGroup,
-    QgsFeedback,
-    QgsProcessingContext,
-)
-from functools import partial
-from geest.gui.views import JsonTreeView, JsonTreeModel
-from geest.core import JsonTreeItem
-from geest.utilities import resources_path
-from geest.core import setting, set_setting
-from geest.core import WorkflowQueueManager
-from geest.gui.dialogs import (
-    FactorAggregationDialog,
-    DimensionAggregationDialog,
-    AnalysisAggregationDialog,
-)
-from geest.core.algorithms import (
-    PopulationRasterProcessingTask,
-    WEEByPopulationScoreProcessingTask,
-    SubnationalAggregationProcessingTask,
-    OpportunitiesMaskProcessor,
-    OpportunitiesByWeeScoreProcessingTask,
-    OpportunitiesByWeeScorePopulationProcessingTask,
-)
-from geest.core.reports.study_area_report import StudyAreaReport
+from qgis.utils import iface
 
-from geest.utilities import log_message
+from geest.core import JsonTreeItem, WorkflowQueueManager
+from geest.core.algorithms import (
+    OpportunitiesByWeeScorePopulationProcessingTask,
+    OpportunitiesByWeeScoreProcessingTask,
+    OpportunitiesMaskProcessor,
+    PopulationRasterProcessingTask,
+    PopulationVectorProcessingTask,
+    SubnationalAggregationProcessingTask,
+    WEEByPopulationScoreProcessingTask,
+)
+from geest.core.constants import DEFAULT_S2S_POPULATION_FIELD, MAX_FEATURES_FOR_VECTOR
+from geest.core.i18n import tr
+from geest.core.reports import StudyAreaReport
+from geest.core.settings import set_setting, setting
+from geest.core.tasks import AnalysisReportTask
+from geest.core.utilities import add_grid_layer_to_map, add_to_map, validate_network_layer
+from geest.core.women_considerations import resolve_women_enabling_for_factor
+from geest.gui.dialogs import (
+    AnalysisAggregationDialog,
+    DimensionAggregationDialog,
+    FactorAggregationDialog,
+)
+from geest.gui.views import JsonTreeModel, JsonTreeView
+from geest.gui.widgets import ItemInfoPanel, SolidMenu
+from geest.utilities import log_message, open_with_system_handler, resources_path, theme_stylesheet
 
 
 class TreePanel(QWidget):
+    """🎯 Tree Panel.
+
+    Attributes:
+        active_model: Active model.
+        help_button: Help button.
+        items_to_run: Items to run.
+        json_data: Json data.
+        json_file: Json file.
+    """
+
     switch_to_next_tab = pyqtSignal()  # Signal to notify the parent to switch tabs
+    switch_to_setup_tab = pyqtSignal()
     switch_to_previous_tab = pyqtSignal()  # Signal to notify the parent to switch tabs
+    switch_to_network_tab = pyqtSignal()  # Signal to open the road network tab
+    switch_to_ors_tab = pyqtSignal()  # Signal to open the ORS setup tab
 
     def __init__(self, parent=None, json_file=None):
+        """🏗️ Initialize the instance.
+
+        Args:
+            parent: Parent.
+            json_file: Json file.
+        """
         super().__init__(parent)
 
         # Initialize the QueueManager
         self.working_directory = None
-        pool_size = int(setting(key="concurrent_tasks", default=1))
-        self.queue_manager = WorkflowQueueManager(pool_size=pool_size)
+        # Pass None to enable dynamic reading of concurrent_tasks setting.
+        # This allows users to change the setting without restarting QGIS.
+        self.queue_manager = WorkflowQueueManager(pool_size=None)
         self.json_file = json_file
         self.tree_view_visible = True
-        self.run_only_incomplete = (
-            True  # saves time by not running models that have already been run
-        )
+        self.run_only_incomplete = True  # saves time by not running models that have already been run
         self.items_to_run = 0  # Count of items that need to be run
+        # keyed by item.guid, not a single shared pair of attributes - with
+        # concurrent_tasks > 1 (or just two items' start/stop events racing),
+        # a single shared QMovie meant stopping one item's spinner could
+        # silently stop a DIFFERENT, still-running item's spinner instead,
+        # freezing it on its last rendered frame (worldbank/GeoE3 field
+        # report, 2026-10-24).
+        self._item_spinners = {}  # guid -> [QMovie, ...] (item's own, plus parent's if an indicator)
 
         layout = QVBoxLayout()
-
+        layout.setContentsMargins(0, 0, 0, 8)
         if json_file:
             # Load JSON data
             self.load_json()
         else:
             self.json_data = {"dimensions": []}
 
+        # Inline warning banner (hidden by default)
+        self.warning_widget = QWidget()
+        self.warning_widget.setVisible(False)
+        warning_layout = QHBoxLayout(self.warning_widget)
+        warning_layout.setContentsMargins(12, 10, 12, 10)
+        warning_layout.setSpacing(12)
+
+        warning_icon = QLabel("⚠️")
+        warning_icon.setStyleSheet("font-size: 18px;")
+        warning_layout.addWidget(warning_icon)
+
+        self.warning_message_label = QLabel()
+        self.warning_message_label.setWordWrap(True)
+        self.warning_message_label.setStyleSheet("color: #856404; font-size: 13px;")
+        warning_layout.addWidget(self.warning_message_label, 1)
+
+        self.configure_network_button = QPushButton("Configure")
+        self.configure_network_button.clicked.connect(self._on_configure_clicked)
+        self.configure_network_button.setStyleSheet(
+            """
+            QPushButton {
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #3E799B, stop:1 #2d5a75);
+                color: #ffffff;
+                border: 1px solid #2d5a75;
+                border-radius: 3px;
+                padding: 4px 12px;
+            }
+            QPushButton:hover {
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #4a8bb0, stop:1 #3E799B);
+            }
+            QPushButton:pressed {
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #2d5a75, stop:1 #3E799B);
+            }
+        """
+        )
+        warning_layout.addWidget(self.configure_network_button)
+
+        close_warning_button = QPushButton("✕")
+        close_warning_button.setFixedSize(24, 24)
+        close_warning_button.setStyleSheet(
+            """
+            QPushButton {
+                border: none;
+                color: #856404;
+                background: transparent;
+                font-size: 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: rgba(0, 0, 0, 0.1);
+                border-radius: 3px;
+            }
+        """
+        )
+        close_warning_button.clicked.connect(self.hide_validation_warning)
+        warning_layout.addWidget(close_warning_button)
+
+        self.warning_widget.setStyleSheet(
+            """
+            QWidget {
+                background-color: #fff3cd;
+                border-left: 4px solid #ffc107;
+                border-radius: 3px;
+            }
+        """
+        )
+
+        layout.addWidget(self.warning_widget)
+
         # Create a CustomTreeView widget to handle editing and reverts
         self.treeView = JsonTreeView()
-        self.treeView.setDragDropMode(QTreeView.InternalMove)
-        self.treeView.setDefaultDropAction(Qt.MoveAction)
+        self.treeView.setDragDropMode(QTreeView.DragDropMode.InternalMove)
+        self.treeView.setDefaultDropAction(Qt.DropAction.MoveAction)
 
         # Create a model for the QTreeView using custom JsonTreeModel
         self.model = JsonTreeModel(self.json_data)
         self.active_model = "default"  # or "promotion"
-        self.treeView.setModel(
-            self.model
-        )  # Simple model where we allow single childred
+        self.treeView.setModel(self.model)  # Simple model where we allow single childred
 
         # Connect signals to track changes in the model and save automatically
         self.model.dataChanged.connect(self.save_json_to_working_directory)
@@ -121,28 +221,38 @@ class TreePanel(QWidget):
         self.treeView.header().hideSection(2)
 
         # Enable custom context menu
-        self.treeView.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.treeView.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.treeView.customContextMenuRequested.connect(self.open_context_menu)
 
         # Expand the whole tree by default
         self.treeView.expandAll()
 
-        # Set the second and third columns to the exact width of their contents
-        self.treeView.header().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.treeView.header().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        # Size the status column to its contents ONCE, then freeze it. Left
+        # on ResizeToContents, this column's width tracked whatever was
+        # currently showing there - a status string one moment, a running
+        # item's spinner widget the next - so it kept shrinking and
+        # growing as items started and finished throughout a run, and that
+        # alone changed the tree view's sizeHint (independent of, and in
+        # addition to, the status_label-in-button_bar issue fixed
+        # separately) - the panel kept resizing for the run's entire
+        # duration, not just when it started. A floor of 90px keeps the
+        # spinner (scaled to one row's height, so well under that) and a
+        # short status string both comfortably on-screen even if this
+        # measurement runs before any real status text has been loaded.
+        self.treeView.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.treeView.header().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.treeView.resizeColumnToContents(1)
+        self.treeView.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        self.treeView.header().resizeSection(1, max(self.treeView.header().sectionSize(1), 90))
 
         # Expand the first column to use the remaining space and resize with the dialog
-        self.treeView.header().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.treeView.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.treeView.header().setStretchLastSection(False)
         # Now hide the header
         self.treeView.header().hide()
         # Action fow when we double click an item
-        self.treeView.setExpandsOnDoubleClick(
-            False
-        )  # Prevent double-click from collapsing the tree view
-        self.treeView.doubleClicked.connect(
-            self.on_item_double_clicked
-        )  # Will show properties dialogs
+        self.treeView.setExpandsOnDoubleClick(False)  # Prevent double-click from collapsing the tree view
+        self.treeView.doubleClicked.connect(self.on_item_double_clicked)  # Will show properties dialogs
 
         # Show the item on the map if it is already generated and the
         # user clicks it
@@ -151,18 +261,36 @@ class TreePanel(QWidget):
         # Set layout
         layout.addWidget(self.treeView)
 
+        # Explains whatever tree item is currently selected, with a
+        # slide-over to the methodology behind an indicator's score -
+        # replaces the old map-canvas overlay (removed; a dock panel
+        # next to the controls beats a floating label on the map). Also
+        # hosts the status text and the two progress bars for an active
+        # run, on their own stack page - they used to live in button_bar
+        # below (status_label at a fixed 200px alongside two more
+        # 200px-fixed progress bars, plus buttons that hide during a
+        # run), where the row's required minimum width jumped between
+        # "idle" and "running" states as widgets toggled visibility,
+        # which is what made the whole panel keep resizing during
+        # analysis execution (worldbank/GeoE3 field report, 2026-10-24).
+        self.item_info_panel = ItemInfoPanel()
+        layout.addWidget(self.item_info_panel)
+        self.status_label = self.item_info_panel.status_label
+        self.overall_progress_bar = self.item_info_panel.overall_progress_bar
+        self.workflow_progress_bar = self.item_info_panel.workflow_progress_bar
+
         button_bar = QHBoxLayout()
 
         # Create the split tool button
         self.prepare_analysis_button = QToolButton()
         self.prepare_analysis_button.setText("▶️ Run all")
-        self.prepare_analysis_button.setPopupMode(QToolButton.MenuButtonPopup)
+        self.prepare_analysis_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
 
         # Connect the main button click to run all
         self.prepare_analysis_button.clicked.connect(self.run_all)
 
         # Create the menu for additional options
-        prepare_analysis_menu = QMenu(self.prepare_analysis_button)
+        prepare_analysis_menu = SolidMenu(self.prepare_analysis_button)
 
         # Add "Run all" action
         run_all_action = QAction("Run all", self)
@@ -174,6 +302,11 @@ class TreePanel(QWidget):
         run_incomplete_action.triggered.connect(self.run_incomplete)
         prepare_analysis_menu.addAction(run_incomplete_action)
 
+        # Add "Download all resources" action
+        download_all_resources_action = QAction("Download all resources", self)
+        download_all_resources_action.triggered.connect(self.download_all_resources)
+        prepare_analysis_menu.addAction(download_all_resources_action)
+
         # Set the menu on the tool button
         self.prepare_analysis_button.setMenu(prepare_analysis_menu)
 
@@ -181,32 +314,18 @@ class TreePanel(QWidget):
         button_bar.addWidget(self.prepare_analysis_button)
 
         self.project_button = QPushButton("Project")
-        self.project_button.clicked.connect(self.switch_to_previous_tab)
+        self.project_button.clicked.connect(self.switch_to_setup_tab)
         button_bar.addWidget(self.project_button)
+
         self.help_button = QPushButton("Help")
         self.help_button.clicked.connect(self.switch_to_next_tab)
         button_bar.addWidget(self.help_button)
-        # Add two progress bars to monitor all workflow progress and individual progress
-        self.overall_progress_bar = QProgressBar()
-        self.overall_progress_bar.setRange(0, 100)
-        self.overall_progress_bar.setValue(0)
-        self.overall_progress_bar.setFormat("Overall Progress: %p%")
-        self.overall_progress_bar.setAlignment(Qt.AlignCenter)
-        self.overall_progress_bar.setVisible(False)
-        self.overall_progress_bar.setFixedHeight(20)
-        self.overall_progress_bar.setFixedWidth(200)
-        button_bar.addWidget(self.overall_progress_bar)
-        self.workflow_progress_bar = QProgressBar()
-        self.workflow_progress_bar.setRange(0, 100)
-        self.workflow_progress_bar.setValue(0)
-        self.workflow_progress_bar.setFormat("Task Progress: %p%")
-        self.workflow_progress_bar.setAlignment(Qt.AlignCenter)
-        self.workflow_progress_bar.setVisible(False)
-        self.workflow_progress_bar.setFixedHeight(20)
-        self.workflow_progress_bar.setFixedWidth(200)
-        button_bar.addWidget(self.workflow_progress_bar)
+        # The two progress bars live inside item_info_panel now (see
+        # above) - aliased onto self so the ~30 existing
+        # setValue()/setFormat()/setVisible() call sites throughout this
+        # file keep working unchanged.
 
-        self.treeView.setEditTriggers(QTreeView.NoEditTriggers)
+        self.treeView.setEditTriggers(QTreeView.EditTrigger.NoEditTriggers)
 
         layout.addLayout(button_bar)
         self.setLayout(layout)
@@ -215,13 +334,28 @@ class TreePanel(QWidget):
         # Workflows need to be run in batches: first indicators, then factors, then dimensions
         # to prevent race conditions
         self.workflow_queue = []
+        self.workflow_scope_item = None
+        # Set by run_all so a successful complete run ends with the analysis
+        # report being generated and opened for the user.
+        self._open_report_when_done = False
         self.queue_manager.processing_completed.connect(self.run_next_workflow_queue)
+        self.queue_manager.processing_error.connect(self.on_processing_error)
 
     def on_item_double_clicked(self, index):
+        """⚙️ On item double clicked.
+
+        Args:
+            index: Index.
+        """
         # Action to trigger on double-click
         item = index.internalPointer()
+
+        # Don't allow interaction with disabled items
+        if not item.is_enabled():
+            return
+
         if item.role == "indicator":
-            self.edit_factor_aggregation(item.parent())
+            self.edit_factor_aggregation(item.parent(), selected_guids=[item.guid])
         elif item.role == "factor":
             self.edit_factor_aggregation(item)
         elif item.role == "dimension":
@@ -232,25 +366,217 @@ class TreePanel(QWidget):
     def on_item_clicked(self, index: QModelIndex):
         """
         Slot that runs whenever an item in the tree is clicked.
-        :param index: QModelIndex of the clicked item.
+
+        Args:
+            index: QModelIndex of the clicked item.
         """
-        show_layer_on_click = setting(key="show_layer_on_click", default=False)
+        item = index.internalPointer()
+        if not item or not item.is_enabled():
+            return
+
+        show_layer_on_click = setting(key="show_layer_on_click", default=True)
         if show_layer_on_click:
-            item = index.internalPointer()
-            self.add_to_map(item)
+            analysis_raster_key = "result_file"
+            if item.role == "dimension":
+                column_name = f"dim_{item.attribute('id').lower().replace(' ', '_').replace('-', '_')}"
+            elif item.role == "factor":
+                column_name = f"fac_{item.attribute('id').lower().replace(' ', '_').replace('-', '_')}"
+            elif item.role == "indicator":
+                column_name = item.attribute("id").lower().replace(" ", "_").replace("-", "_")
+            elif item.role == "analysis":
+                use_masked, analysis_raster_key = self._analysis_display(item)
+                column_name = "geoe3_masked" if use_masked else "geoe3"  # Analysis aggregation uses geoe3 column
+            else:
+                column_name = None
+
+            if column_name is None or self._get_render_strategy() == "raster":
+                if item.role == "analysis":
+                    add_to_map(item, key=analysis_raster_key, layer_name="GeoE3 Score", group="GeoE3")
+                else:
+                    add_to_map(item)
+            else:
+                add_grid_layer_to_map(item, column_name, self.working_directory)
+        self.item_info_panel.show_item(item)
+        show_pie = setting(key="show_pie_overlay", default=False)
+        if show_pie:
+            # TODO - calculate the pie data
+            QSettings().setValue("geoe3/pie_data", item.data(0))
+
+    def _analysis_display(self, item):
+        """Return how the analysis result should be displayed.
+
+        Mirror the decision taken when a workflow completes so that clicking
+        the analysis item re-shows the same layer that was last added to the
+        map.
+
+        Args:
+            item: The analysis tree item.
+
+        Returns:
+            tuple: (use_masked, raster_key) where raster_key is the attribute
+                holding the GeoE3 score raster, preferring the masked VRT when
+                a mask mode is active and the masked product exists.
+        """
+        mask_mode = item.attribute("mask_mode", "None")
+        masked_vrt = item.attribute("geoe3_score_ghsl_masked_result_file", "")
+        use_masked = mask_mode not in ("", "None", "none") and bool(masked_vrt)
+        raster_key = "geoe3_score_ghsl_masked_result_file" if use_masked else "result_file"
+        return use_masked, raster_key
 
     def on_previous_button_clicked(self):
+        """⚙️ On previous button clicked."""
+        self.item_info_panel.clear()
+        QSettings().setValue("geoe3/pie_data", "")
         self.switch_to_previous_tab.emit()
 
     def on_next_button_clicked(self):
+        """⚙️ On next button clicked."""
+        self.item_info_panel.clear()
+        QSettings().setValue("geoe3/pie_data", "")
         self.switch_to_next_tab.emit()
 
     def clear_item(self):
-        """Clear the outputs for a single item."""
+        """Clear the outputs for a single item (non-recursive).
+
+        Besides resetting the item's own status/result attributes, this
+        also removes its on-disk outputs (masked rasters etc.), blanks its
+        own study_area_grid column, and removes its own map layer(s) from
+        the legend/registry. Children are left completely untouched -
+        their own results, grid columns, rasters, and layers/groups stay
+        exactly as they were - matching "clear this item, then re-run it
+        trusting its already-complete children".
+
+        A factor with exactly one child indicator is hidden from the tree
+        view entirely - JsonTreeModel.data() promotes that indicator's row
+        to display in the factor's place (labeled with the factor's name),
+        so the one row the user sees and clicks really represents TWO tree
+        items sharing a single visible row. Clearing "that row" must clear
+        both, or the factor's own column/rasters/layer silently survive
+        untouched while the user believes the whole thing was cleared.
+        """
         index = self.treeView.currentIndex()
         item = index.internalPointer()
-        item.clear(recursive=False)
+
+        self._clear_single_item_outputs(item)
+
+        # Normally the cascade starts at item's own parent, since only
+        # item itself was fully cleared. In the fused-row case the factor
+        # was ALSO just fully cleared above (own outputs deleted, result
+        # set to "Not Run") - start the cascade one level higher so that
+        # doesn't get overwritten by the lighter invalidation below.
+        invalidation_start = item
+        if item.role == "indicator":
+            parent = item.parentItem
+            if parent and parent.role == "factor" and not parent.is_visible():
+                self._clear_single_item_outputs(parent)
+                invalidation_start = parent
+
+        # Every ancestor's cached aggregate was computed including this
+        # item's now-deleted result, so it's stale too - same reasoning as
+        # on_workflow_completed(), just triggered by the user clearing an
+        # item rather than re-running one.
+        invalidation_start.invalidateAncestors()
+
         self.save_json_to_working_directory()
+
+    # The analysis item's own outputs are spread across several top-level
+    # directories (one per product) rather than a single directory
+    # matching its place in the tree hierarchy the way every other role
+    # gets from item.getPaths() - see _clear_single_item_outputs(). Names
+    # confirmed against each processor's own self.output_dir/
+    # self.workflow_directory (analysis_aggregation_workflow.py,
+    # wee_by_population_score_processor.py,
+    # opportunities_by_wee_score_processor.py,
+    # opportunities_by_wee_score_population_processor.py,
+    # opportunities_mask_processor.py, subnational_aggregation_processor.py).
+    ANALYSIS_OUTPUT_DIRECTORIES = (
+        "geoe3_score",
+        "geoe3_by_population_score",
+        "geoe3_score_ghsl_masked",
+        "geoe3_score_by_population_ghsl_masked",
+        "opportunity_masks",
+        "subnational_aggregation",
+    )
+    # Mirrors ANALYSIS_OUTPUT_DIRECTORIES - the study_area_grid columns the
+    # analysis item's own products write to (indicator/factor/dimension
+    # columns belong to those items, not the analysis item, and are left
+    # untouched here).
+    ANALYSIS_GRID_COLUMNS = (
+        "geoe3",
+        "geoe3_by_population",
+        "geoe3_masked",
+        "geoe3_by_population_masked",
+        "opportunities_mask",
+    )
+
+    def _clear_single_item_outputs(self, item):
+        """Clear one item's own outputs/attributes - see clear_item()."""
+        from geest.core.grid_column_utils import clear_grid_column, clear_grid_columns
+        from geest.core.utilities import remove_from_map
+
+        # Remove only the files directly inside this item's own workflow
+        # director{y,ies} - never recurse into subdirectories, which
+        # belong to this item's children (e.g. a factor's indicators).
+        #
+        # item.getPaths() only knows how to build a path for
+        # indicator/factor/dimension hierarchies - it returns [] for the
+        # analysis item itself, which previously resolved the directory
+        # to clear down to self.working_directory (the whole project
+        # folder) rather than anywhere any of its outputs actually live,
+        # so "Clear Item" on the Analysis node silently deleted nothing.
+        # A later "Run Item Workflow" then found the stale per-area
+        # rasters from the earlier run still on disk and skipped
+        # reprocessing those areas as "already done", while areas without
+        # a leftover file got freshly (and correctly) regenerated -
+        # leaving an inconsistent mix of stale and fresh areas with no
+        # error ever raised (worldbank/GeoE3 field report, 2026-10-24).
+        if self.working_directory:
+            if item.role == "analysis":
+                item_directories = [
+                    os.path.join(self.working_directory, name) for name in TreePanel.ANALYSIS_OUTPUT_DIRECTORIES
+                ]
+            else:
+                item_directories = [os.path.join(self.working_directory, *item.getPaths())]
+
+            for item_directory in item_directories:
+                if not os.path.isdir(item_directory):
+                    continue
+                for filename in os.listdir(item_directory):
+                    file_path = os.path.join(item_directory, filename)
+                    if os.path.isfile(file_path) or os.path.islink(file_path):
+                        try:
+                            os.unlink(file_path)
+                        except OSError as error:
+                            log_message(
+                                f"Failed to delete {file_path}: {error}",
+                                tag="GeoE3",
+                                level=Qgis.Warning,
+                            )
+
+        # Blank this item's own study_area_grid column(s) (not its
+        # children's). item.gridColumnName() falls through to
+        # item.attribute("id", "") for any role without its own prefix
+        # convention (dim_/fac_) - the analysis item has no "id"
+        # attribute at all, so that call always resolved to "", the same
+        # root cause as the directory bug above, and reached clear_grid_column()
+        # with a blank column name.
+        if self.working_directory:
+            gpkg_path = os.path.join(self.working_directory, "study_area", "study_area.gpkg")
+            if os.path.exists(gpkg_path):
+                if item.role == "analysis":
+                    # One combined open/transaction/WAL-checkpoint for all
+                    # 5 columns instead of 5 separate ones - see
+                    # clear_grid_columns()'s own docstring for why that
+                    # mattered enough to be worth a dedicated function.
+                    clear_grid_columns(gpkg_path, list(TreePanel.ANALYSIS_GRID_COLUMNS))
+                else:
+                    clear_grid_column(gpkg_path, item.gridColumnName())
+
+        # Remove this item's own layer(s) from the legend/registry, keeping
+        # the group that holds its children's layers (if any) intact.
+        remove_from_map(item)
+
+        item.clear(recursive=False)
 
     def clear_workflows(self):
         """
@@ -261,33 +587,45 @@ class TreePanel(QWidget):
         :param parent_item: The parent item to process. If none, start from the root.
         """
         msg_box = QMessageBox(self)
-        msg_box.setIcon(QMessageBox.Warning)
+        msg_box.setIcon(QMessageBox.Icon.Warning)
+        msg_box.setStyleSheet(theme_stylesheet())
         msg_box.setWindowTitle("Clear Workflows")
         msg_box.setText(
             f"This action will DELETE all files and folders in the working directory ({self.working_directory}). Do you want to continue?"
         )
-        msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-        open_folder_button = msg_box.addButton("Open Folder", QMessageBox.ActionRole)
-        msg_box.setDefaultButton(QMessageBox.No)
+        msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        open_folder_button = msg_box.addButton("Open Folder", QMessageBox.ButtonRole.ActionRole)
+        msg_box.setDefaultButton(QMessageBox.StandardButton.No)
 
-        reply = msg_box.exec_()
+        reply = msg_box.exec()
 
         if msg_box.clickedButton() == open_folder_button:
             if self.working_directory:
-                if os.name == "nt":
-                    os.startfile(self.working_directory)
-                elif os.name == "posix":
-                    os.system(f'xdg-open "{self.working_directory}"')
+                open_with_system_handler(self.working_directory)
                 return
 
-        if reply == QMessageBox.No:
+        if reply == QMessageBox.StandardButton.No or reply == QMessageBox.DialogCode.Rejected:
             return
         self.run_only_incomplete = False
         # Remove every file in self.working_directory except
         # mode.json and the study_area folder
+        exceptions = [
+            "model.json",
+            "study_area",
+            "study_area_report.pdf",
+            "road_network.gpkg",
+            "settlements.gpkg",
+        ]
+        if self.working_directory is None:
+            log_message(
+                "No working directory set, cannot clear workflows.",
+                tag="GeoE3",
+                level=Qgis.Warning,
+            )
+            return
         for filename in os.listdir(self.working_directory):
             file_path = os.path.join(self.working_directory, filename)
-            if filename != "model.json" and filename != "study_area":
+            if filename not in exceptions:
                 try:
                     if os.path.isfile(file_path) or os.path.islink(file_path):
                         os.unlink(file_path)
@@ -298,10 +636,9 @@ class TreePanel(QWidget):
                         f"Failed to delete {file_path}. Reason: {e}",
                         level=Qgis.Critical,
                     )
-        # Also remove the Geest layer group in the QGIS Layers List
         root = QgsProject.instance().layerTreeRoot()
         for child in root.children():
-            if child.name() == "Geest":
+            if child.name() == "GeoE3":
                 root.removeChildNode(child)
         # Mark all items in the data model as not run
         item = self.model.rootItem
@@ -311,13 +648,29 @@ class TreePanel(QWidget):
 
     @pyqtSlot(str)
     def working_directory_changed(self, new_directory):
-        """Change the working directory and load the model.json if available."""
+        """Change the working directory and load the model.json if available.
+
+        Args:
+            new_directory: Path to the new working directory.
+        """
         log_message(
             f"Working directory changed to {new_directory}",
-            tag="Geest",
+            tag="GeoE3",
             level=Qgis.Info,
         )
         self.working_directory = new_directory
+        # Verify (and self-heal if needed) the study area GeoPackage before
+        # the user starts working with this project.
+        self.check_study_area_gpkg_health(reason="project open")
+        # Offer to sweep orphaned layers (registry entries hidden from the
+        # legend, typically left behind by interrupted runs).
+        # ⚠️ Deferred: this handler runs inside the project-load signal —
+        # showing a modal dialog here re-enters the event loop mid-load, and
+        # removing layers at that point deletes layers the loader has
+        # registered but not yet attached to the legend (segfault, and every
+        # loading layer misdetects as an orphan). Wait until the load has
+        # fully settled.
+        QTimer.singleShot(3000, self.prompt_remove_orphaned_layers)
         model_path = os.path.join(new_directory, "model.json")
 
         project_path = QgsProject.instance().fileName()
@@ -331,11 +684,14 @@ class TreePanel(QWidget):
                 self.json_file = model_path
                 self.load_json()  # sets the class member json_data
                 self.model.loadJsonData(self.json_data)
+                self.apply_women_considerations_logic()  # Hide factors based on women considerations
+                # Hide factors that have only a single indicator (indicator shown in their place)
+                self.model.toggle_single_child_factors_visibility(hide_single_child=True)
                 self.treeView.expandAll()
                 log_message(f"Loaded model.json from {model_path}")
 
                 # If this is a first time use of the analysis project lets set some things up
-                analysis_item = self.model.rootItem.child(0)
+                analysis_item = self.model.get_analysis_item()
                 analysis_data = analysis_item.attributes()
                 log_message(analysis_item.attributesAsMarkdown())
                 if analysis_data.get("working_folder", "Not Set"):
@@ -346,29 +702,25 @@ class TreePanel(QWidget):
                 # Use the last dir in the working directory path as the analysis name
                 if analysis_data.get("analysis_name", "Not Set"):
                     analysis_name = os.path.basename(self.working_directory)
-                    analysis_data["analysis_name"] = (
-                        f"Women's Economic Empowerment - {analysis_name}"
-                    )
+                    analysis_data["analysis_name"] = f"Women's Economic Empowerment - {analysis_name}"
                 # analysis_item.setData(0, analysis_data.get("analysis_name", "Analysis"))
-                analysis_item.setData(0, "WEE Score")
+                analysis_item.setData(0, "GeoE3 Score")
                 settings = QSettings()
                 # This is the top level folder for work files
                 settings.setValue("last_working_directory", self.working_directory)
                 # Use QGIS internal settings for the association between model path and QGIS project
-                set_setting(
-                    str(checksum), self.working_directory, store_in_project=True
-                )
+                set_setting(str(checksum), self.working_directory, store_in_project=True)
 
             except Exception as e:
                 log_message(
                     f"Error loading model.json: {str(e)}",
-                    tag="Geest",
+                    tag="GeoE3",
                     level=Qgis.Critical,
                 )
         else:
             log_message(
                 f"No model.json found in {new_directory}, using default.",
-                tag="Geest",
+                tag="GeoE3",
                 level=Qgis.Warning,
             )
             # copy the default model.json to the working directory
@@ -380,20 +732,202 @@ class TreePanel(QWidget):
                 except Exception as e:
                     log_message(
                         f"Error copying master model.json: {str(e)}",
-                        tag="Geest",
+                        tag="GeoE3",
                         level=Qgis.Critical,
                     )
             self.load_json()
             self.model.loadJsonData(self.json_data)
+            self.apply_women_considerations_logic()  # Hide factors based on women considerations
+            # Hide factors that have only a single indicator (indicator shown in their place)
+            self.model.toggle_single_child_factors_visibility(hide_single_child=True)
             self.treeView.expandAll()
         # Collapse any factors that have only a single indicator
         self.treeView.collapse_single_nodes()
 
+    def check_study_area_gpkg_health(self, reason: str = "") -> None:
+        """Run a GeoPackage health check (with in-place self-heal) in the background.
+
+        Checks the study area GeoPackage for corruption (stale WAL journals,
+        duplicated schema objects from historic write races, structural btree
+        damage) and repairs it in place when possible. Runs as a QgsTask so
+        the UI never blocks, even on very large GeoPackages.
+
+        Args:
+            reason: Short description of what triggered the check (for logs).
+        """
+        if not self.working_directory:
+            return
+        gpkg_path = os.path.join(self.working_directory, "study_area", "study_area.gpkg")
+        if not os.path.exists(gpkg_path):
+            return
+
+        def _check(task) -> bool:
+            from geest.core.gpkg_doctor import heal_geopackage
+            from geest.core.grid_column_utils import grid_cell_count
+
+            # Breadcrumb for grid-truncation forensics: every health check
+            # records the cell count so logs bracket any loss of grid data.
+            log_message(
+                f"GeoPackage health check ({reason}): analysis grid has {grid_cell_count(gpkg_path)} cells",
+                tag="GeoE3",
+                level=Qgis.Info,
+            )
+            report = heal_geopackage(
+                gpkg_path,
+                log=lambda message: log_message(message, tag="GeoE3", level=Qgis.Warning),
+            )
+            if report.was_corrupt:
+                log_message(
+                    f"GeoPackage health check ({reason}): {report.summary()}",
+                    tag="GeoE3",
+                    level=Qgis.Warning if report.healthy else Qgis.Critical,
+                )
+            else:
+                log_message(
+                    f"GeoPackage health check ({reason}): {os.path.basename(gpkg_path)} is healthy",
+                    tag="GeoE3",
+                    level=Qgis.Info,
+                )
+            self._last_gpkg_health_report = report
+            return report.healthy
+
+        def _finished(exception, healthy=None) -> None:
+            report = getattr(self, "_last_gpkg_health_report", None)
+            if exception is not None or report is None:
+                return
+            if report.was_corrupt and report.healthy:
+                try:
+                    iface.messageBar().pushMessage(
+                        tr("GeoE3"),
+                        tr(
+                            "The study area GeoPackage was corrupted and has been "
+                            "repaired. Please reload the project layers."
+                        ),
+                        level=Qgis.Warning,
+                        duration=15,
+                    )
+                except Exception:  # nosec B110 — headless/test environments have no iface
+                    pass
+            elif report.was_corrupt and not report.healthy:
+                try:
+                    iface.messageBar().pushMessage(
+                        tr("GeoE3"),
+                        tr(
+                            "The study area GeoPackage is corrupted and could not "
+                            "be repaired automatically. Re-create the study area "
+                            "or restore from a backup."
+                        ),
+                        level=Qgis.Critical,
+                        duration=0,
+                    )
+                except Exception:  # nosec B110
+                    pass
+
+        task = QgsTask.fromFunction(
+            f"GeoE3 GeoPackage health check ({reason})",
+            _check,
+            on_finished=_finished,
+        )
+        # Keep a reference so the task is not garbage collected mid-run.
+        self._gpkg_health_task = task
+        QgsApplication.taskManager().addTask(task)
+
     @pyqtSlot()
     def set_working_directory(self, working_directory):
+        """⚙️ Set working directory.
+
+        Args:
+            working_directory: Working directory.
+        """
         if working_directory:
             self.working_directory = working_directory
+            self.item_info_panel.clear()
+            QSettings().setValue("geoe3/pie_data", "")
             self.working_directory_changed(working_directory)
+
+    @pyqtSlot(str)
+    def set_road_network_layer_path(self, network_layer_path):
+        """⚙️ Set road network layer path.
+
+        Validates the layer before storing it. An empty/None path clears the
+        previously stored value instead of being silently ignored, so a
+        broken reference detected by the Road Network panel (e.g. the file
+        was deleted outside GeoE3) doesn't linger forever in model.json.
+
+        Args:
+            network_layer_path: Network layer path, or empty/None to clear it.
+        """
+        analysis_item = self.model.rootItem.child(0)
+        if network_layer_path:
+            base_path = network_layer_path.split("|")[0] if "|" in network_layer_path else network_layer_path
+            if not os.path.exists(base_path):
+                self.show_validation_error(
+                    "Road Network Issue",
+                    f"Road network layer file not found: {base_path}. "
+                    "Please select or download a road network layer again.",
+                )
+                log_message(
+                    f"Refusing to set road_network_layer_path - file not found: {base_path}",
+                    level=Qgis.Warning,
+                )
+                return
+            log_message(f"Setting road_network_layer_path in model to {network_layer_path}")
+            try:
+                analysis_item.setAttribute("road_network_layer_path", network_layer_path)
+                self.save_json_to_working_directory()
+            except Exception as e:
+                log_message(f"Error setting road network path: {str(e)}", level=Qgis.Critical)
+        else:
+            log_message("Clearing road_network_layer_path in model (no layer selected).")
+            try:
+                analysis_item.setAttribute("road_network_layer_path", "")
+                self.save_json_to_working_directory()
+            except Exception as e:
+                log_message(f"Error clearing road network path: {str(e)}", level=Qgis.Critical)
+
+    def qgis_project_path(self) -> Optional[str]:
+        """Get the associated QGIS project path from the analysis item.
+
+        Returns:
+            str: The QGIS project path, or None if not set.
+        """
+        analysis_item = self.model.get_analysis_item()
+        if analysis_item:
+            return analysis_item.attribute("qgis_project_path")
+        return None
+
+    def set_qgis_project_path(self, qgis_path: str) -> None:
+        """Set the associated QGIS project path in the analysis item.
+
+        Args:
+            qgis_path: The QGIS project path to store.
+        """
+        if qgis_path:
+            log_message(f"Setting qgis_project_path in model to {qgis_path}")
+            analysis_item = self.model.get_analysis_item()
+            if analysis_item:
+                try:
+                    analysis_item.setAttribute("qgis_project_path", qgis_path)
+                    self.save_json_to_working_directory()
+                except Exception as e:
+                    log_message(f"Error setting qgis project path: {str(e)}", level=Qgis.Critical)
+
+    @pyqtSlot()
+    def set_ghsl_layer_path(self, ghsl_layer_path: str):
+        """⚙️ Set ghsl layer path.
+
+        Args:
+            ghsl_layer_path: GHSL layer path.
+        """
+        if ghsl_layer_path:
+            log_message(f"Setting ghsl_layer_path in model to {ghsl_layer_path}")
+            analysis_item = self.model.rootItem.child(0)
+            try:
+                analysis_item.setAttribute("ghsl_layer_path", ghsl_layer_path)
+            except Exception as e:
+                log_message(f"Error setting ghsl path: {str(e)}", level=Qgis.Critical)
+        else:
+            log_message("No ghsl layer path provided.")
 
     @pyqtSlot()
     def save_json_to_working_directory(self):
@@ -401,9 +935,10 @@ class TreePanel(QWidget):
         if not self.working_directory:
             log_message(
                 "No working directory set, cannot save JSON.",
-                tag="Geest",
+                tag="GeoE3",
                 level=Qgis.Warning,
             )
+            return
         try:
             json_data = self.model.to_json()
 
@@ -420,6 +955,142 @@ class TreePanel(QWidget):
             self.json_data = json.load(f)
             log_message(f"Loaded JSON data from {self.json_file}")
 
+    def reload_and_apply_women_considerations_logic(self):
+        """Reload model.json and apply women considerations logic.
+
+        This method should be called when women considerations settings change
+        during runtime (e.g., checkbox toggled in OpenProjectPanel).
+        """
+        if not hasattr(self, "working_directory") or not self.working_directory:
+            log_message(
+                "reload_and_apply_women_considerations_logic: working_directory not set",
+                tag="GeoE3",
+                level=Qgis.Warning,
+            )
+            return
+
+        model_path = os.path.join(self.working_directory, "model.json")
+        if not os.path.exists(model_path):
+            log_message(
+                f"reload_and_apply_women_considerations_logic: model.json not found at {model_path}",
+                tag="GeoE3",
+                level=Qgis.Warning,
+            )
+            return
+
+        self.json_file = model_path
+        self.load_json()
+        self.apply_women_considerations_logic()
+
+    def apply_women_considerations_logic(self):
+        """Apply factor enabled/disabled state based on women considerations setting.
+
+        Uses the women_enabling attribute from model.json for each factor:
+        - women_enabling = 1: Women-specific factors (enabled when women considerations ON)
+        - women_enabling = 0: Generic factors (always enabled)
+        - women_enabling = 2: EPLEX factors (enabled when women considerations OFF - inverse)
+        """
+        if not hasattr(self, "json_data") or self.json_data is None:
+            return
+
+        contextual_data = None
+        for dimension in self.json_data.get("dimensions", []):
+            if dimension.get("id", "").lower() == "contextual":
+                contextual_data = dimension
+                break
+
+        if contextual_data is not None:
+            women_considerations_enabled = contextual_data.get("women_considerations_enabled")
+            eplex_score = contextual_data.get("eplex_score")
+        else:
+            women_considerations_enabled = None
+            eplex_score = None
+
+        if women_considerations_enabled is None:
+            women_considerations_enabled = self.json_data.get("women_considerations_enabled", True)
+        if eplex_score is None:
+            eplex_score = self.json_data.get("eplex_score", 0.0)
+        log_message(f"Women considerations enabled: {women_considerations_enabled}, EPLEX score: {eplex_score}")
+
+        # Get all dimensions from the model
+        root_item = self.model.get_analysis_item()
+        if not root_item:
+            return
+
+        # Iterate through dimensions
+        for dim_idx in range(root_item.childCount()):
+            dimension = root_item.child(dim_idx)
+            if not dimension:
+                continue
+
+            # Propagate settings to Contextual dimension item attributes
+            if dimension.attribute("id", "").lower() == "contextual":
+                dimension.setAttribute("women_considerations_enabled", women_considerations_enabled)
+                dimension.setAttribute("eplex_score", eplex_score)
+
+            # Iterate through factors in this dimension
+            for factor_idx in range(dimension.childCount()):
+                factor = dimension.child(factor_idx)
+                if not factor:
+                    continue
+
+                women_enabling = resolve_women_enabling_for_factor(
+                    factor.attribute("id", ""), factor.attribute("women_enabling", 0)
+                )
+                factor_name = factor.data(0)
+
+                # Determine enabled state based on women_enabling value
+                if women_enabling == 1:
+                    # Women-specific factors: enabled when women considerations ON, disabled when OFF
+                    enabled = women_considerations_enabled
+                    log_message(f"Factor '{factor_name}' (women_enabling=1): enabled={enabled}")
+                elif women_enabling == 2:
+                    # EPLEX factors: enabled when women considerations OFF, disabled when ON (inverse)
+                    enabled = not women_considerations_enabled
+                    log_message(f"Factor '{factor_name}' (women_enabling=2): enabled={enabled}")
+                else:
+                    # Generic factors (women_enabling=0): always enabled
+                    enabled = True
+
+                # Apply enabled state to factor
+                factor.set_enabled(enabled)
+
+                # Also apply to all child indicators
+                for indicator_idx in range(factor.childCount()):
+                    indicator = factor.child(indicator_idx)
+                    if indicator:
+                        indicator.set_enabled(enabled)
+
+            # Rebalance eligible factors, preserving factors explicitly
+            # excluded by the user so they remain available to re-enable.
+            enabled_factors = [
+                dimension.child(idx)
+                for idx in range(dimension.childCount())
+                if dimension.child(idx)
+                and dimension.child(idx).is_enabled()
+                and dimension.child(idx).attribute("analysis_mode", "") != "Do Not Use"
+            ]
+            if enabled_factors:
+                equal_weight = 1.0 / len(enabled_factors)
+            else:
+                equal_weight = 0.0
+
+            for factor_idx in range(dimension.childCount()):
+                factor = dimension.child(factor_idx)
+                if not factor:
+                    continue
+                is_manually_disabled = factor.attribute("analysis_mode", "") == "Do Not Use"
+                new_weight = equal_weight if factor.is_enabled() and not is_manually_disabled else 0.0
+                root_item.updateFactorWeighting(factor.guid, new_weight)
+
+        # Force a complete refresh of the tree view
+        self.model.beginResetModel()
+        self.model.endResetModel()
+
+        # Force viewport repaint
+        self.treeView.viewport().update()
+        self.treeView.update()
+
     def load_json_from_file(self):
         """Prompt the user to load a JSON file and update the tree."""
         json_file, _ = QFileDialog.getOpenFileName(
@@ -429,6 +1100,9 @@ class TreePanel(QWidget):
             self.json_file = json_file
             self.load_json()
             self.model.loadJsonData(self.json_data)
+            self.apply_women_considerations_logic()  # Hide factors based on women considerations
+            # Hide factors that have only a single indicator (indicator shown in their place)
+            self.model.toggle_single_child_factors_visibility(hide_single_child=True)
             self.treeView.expandAll()
 
     def export_json_to_file(self):
@@ -443,17 +1117,23 @@ class TreePanel(QWidget):
         self.model.add_dimension()
 
     def open_context_menu(self, position: QPoint):
-        """Handle right-click context menu."""
+        """Handle right-click context menu.
+
+        Args:
+            position: Position where the context menu was requested.
+        """
 
         index = self.treeView.indexAt(position)
         if not index.isValid():
             return
 
         item = index.internalPointer()
+
+        # Don't show context menu for disabled items
+        if not item.is_enabled():
+            return
         show_json_attributes_action = QAction("Show Attributes", self)
-        show_json_attributes_action.triggered.connect(
-            lambda: self.show_attributes(item)
-        )
+        show_json_attributes_action.triggered.connect(lambda: self.show_attributes(item))
         # We disable items by setting their weight to 0
         if item.getStatus() == "Excluded from analysis":
             disable_action = QAction("Enable", self)
@@ -463,15 +1143,16 @@ class TreePanel(QWidget):
             disable_action.triggered.connect(lambda: self.disable_item(item))
 
         add_to_map_action = QAction("Add to map", self)
-        add_to_map_action.triggered.connect(lambda: self.add_to_map(item))
+        add_to_map_action.triggered.connect(lambda: add_to_map(item))
 
         run_item_action = QAction("Run Item Workflow", self)
 
         # If shift is pressed, change the text to "Rerun Item Workflow"
         def update_action_text():
+            """🔄 Update action text."""
             text = (
                 "Rerun Item Workflow"
-                if QApplication.keyboardModifiers() & Qt.ShiftModifier
+                if QApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier
                 else "Run Item Workflow"
             )
             run_item_action.setText(text)
@@ -484,82 +1165,93 @@ class TreePanel(QWidget):
         clear_results_action.triggered.connect(self.clear_workflows)
 
         # Update when menu shows
-        menu = QMenu(self)
+        menu = SolidMenu(self)
+
         menu.aboutToShow.connect(update_action_text)
         # Add event filter to menu to update when shift is pressed while menu is open
         menu.installEventFilter(self)
         run_item_action.triggered.connect(
             lambda: self.run_item(
                 item,
-                shift_pressed=QApplication.keyboardModifiers() & Qt.ShiftModifier,
+                shift_pressed=QApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier,
             )
         )
         open_working_directory_action = QAction("Open Working Directory", self)
-        open_working_directory_action.triggered.connect(
-            lambda: self.open_working_directory(item)
-        )
+        open_working_directory_action.triggered.connect(lambda: self.open_working_directory(item))
 
         if item.role == "analysis":
-            menu = QMenu(self)
+            menu = SolidMenu(self)
             edit_analysis_action = QAction("🔘 Edit Weights and Settings", self)
-            edit_analysis_action.triggered.connect(
-                lambda: self.edit_analysis_aggregation(item)
-            )  # Connect to method
+            edit_analysis_action.triggered.connect(lambda: self.edit_analysis_aggregation(item))  # Connect to method
+            set_network_layers_action = QAction("Set Network Layers")
+            set_network_layers_action.triggered.connect(self.switch_to_network_tab)  # Connect to method
+            set_ors_action = QAction("Set ORS Options")
+            set_ors_action.triggered.connect(self.switch_to_ors_tab)
+            remove_unused_layers_action = QAction("Clean Unused Layers from Project")
+            remove_unused_layers_action.triggered.connect(self.clean_unused_layers)
             menu.addAction(edit_analysis_action)
+            menu.addAction(set_network_layers_action)
+            menu.addAction(set_ors_action)
             menu.addAction(show_json_attributes_action)
             menu.addAction(clear_item_action)
             menu.addAction(clear_results_action)
             menu.addAction(run_item_action)
-            add_wee_score = QAction("Add WEE Score to Map")
-            add_wee_score.triggered.connect(
-                lambda: self.add_to_map(
-                    item, key="result_file", layer_name="WEE Score", group="WEE"
-                )
-            )
-            menu.addAction(add_wee_score)
+            menu.addAction(open_working_directory_action)
+            menu.addAction(remove_unused_layers_action)
 
-            add_wee_by_population = QAction("Add WEE by Pop to Map")
-            add_wee_by_population.triggered.connect(
-                lambda: self.add_to_map(
+            # Add Animate Results action
+            animate_results_action = QAction("Animate results", self)
+            animate_results_action.triggered.connect(self.animate_results)
+            menu.addAction(animate_results_action)
+
+            add_geoe3_score = QAction("Add GeoE3 Score to Map (Raster)")
+            add_geoe3_score.triggered.connect(
+                lambda: add_to_map(item, key="result_file", layer_name="GeoE3 Score", group="GeoE3")
+            )
+            menu.addAction(add_geoe3_score)
+
+            add_geoe3_score_grid = QAction("Add GeoE3 Score to Map (Grid)")
+            add_geoe3_score_grid.triggered.connect(lambda: add_grid_layer_to_map(item, "geoe3", self.working_directory))
+            menu.addAction(add_geoe3_score_grid)
+
+            add_geoe3_by_population = QAction("Add GeoE3 by Pop to Map")
+            add_geoe3_by_population.triggered.connect(
+                lambda: add_grid_layer_to_map(
                     item,
-                    key="wee_by_population",
-                    layer_name="WEE by Population",
-                    group="WEE",
+                    column_name="geoe3_by_population",
+                    working_directory=self.working_directory,
+                    layer_name="GeoE3 by Population (Grid)",
+                    group="GeoE3",
                 )
             )
-            menu.addAction(add_wee_by_population)
+            menu.addAction(add_geoe3_by_population)
 
-            add_wee_by_population_aggregate = QAction("Add WEE Aggregates to Map")
-            add_wee_by_population_aggregate.triggered.connect(
-                lambda: self.add_aggregates_to_map(item)
-            )
-            menu.addAction(add_wee_by_population_aggregate)
+            add_geoe3_by_population_aggregate = QAction("Add GeoE3 Aggregates to Map")
+            add_geoe3_by_population_aggregate.triggered.connect(lambda: self.add_aggregates_to_map(item))
+            menu.addAction(add_geoe3_by_population_aggregate)
 
             add_masked_scores = QAction("Add Masked Scores to Map")
-            add_masked_scores.triggered.connect(
-                lambda: self.add_masked_scores_to_map(item)
-            )
+            add_masked_scores.triggered.connect(lambda: self.add_masked_scores_to_map(item))
             menu.addAction(add_masked_scores)
 
             add_job_opportunities_mask = QAction("Add Job Opportunities Mask to Map")
-            add_job_opportunities_mask.triggered.connect(
-                lambda: self.add_to_map(
-                    item,
-                    key="opportunities_mask_result_file",
-                    layer_name="Opportunities Mask",
-                    group="WEE",
-                )
-            )
+            add_job_opportunities_mask.triggered.connect(lambda: self.add_opportunities_mask_to_map(item))
             menu.addAction(add_job_opportunities_mask)
+
+            add_ghsl_settlements = QAction("Add GHSL Settlements to Map")
+            add_ghsl_settlements.triggered.connect(self.add_ghsl_settlements_to_map)
+            menu.addAction(add_ghsl_settlements)
 
             add_study_area_layers_action = QAction("Add Study Area to Map", self)
             add_study_area_layers_action.triggered.connect(self.add_study_area_to_map)
             menu.addAction(add_study_area_layers_action)
 
+            add_analysis_report_action = QAction("Show Analysis Report", self)
+            add_analysis_report_action.triggered.connect(self.generate_analysis_report)
+            menu.addAction(add_analysis_report_action)
+
             add_study_area_report_action = QAction("Show Study Area Report", self)
-            add_study_area_report_action.triggered.connect(
-                self.generate_study_area_report
-            )
+            add_study_area_report_action.triggered.connect(self.generate_study_area_report)
             menu.addAction(add_study_area_report_action)
 
             open_log_file_action = QAction("Open Log File", self)
@@ -579,44 +1271,52 @@ class TreePanel(QWidget):
             add_factor_action = QAction("Add Factor", self)
             remove_dimension_action = QAction("Remove Dimension", self)
 
+            # Add grid layer action
+            add_grid_to_map_action = QAction("Add to map (Grid)", self)
+            column_name = f"dim_{item.attribute('id').lower().replace(' ', '_').replace('-', '_')}"
+            add_grid_to_map_action.triggered.connect(
+                lambda _, col=column_name, i=item: add_grid_layer_to_map(i, col, self.working_directory)
+            )
+
             # Connect actions
             add_factor_action.triggered.connect(lambda: self.model.add_factor(item))
-            remove_dimension_action.triggered.connect(
-                lambda: self.model.remove_item(item)
-            )
+            remove_dimension_action.triggered.connect(lambda: self.model.remove_item(item))
             # Add actions to menu
-            menu = QMenu(self)
+            menu = SolidMenu(self)
             menu.addAction(edit_aggregation_action)
             menu.addAction(show_json_attributes_action)
             menu.addAction(clear_item_action)
             menu.addAction(add_to_map_action)
+            menu.addAction(add_grid_to_map_action)
             menu.addAction(run_item_action)
             menu.addAction(open_working_directory_action)
             menu.addAction(disable_action)
 
         elif item.role == "factor":
             # Context menu for factors
-            edit_aggregation_action = QAction(
-                "🔘 Edit Weights", self
-            )  # New action for contextediting aggregation
+            edit_aggregation_action = QAction("🔘 Edit Weights", self)  # New action for contextediting aggregation
             add_indicator_action = QAction("Add Indicator", self)
             remove_factor_action = QAction("Remove Factor", self)
 
-            # Connect actions
-            edit_aggregation_action.triggered.connect(
-                lambda: self.edit_factor_aggregation(item)
-            )  # Connect to method
-            add_indicator_action.triggered.connect(
-                lambda: self.model.add_indicator(item)
+            # Add grid layer action
+            add_grid_to_map_action = QAction("Add to map (Grid)", self)
+            column_name = f"fac_{item.attribute('id').lower().replace(' ', '_').replace('-', '_')}"
+            add_grid_to_map_action.triggered.connect(
+                lambda _, col=column_name, i=item: add_grid_layer_to_map(i, col, self.working_directory)
             )
+
+            # Connect actions
+            edit_aggregation_action.triggered.connect(lambda: self.edit_factor_aggregation(item))  # Connect to method
+            add_indicator_action.triggered.connect(lambda: self.model.add_indicator(item))
             remove_factor_action.triggered.connect(lambda: self.model.remove_item(item))
 
             # Add actions to menu
-            menu = QMenu(self)
+            menu = SolidMenu(self)
             menu.addAction(edit_aggregation_action)
             menu.addAction(show_json_attributes_action)
             menu.addAction(clear_item_action)
             menu.addAction(add_to_map_action)
+            menu.addAction(add_grid_to_map_action)
             menu.addAction(run_item_action)
             menu.addAction(open_working_directory_action)
             menu.addAction(disable_action)
@@ -626,92 +1326,261 @@ class TreePanel(QWidget):
             # Editing an indicator will open the attributes dialog
             # of its parent factor...
             show_properties_action = QAction("🔘 Edit Weights", self)
-            remove_indicator_action = QAction("❌ Remove Indicator", self)
+
+            # Add grid layer action (indicators use raw ID without prefix)
+            add_grid_to_map_action = QAction("Add to map (Grid)", self)
+            column_name = item.attribute("id").lower().replace(" ", "_").replace("-", "_")
+            add_grid_to_map_action.triggered.connect(
+                lambda _, col=column_name, i=item: add_grid_layer_to_map(i, col, self.working_directory)
+            )
 
             # Connect actions
             show_properties_action.triggered.connect(
-                lambda: self.edit_factor_aggregation(item.parent())
+                lambda: self.edit_factor_aggregation(item.parent(), selected_guids=[item.guid])
             )
-            remove_indicator_action.triggered.connect(
-                lambda: self.model.remove_item(item)
-            )
-
             # Add actions to menu
-            menu = QMenu(self)
+            menu = SolidMenu(self)
             menu.addAction(show_properties_action)
             menu.addAction(show_json_attributes_action)
             menu.addAction(clear_item_action)
             menu.addAction(add_to_map_action)
+            menu.addAction(add_grid_to_map_action)
             menu.addAction(run_item_action)
             menu.addAction(open_working_directory_action)
             menu.addAction(disable_action)
 
         # Show the menu at the cursor's position
-        menu.exec_(self.treeView.viewport().mapToGlobal(position))
+        menu.exec(self.treeView.viewport().mapToGlobal(position))
+
+    def generate_analysis_report(self):
+        """Add a report showing analysis results."""
+        if not self.working_directory:
+            log_message(
+                "No working directory set, cannot generate analysis report.",
+                tag="GeoE3",
+                level=Qgis.Warning,
+            )
+            return
+
+        # Show progress bar in indeterminate mode
+        self.item_info_panel.show_progress("Generating analysis report...")
+        self.overall_progress_bar.setVisible(True)
+        self.overall_progress_bar.setMinimum(0)
+        self.overall_progress_bar.setMaximum(0)  # Indeterminate/bouncing
+        self.overall_progress_bar.setFormat("Generating analysis report...")
+
+        # Start report generation in background
+        model_path = os.path.join(self.working_directory, "model.json")
+        self.analysis_report_task = AnalysisReportTask(self.working_directory, model_path)
+        self.analysis_report_task.taskCompleted.connect(self.on_analysis_report_completed)
+        self.analysis_report_task.taskTerminated.connect(self.on_analysis_report_failed)
+
+        QgsApplication.taskManager().addTask(self.analysis_report_task)
+
+    def on_analysis_report_completed(self):
+        """Slot called when analysis report generation completes successfully."""
+        log_message("Analysis report generated successfully.", tag="GeoE3", level=Qgis.Info)
+
+        self.overall_progress_bar.setMinimum(0)
+        self.overall_progress_bar.setMaximum(100)
+        self.overall_progress_bar.setValue(100)
+        self.overall_progress_bar.setFormat("Report generated successfully!")
+        self.overall_progress_bar.setVisible(False)
+        self.item_info_panel.hide_progress()
+
+    def on_analysis_report_failed(self):
+        """Slot called when analysis report generation fails."""
+        error_msg = (
+            str(self.analysis_report_task.exception)
+            if hasattr(self.analysis_report_task, "exception") and self.analysis_report_task.exception
+            else "Unknown error"
+        )
+
+        log_message(f"Analysis report generation failed: {error_msg}", tag="GeoE3", level=Qgis.Critical)
+
+        self.overall_progress_bar.setMinimum(0)
+        self.overall_progress_bar.setMaximum(100)
+        self.overall_progress_bar.setValue(0)
+        self.overall_progress_bar.setFormat(f"Error: {error_msg}")
+        self.overall_progress_bar.setVisible(False)
+        self.item_info_panel.hide_progress()
 
     def generate_study_area_report(self):
         """Add a report showing population information for the study area."""
-        gpkg_path = os.path.join(
-            self.working_directory, "study_area", "study_area.gpkg"
-        )
-        report = StudyAreaReport(gpkg_path=gpkg_path, report_name="Study Area Summary")
-        report.create_layout()
-        report.export_pdf(os.path.join(self.working_directory, "study_area_report.pdf"))
-        # open the pdf using the system PDF viewer
-        # Windows
-        if os.name == "nt":  # Windows
-            os.startfile(os.path.join(self.working_directory, "study_area_report.pdf"))
-        else:  # macOS and Linux
-            system = platform.system().lower()
-            if system == "darwin":  # macOS
-                os.system(
-                    f'open "{os.path.join(self.working_directory, "study_area_report.pdf")}"'
-                )
-            else:  # Linux
-                os.system(
-                    f'xdg-open "{os.path.join(self.working_directory, "study_area_report.pdf")}"'
-                )
+        gpkg_path = os.path.join(self.working_directory, "study_area", "study_area.gpkg")
+        self.item_info_panel.show_progress("Generating study area report...")
+        with StudyAreaReport(gpkg_path=gpkg_path, report_name="Study Area Summary") as report:
+            self.overall_progress_bar.setVisible(True)
+            self.overall_progress_bar.setValue(10)
+            report.create_layout()
+            self.overall_progress_bar.setValue(30)
+            report.export_pdf(os.path.join(self.working_directory, "study_area_report.pdf"))
+            self.overall_progress_bar.setValue(90)
+
+        # Open the pdf using the system PDF viewer (detached — a blocking
+        # call here freezes the QGIS event loop behind the viewer window).
+        open_with_system_handler(os.path.join(self.working_directory, "study_area_report.pdf"))
+        self.overall_progress_bar.setValue(100)
+        self.overall_progress_bar.setVisible(False)
+        self.item_info_panel.hide_progress()
 
     def add_masked_scores_to_map(self, item):
-        """Add the masked scores to the map."""
-        self.add_to_map(
+        """Add the masked scores to the map as grid layers.
+
+        Args:
+            item: The analysis item containing masked score data.
+        """
+        # Add GeoE3 masked score as grid layer
+        add_grid_layer_to_map(
             item,
-            key="wee_by_opportunities_mask_result_file",
-            layer_name="Masked WEE Score",
-            group="WEE",
+            column_name="geoe3_masked",
+            working_directory=self.working_directory,
+            layer_name="Masked GeoE3 Score (Grid)",
+            group="GeoE3",
         )
-        self.add_to_map(
+        # Add GeoE3 by population masked score as grid layer
+        add_grid_layer_to_map(
             item,
-            key="wee_by_population_by_opportunities_mask_result_file",
-            layer_name="Masked WEE by Population Score",
-            group="WEE",
+            column_name="geoe3_by_population_masked",
+            working_directory=self.working_directory,
+            layer_name="Masked GeoE3 by Population Score (Grid)",
+            group="GeoE3",
+        )
+
+    def add_opportunities_mask_to_map(self, item):
+        """Add the opportunities mask to the map as a grid layer.
+
+        Args:
+            item: The analysis item containing opportunities mask configuration.
+        """
+        add_grid_layer_to_map(
+            item,
+            column_name="opportunities_mask",
+            working_directory=self.working_directory,
+            layer_name="Opportunities Mask (Grid)",
+            group="GeoE3",
+        )
+
+    def add_ghsl_settlements_to_map(self):
+        """Add the GHSL settlements layer from the study area GeoPackage to the map."""
+        working_dir = self.working_directory
+        if not working_dir:
+            iface.messageBar().pushMessage(
+                "GHSL Settlements",
+                "No working directory set.",
+                level=Qgis.Warning,
+                duration=5,
+            )
+            return
+
+        gpkg_path = os.path.join(working_dir, "study_area", "study_area.gpkg")
+        if not os.path.exists(gpkg_path):
+            iface.messageBar().pushMessage(
+                "GHSL Settlements",
+                "Study area GeoPackage not found. Create a project first.",
+                level=Qgis.Warning,
+                duration=5,
+            )
+            return
+
+        layer_name = "ghsl_settlements"
+        layer_path = f"{gpkg_path}|layername={layer_name}"
+
+        # Check if layer exists in the GeoPackage
+        from osgeo import ogr
+
+        ds = ogr.Open(gpkg_path, 0)
+        if ds is None:
+            iface.messageBar().pushMessage(
+                "GHSL Settlements",
+                "Could not open study area GeoPackage.",
+                level=Qgis.Warning,
+                duration=5,
+            )
+            return
+
+        layer_exists = ds.GetLayerByName(layer_name) is not None
+        ds = None
+
+        if not layer_exists:
+            iface.messageBar().pushMessage(
+                "GHSL Settlements",
+                "GHSL layer not found. It may not have been downloaded during project creation.",
+                level=Qgis.Warning,
+                duration=8,
+            )
+            return
+
+        # Load the layer
+        layer = QgsVectorLayer(layer_path, "GHSL Settlements", "ogr")
+        if not layer.isValid():
+            iface.messageBar().pushMessage(
+                "GHSL Settlements",
+                "Failed to load GHSL settlements layer.",
+                level=Qgis.Warning,
+                duration=5,
+            )
+            return
+
+        # Add to map under Study Area group
+        project = QgsProject.instance()
+        root = project.layerTreeRoot()
+        study_area_group = root.findGroup("GeoE3 Study Area")
+        if study_area_group is None:
+            study_area_group = root.insertGroup(0, "GeoE3 Study Area")
+
+        project.addMapLayer(layer, False)
+        layer_tree_layer = study_area_group.addLayer(layer)
+
+        # Unlike add_to_map()/add_grid_layer_to_map(), this function never
+        # re-enabled visibility on the layer or its parent groups - if
+        # "GeoE3 Study Area" (or an ancestor) was ever unchecked for any
+        # reason, "Layer added to map" would fire while nothing actually
+        # rendered, with no self-healing re-check (worldbank/GeoE3 field
+        # report, 2026-10-24).
+        current_group = study_area_group
+        while current_group is not None:
+            current_group.setExpanded(True)
+            current_group.setItemVisibilityChecked(True)
+            current_group = current_group.parent()
+        layer_tree_layer.setItemVisibilityChecked(True)
+
+        iface.messageBar().pushMessage(
+            "GHSL Settlements",
+            "Layer added to map.",
+            level=Qgis.Success,
+            duration=3,
         )
 
     def add_aggregates_to_map(self, item):
-        """Add all the aggregate produts to the map"""
-        self.add_to_map(
+        """Add all the aggregate products to the map.
+
+        Args:
+            item: The analysis item containing aggregate data.
+        """
+        add_to_map(
             item,
-            key="wee_score_subnational_aggregation",
-            layer_name="WEE Score Aggregate",
-            group="WEE",
+            key="geoe3_score_subnational_aggregation",
+            layer_name="GeoE3 Score Aggregate",
+            group="GeoE3",
         )
-        self.add_to_map(
+        add_to_map(
             item,
-            key="wee_by_population_subnational_aggregation",
-            layer_name="WEE by Population Aggregate",
-            group="WEE",
+            key="geoe3_by_population_subnational_aggregation",
+            layer_name="GeoE3 by Population Aggregate",
+            group="GeoE3",
         )
-        self.add_to_map(
+        add_to_map(
             item,
-            key="opportunities_by_wee_score_subnational_aggregation",
-            layer_name="WEE Score by Opportunities Aggregate",
-            group="WEE",
+            key="geoe3_score_ghsl_masked_subnational_aggregation",
+            layer_name="GeoE3 Score GHSL Masked Aggregate",
+            group="GeoE3",
         )
-        self.add_to_map(
+        add_to_map(
             item,
-            key="opportunities_by_wee_score_by_population_subnational_aggregation",
-            layer_name="WEE Score by Population by Opportunities Aggregate",
-            group="WEE",
+            key="geoe3_score_by_population_ghsl_masked_subnational_aggregation",
+            layer_name="GeoE3 Score by Population GHSL Masked Aggregate",
+            group="GeoE3",
         )
 
     def open_working_directory(self, item: JsonTreeItem = None):
@@ -722,10 +1591,8 @@ class TreePanel(QWidget):
 
         If item is none we assume that the working directory is the top level working directory.
 
-        args:
+        Args:
             item: The item to open the working directory for.
-        returns:
-            None
         """
         log_message("Opening working directory.")
         if item is None:
@@ -733,9 +1600,7 @@ class TreePanel(QWidget):
         elif item.role == "analysis":
             working_directory = self.working_directory
         elif item.role == "dimension":
-            working_directory = os.path.join(
-                self.working_directory, item.data(0).lower()
-            )
+            working_directory = os.path.join(self.working_directory, item.data(0).lower())
         elif item.role == "factor":
             working_directory = os.path.join(
                 self.working_directory,
@@ -751,15 +1616,9 @@ class TreePanel(QWidget):
             )
         log_message(f"Opening working directory: {working_directory}")
         if working_directory:
-            if os.name == "nt":
-                os.startfile(working_directory)
-            elif os.name == "posix":
-                log_message("Using xdg-open to open the working directory.")
-                os.system(f'xdg-open "{working_directory}"')
+            open_with_system_handler(working_directory)
         else:
-            QMessageBox.warning(
-                self, "No Working Directory", "The working directory is not set."
-            )
+            QMessageBox.warning(self, "No Working Directory", "The working directory is not set.")
 
     def open_log_file(self):
         """Open the log file in the default text editor."""
@@ -767,35 +1626,42 @@ class TreePanel(QWidget):
         log_file_path = logger.handlers[0].baseFilename
 
         if os.path.exists(log_file_path):
-            if os.name == "nt":
-                os.startfile(log_file_path)
-            elif os.name == "posix":
-                os.system(f'xdg-open "{log_file_path}"')
+            open_with_system_handler(log_file_path)
         else:
-            QMessageBox.warning(
-                self, "Log File Not Found", "The log file does not exist."
-            )
+            QMessageBox.warning(self, "Log File Not Found", "The log file does not exist.")
 
     def disable_item(self, item):
-        """Disable the item and its children."""
+        """Disable the item and its children.
+
+        Args:
+            item: The item to disable.
+        """
         item.disable()
 
     def enable_item(self, item):
-        """Enable the item and its children."""
+        """Enable the item and its children.
+
+        Args:
+            item: The item to enable.
+        """
         item.enable()
 
     def show_attributes(self, item):
-        """Show the attributes of the item in a table."""
+        """Show the attributes of the item in a table.
+
+        Args:
+            item: The item whose attributes to display.
+        """
         attributes = item.attributes()
         # Sort the data alphabetically by key name
         sorted_data = dict(sorted(attributes.items()))
 
         dialog = QDialog()
-        dialog.setWindowState(Qt.WindowMaximized)
+        dialog.setWindowState(Qt.WindowState.WindowMaximized)
         dialog.setWindowTitle("Attributes")
         dialog.resize(
-            int(QApplication.desktop().screenGeometry().width() * 0.9),
-            int(QApplication.desktop().screenGeometry().height() * 0.9),
+            int(QApplication.primaryScreen().geometry().width() * 0.9),
+            int(QApplication.primaryScreen().geometry().height() * 0.9),
         )
 
         layout = QVBoxLayout()
@@ -807,14 +1673,14 @@ class TreePanel(QWidget):
         table.setColumnCount(2)
         table.setHorizontalHeaderLabels(["Key", "Value"])
         table.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.Stretch
+            1, QHeaderView.ResizeMode.Stretch
         )  # Only the second column stretches
         # Track if "error_file" exists
         error_file_content = None
         # Populate the table with the sorted data
         for row, (key, value) in enumerate(sorted_data.items()):
             key_item = QTableWidgetItem(key)
-            key_item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+            key_item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
             table.setItem(row, 0, key_item)
 
             if isinstance(value, dict):
@@ -825,7 +1691,7 @@ class TreePanel(QWidget):
                 table.setRowHeight(row, nested_table.height() + 10)  # Add 10px padding
             else:
                 value_item = QTableWidgetItem(str(value))
-                value_item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+                value_item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
                 table.setItem(row, 1, value_item)
             # Check if this row contains "error_file"
             if key == "error_file" and isinstance(value, str):
@@ -861,16 +1727,12 @@ class TreePanel(QWidget):
         if error_file_content is not None:
             show_error_file_button = QPushButton("Show Error File")
             button_layout.addWidget(show_error_file_button)
-            show_error_file_button.clicked.connect(
-                lambda: self.show_error_file_popup(error_file_content)
-            )
+            show_error_file_button.clicked.connect(lambda: self.show_error_file_popup(error_file_content))
         layout.addLayout(button_layout)
 
         # Enable custom context menu for the table
-        table.setContextMenuPolicy(Qt.CustomContextMenu)
-        table.customContextMenuRequested.connect(
-            lambda pos: self.show_context_menu(table, pos)
-        )
+        table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        table.customContextMenuRequested.connect(lambda pos: self.show_context_menu(table, pos))
         log_message("----------------------")
         log_message("Showing descendant Dimensions.")
         log_message("----------------------")
@@ -887,21 +1749,27 @@ class TreePanel(QWidget):
         for child in item.getDescendantIndicators():
             log_message(child.data(0))
         log_message("----------------------")
-        dialog.exec_()
+        dialog.exec()
 
     def show_error_file_popup(self, error_file_content):
-        """Show a popup message with the contents of the error file."""
+        """Show a popup message with the contents of the error file.
+
+        Args:
+            error_file_content: Content of the error file to display.
+        """
         msg_box = QMessageBox()
         msg_box.setWindowTitle("Error File Contents")
         msg_box.setText(error_file_content)
-        msg_box.setStandardButtons(QMessageBox.Ok)
-        msg_box.exec_()
+        msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msg_box.exec()
 
     def copy_to_clipboard_as_markdown(self, table: QTableWidget):
-        """Copy the table content as Markdown to the clipboard."""
-        headers = [
-            table.horizontalHeaderItem(i).text() for i in range(table.columnCount())
-        ]
+        """Copy the table content as Markdown to the clipboard.
+
+        Args:
+            table: The table widget to copy.
+        """
+        headers = [table.horizontalHeaderItem(i).text() for i in range(table.columnCount())]
         markdown_lines = ["| " + " | ".join(headers) + " |"]
         markdown_lines.append("| " + " | ".join("---" for _ in headers) + " |")
 
@@ -916,8 +1784,7 @@ class TreePanel(QWidget):
                     cell_widget = table.cellWidget(row, col)
                     if isinstance(cell_widget, QTableWidget):
                         nested_headers = [
-                            cell_widget.horizontalHeaderItem(i).text()
-                            for i in range(cell_widget.columnCount())
+                            cell_widget.horizontalHeaderItem(i).text() for i in range(cell_widget.columnCount())
                         ]
                         nested_data = []
                         for nested_row in range(cell_widget.rowCount()):
@@ -926,9 +1793,7 @@ class TreePanel(QWidget):
                                 for nested_col in range(cell_widget.columnCount())
                             ]
                             nested_data.append(", ".join(nested_row_data))
-                        row_data.append(
-                            f"Nested: {', '.join(nested_headers)} ({'; '.join(nested_data)})"
-                        )
+                        row_data.append(f"Nested: {', '.join(nested_headers)} ({'; '.join(nested_data)})")
                     else:
                         row_data.append("")
             markdown_lines.append("| " + " | ".join(row_data) + " |")
@@ -940,80 +1805,172 @@ class TreePanel(QWidget):
         log_message("Table copied to clipboard as Markdown.")
 
     def create_nested_table(self, nested_data: dict) -> QTableWidget:
-        """Create a QTableWidget to display nested dictionary data."""
+        """Create a QTableWidget to display nested dictionary data.
+
+        Args:
+            nested_data: Dictionary data to display in the table.
+
+        Returns:
+            QTableWidget configured to display the nested data.
+        """
         nested_table = QTableWidget()
         nested_table.setRowCount(len(nested_data))
         nested_table.setColumnCount(2)
         nested_table.setHorizontalHeaderLabels(["Key", "Value"])
-        nested_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        nested_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
 
         for row, (key, value) in enumerate(nested_data.items()):
             key_item = QTableWidgetItem(str(key))  # Convert key to string
             value_item = QTableWidgetItem(str(value))  # Convert value to string
-            key_item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
-            value_item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+            key_item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
+            value_item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
 
             nested_table.setItem(row, 0, key_item)
             nested_table.setItem(row, 1, value_item)
 
-        nested_table.setFixedHeight(
-            len(nested_data) * 25
-        )  # Adjust height based on the number of rows
-        nested_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        nested_table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        nested_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        nested_table.setFixedHeight(len(nested_data) * 25)  # Adjust height based on the number of rows
+        nested_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        nested_table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        nested_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         return nested_table
 
     def maximize_dialog(self, dialog, table):
-        """Maximize the dialog and adjust the table column widths."""
+        """Maximize the dialog and adjust the table column widths.
+
+        Args:
+            dialog: The dialog to maximize.
+            table: The table whose columns to adjust.
+        """
         dialog.showMaximized()
         # Adjust the first column to fit its content
         table.resizeColumnToContents(0)
 
     def show_context_menu(self, table, pos):
-        """Show a context menu with a copy option on right-click."""
+        """Show a context menu with a copy option on right-click.
+
+        Args:
+            table: The table widget.
+            pos: Position where the context menu was requested.
+        """
         # Get the cell at the position where the right-click occurred
         item = table.itemAt(pos)
         if not item:
             return  # If no cell is clicked, do nothing
 
         # Create the context menu
-        menu = QMenu()
+        menu = SolidMenu()
         copy_action = menu.addAction("Copy")
 
         # Execute the menu at the position and check if an action was selected
-        action = menu.exec_(table.viewport().mapToGlobal(pos))
+        action = menu.exec(table.viewport().mapToGlobal(pos))
         if action == copy_action:
             # If "Copy" was selected, copy the cell's content to the clipboard
             clipboard = QApplication.clipboard()
             clipboard.setText(item.text())
+
+    def _orphaned_layer_ids(self) -> list:
+        """Registry layers that are not shown anywhere in the legend."""
+        from qgis.core import QgsLayerTreeGroup, QgsLayerTreeLayer
+
+        project = QgsProject.instance()
+
+        def collect_layer_ids(node):
+            ids = set()
+            if isinstance(node, QgsLayerTreeLayer):
+                layer = node.layer()
+                if layer:
+                    ids.add(layer.id())
+            elif isinstance(node, QgsLayerTreeGroup):
+                for child in node.children():
+                    ids.update(collect_layer_ids(child))
+            return ids
+
+        layers_in_legend = collect_layer_ids(project.layerTreeRoot())
+        return [layer_id for layer_id in project.mapLayers() if layer_id not in layers_in_legend]
+
+    def _remove_orphaned_layers(self) -> int:
+        """Remove all orphaned layers; returns how many were removed."""
+        project = QgsProject.instance()
+        orphans = self._orphaned_layer_ids()
+        for layer_id in orphans:
+            layer = project.mapLayer(layer_id)
+            log_message(f"Removing orphaned layer: {layer.name() if layer else layer_id}")
+            project.removeMapLayer(layer_id)
+        return len(orphans)
+
+    def clean_unused_layers(self):
+        """Remove any layers from the project that are not in the QGIS legend."""
+        removed_count = self._remove_orphaned_layers()
+        # Show a message box to confirm completion and how many layers were removed
+        QMessageBox.information(self, "Clean Unused Layers", f"Unused layers have been removed: {removed_count}")
+
+    def prompt_remove_orphaned_layers(self) -> None:
+        """Offer to sweep orphaned layers when a project is opened.
+
+        Orphans (registry layers absent from the legend) accumulate from
+        crashed runs and, once saved, persist inside the project file —
+        so opening a project is the natural moment to offer a cleanup.
+        """
+        # This runs from a QTimer.singleShot, so the panel may have been
+        # destroyed (plugin reload) before the timer fired.
+        if sip.isdeleted(self):
+            return
+        # Never sweep while background tasks run: an in-flight analysis or
+        # report task legitimately holds registry layers that are not in the
+        # legend, and removing them mid-render crashes QGIS.
+        if QgsApplication.taskManager().countActiveTasks() > 0:
+            log_message("Skipping orphaned-layer sweep: background tasks are running")
+            return
+        orphan_count = len(self._orphaned_layer_ids())
+        if not orphan_count:
+            return
+        answer = QMessageBox.question(
+            self,
+            tr("GeoE3"),
+            tr(
+                "This project contains {count} orphaned layer(s) — layers loaded in the "
+                "project but not shown in the layers panel, usually left behind by an "
+                "interrupted run.\n\nRemove them now?"
+            ).format(count=orphan_count),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            removed = self._remove_orphaned_layers()
+            try:
+                iface.messageBar().pushMessage(
+                    tr("GeoE3"),
+                    tr("Removed {count} orphaned layer(s).").format(count=removed),
+                    level=Qgis.Info,
+                    duration=5,
+                )
+            except Exception:  # nosec B110 — headless/test environments have no iface
+                pass
 
     def add_study_area_to_map(self):
         """Add the study area layers to the map.
 
         Note that the area grid layer can be slow to draw!.
         """
-        gpkg_path = os.path.join(
-            self.working_directory, "study_area", "study_area.gpkg"
-        )
+        gpkg_path = os.path.join(self.working_directory, "study_area", "study_area.gpkg")
         project = QgsProject.instance()
 
-        # Check if 'Geest' group exists, otherwise create it
+        # Check if 'GeoE3' group exists, otherwise create it
         root = project.layerTreeRoot()
-        geest_group = root.findGroup("Geest Study Area")
-        if geest_group is None:
-            geest_group = root.insertGroup(
-                0, "Geest Study Area"
-            )  # Insert at the top of the layers panel
+        geoe3_group = root.findGroup("GeoE3 Study Area")
+        if geoe3_group is None:
+            geoe3_group = root.insertGroup(0, "GeoE3 Study Area")  # Insert at the top of the layers panel
 
         layers = [
+            "ghsl_settlements",
             "study_area_polygons",
             "study_area_clip_polygons",
             "study_area_grid",
             "study_area_bboxes",
             "study_area_bbox",
             "study_area_creation_status",
+            "chunks",
         ]
         for layer_name in layers:
             gpkg_layer_path = f"{gpkg_path}|layername={layer_name}"
@@ -1022,7 +1979,7 @@ class TreePanel(QWidget):
             if not layer.isValid():
                 log_message(
                     f"Failed to add '{layer_name}' layer to the map.",
-                    tag="Geest",
+                    tag="GeoE3",
                     level=Qgis.Critical,
                 )
                 continue
@@ -1030,13 +1987,13 @@ class TreePanel(QWidget):
             source_qml = resources_path("resources", "qml", f"{layer_name}.qml")
             result = layer.loadNamedStyle(source_qml)
             if result[0]:  # loadNamedStyle returns (success, error_message)
-                print(f"Successfully applied QML style to layer '{layer_name}'")
+                log_message(f"Successfully applied QML style to layer '{layer_name}'")
             else:
-                print(f"Failed to apply QML style: {result[1]}")
+                log_message(f"Failed to apply QML style: {result[1]}")
 
             # Check if a layer with the same data source exists in the correct group
             existing_layer = None
-            for child in geest_group.children():
+            for child in geoe3_group.children():
                 if isinstance(child, QgsLayerTreeGroup):
                     continue
                 if child.layer().source() == gpkg_layer_path:
@@ -1050,164 +2007,54 @@ class TreePanel(QWidget):
             else:
                 # Add the new layer to the appropriate subgroup
                 QgsProject.instance().addMapLayer(layer, False)
-                layer_tree_layer = geest_group.addLayer(layer)
-                log_message(
-                    f"Added layer: {layer.name()} to group: {geest_group.name()}"
-                )
-
-    def add_to_map(
-        self, item, key="result_file", layer_name=None, qml_key=None, group="Geest"
-    ):
-        """Add the item to the map."""
-        log_message(item.attributesAsMarkdown())
-        layer_uri = item.attribute(f"{key}")
-        log_message(f"Adding {layer_uri} for key {key} to map")
-        if layer_uri:
-            if not layer_name:
-                layer_name = item.data(0)
-
-            if "gpkg" in layer_uri:
-                log_message(f"Adding GeoPackage layer: {layer_name}")
-                layer = QgsVectorLayer(layer_uri, layer_name, "ogr")
-                if qml_key:
-                    qml_path = item.attribute(qml_key)
-                    if qml_path:
-                        result = layer.loadNamedStyle(qml_path)
-            else:
-                log_message(f"Adding raster layer: {layer_name}")
-                layer = QgsRasterLayer(layer_uri, layer_name)
-
-            if not layer.isValid():
-                log_message(
-                    f"Layer {layer_name} is invalid and cannot be added.",
-                    tag="Geest",
-                    level=Qgis.Warning,
-                )
-                return
-
-            project = QgsProject.instance()
-
-            # Check if 'Geest' group exists, otherwise create it
-            root = project.layerTreeRoot()
-            geest_group = root.findGroup(group)
-            if geest_group is None:
-                geest_group = root.insertGroup(
-                    0, group
-                )  # Insert at the top of the layers panel
-                geest_group.setIsMutuallyExclusive(
-                    True
-                )  # Make the group mutually exclusive
-
-            # Traverse the tree view structure to determine the appropriate subgroup based on paths
-            path_list = item.getPaths()
-            parent_group = geest_group
-            # truncate the last item from the path list
-            # as we want to add the layer to the group
-            # that is the parent of the layer
-            path_list = path_list[:-1]
-
-            for path in path_list:
-                sub_group = parent_group.findGroup(path)
-                if sub_group is None:
-                    sub_group = parent_group.addGroup(path)
-                    sub_group.setIsMutuallyExclusive(
-                        True
-                    )  # Make each subgroup mutually exclusive
-
-                parent_group = sub_group
-
-            # Check if a layer with the same data source exists in the correct group
-            existing_layer = None
-            layer_tree_layer = None
-            for child in parent_group.children():
-                if isinstance(child, QgsLayerTreeGroup):
-                    continue
-                if child.layer().source() == layer_uri:
-                    existing_layer = child.layer()
-                    layer_tree_layer = child
-                    break
-
-            # If the layer exists, refresh it instead of removing and re-adding
-            if existing_layer is not None:
-                log_message(
-                    f"Refreshing existing layer: {existing_layer.name()}",
-                    tag="Geest",
-                    level=Qgis.Info,
-                )
-                # Make the layer visible
-                layer_tree_layer.setItemVisibilityChecked(True)
-                existing_layer.reload()
-            else:
-                # Add the new layer to the appropriate subgroup
-                QgsProject.instance().addMapLayer(layer, False)
-                layer_tree_layer = parent_group.addLayer(layer)
-                layer_tree_layer.setExpanded(
-                    False
-                )  # Collapse the legend for the layer by default
-                log_message(
-                    f"Added layer: {layer.name()} to group: {parent_group.name()}"
-                )
-
-            # Ensure the layer and its parent groups are visible
-            current_group = parent_group
-            while current_group is not None:
-                current_group.setExpanded(True)  # Expand the group
-                current_group.setItemVisibilityChecked(
-                    True
-                )  # Set the group to be visible
-                current_group = current_group.parent()
-
-            # Set the layer itself to be visible
-            layer_tree_layer.setItemVisibilityChecked(True)
-
-            log_message(
-                f"Layer {layer.name()} and its parent groups are now visible.",
-                tag="Geest",
-                level=Qgis.Info,
-            )
+                _ = geoe3_group.addLayer(layer)
+                log_message(f"Added layer: {layer.name()} to group: {geoe3_group.name()}")
 
     def edit_analysis_aggregation(self, analysis_item):
-        """Open the AnalysisAggregationDialog for editing the weightings of factors in the analysis."""
+        """Open the AnalysisAggregationDialog for editing the weightings of factors in the analysis.
+
+        Args:
+            analysis_item: The analysis item to edit.
+        """
         dialog = AnalysisAggregationDialog(analysis_item, parent=self)
-        dialog.resize(
-            int(QApplication.desktop().screenGeometry().width() * 0.9),
-            int(QApplication.desktop().screenGeometry().height() * 0.9),
-        )
-        if dialog.exec_():  # If OK was clicked
+        if dialog.exec():  # If OK was clicked
             dialog.saveWeightingsToModel()
             self.save_json_to_working_directory()  # Save changes to the JSON if necessary
 
     def edit_dimension_aggregation(self, dimension_item):
-        """Open the DimensionAggregationDialog for editing the weightings of factors in a dimension."""
+        """Open the DimensionAggregationDialog for editing the weightings of factors in a dimension.
+
+        Args:
+            dimension_item: The dimension item to edit.
+        """
         dimension_name = dimension_item.data(0)
         dimension_data = dimension_item.attributes()
         if not dimension_data:
             dimension_data = {}
-        dialog = DimensionAggregationDialog(
-            dimension_name, dimension_data, dimension_item, parent=self
-        )
-        dialog.resize(
-            int(QApplication.desktop().screenGeometry().width() * 0.9),
-            int(QApplication.desktop().screenGeometry().height() * 0.9),
-        )
-        if dialog.exec_():  # If OK was clicked
+        dialog = DimensionAggregationDialog(dimension_name, dimension_data, dimension_item, parent=self)
+        if dialog.exec():  # If OK was clicked
             dialog.saveWeightingsToModel()
             self.save_json_to_working_directory()  # Save changes to the JSON if necessary
 
-    def edit_factor_aggregation(self, factor_item):
-        """Open the FactorAggregationDialog for editing the weightings of layers in a factor."""
+    def edit_factor_aggregation(self, factor_item, selected_guids=None):
+        """Open the FactorAggregationDialog for editing the weightings of layers in a factor.
+
+        Args:
+            factor_item: The factor item to edit.
+            selected_guids: Optional subset of indicator GUIDs to display in the dialog.
+        """
         factor_name = factor_item.data(0)
         factor_data = factor_item.attributes()
         if not factor_data:
             factor_data = {}
         dialog = FactorAggregationDialog(
-            factor_name, factor_data, factor_item, parent=self
+            factor_name,
+            factor_data,
+            factor_item,
+            parent=self,
+            selected_guids=selected_guids,
         )
-        dialog.resize(
-            int(QApplication.desktop().screenGeometry().width() * 0.9),
-            int(QApplication.desktop().screenGeometry().height() * 0.9),
-        )
-        if dialog.exec_():  # If OK was clicked
+        if dialog.exec():  # If OK was clicked
             dialog.save_weightings_to_model()
             self.save_json_to_working_directory()  # Save changes to the JSON if necessary
 
@@ -1216,37 +2063,43 @@ class TreePanel(QWidget):
 
         We process in the order of layers, factors, and dimensions since there
         is a dependency between them. For example, a factor depends on its layers.
+
+        Args:
+            workflow_type: Type of workflow to start (indicators, factors, dimensions, analysis).
         """
+        scope_item = self.workflow_scope_item or self.model.rootItem
         log_message("\n############################################")
         log_message(f"Starting {workflow_type} workflows")
         log_message("############################################\n")
         if workflow_type == "indicators":
-            for item in self.model.rootItem.getDescendantIndicators(
+            for item in scope_item.getDescendantIndicators(
                 include_completed=not self.run_only_incomplete, include_disabled=False
             ):
                 self.queue_workflow_task(item, item.role)
         elif workflow_type == "factors":
-            for item in self.model.rootItem.getDescendantFactors(
+            for item in scope_item.getDescendantFactors(
                 include_completed=not self.run_only_incomplete, include_disabled=False
             ):
                 self.queue_workflow_task(item, item.role)
         elif workflow_type == "dimensions":
-            for item in self.model.rootItem.getDescendantDimensions(
+            for item in scope_item.getDescendantDimensions(
                 include_completed=not self.run_only_incomplete, include_disabled=False
             ):
                 self.queue_workflow_task(item, item.role)
         elif workflow_type == "analysis":
-            item = self.model.get_analysis_item()
-            log_message("############################################")
-            log_message(f"Starting analysis workflow for {item.data(0)}")
-            log_message("############################################")
-            self.queue_workflow_task(item, item.role)
+            analyses = scope_item.getDescendantAnalyses(include_completed=not self.run_only_incomplete)
+            for analysis_item in analyses:
+                log_message("############################################")
+                log_message(f"Starting analysis workflow for {analysis_item.data(0)}")
+                log_message("############################################")
+                self.queue_workflow_task(analysis_item, analysis_item.role)
 
     def _count_workflows_to_run(self, parent_item=None):
         """
         Recursively count workflows that need to be run visiting each node in the tree.
 
-        :param parent_item: The parent item to process. If none, start from the root.
+        Args:
+            parent_item: The parent item to process. If none, start from the root.
         """
         if parent_item is None:
             parent_item = self.model.rootItem
@@ -1255,23 +2108,169 @@ class TreePanel(QWidget):
         self.items_to_run = count
 
     def cell_size_m(self):
-        """Get the cell size in meters from the analysis item."""
-        cell_size_m = (
-            self.model.get_analysis_item()
-            .attributes()
-            .get("analysis_cell_size_m", 100.0)
-        )
+        """Get the cell size in meters from the analysis item.
+
+        Returns:
+            float: Cell size in meters.
+        """
+        cell_size_m = self.model.get_analysis_item().attributes().get("analysis_cell_size_m", 100.0)
         return cell_size_m
+
+    def analysis_scale(self):
+        """Get the analysis scale from the analysis item.
+
+        Returns:
+            str: Analysis scale (national or regional).
+        """
+        analysis_scale = self.model.get_analysis_item().attributes().get("analysis_scale", "national")
+        return analysis_scale
+
+    def _get_study_area_area_km2(self) -> float:
+        """Get total study area area in km² from study_area_clip_polygons layer.
+
+        Returns:
+            float: Total area in km².
+        """
+        gpkg_path = os.path.join(self.working_directory, "study_area", "study_area.gpkg")
+        layer = QgsVectorLayer(f"{gpkg_path}|layername=study_area_clip_polygons", "study_area", "ogr")
+        if not layer.isValid():
+            log_message(
+                f"Could not load study_area_clip_polygons from {gpkg_path}",
+                tag="GeoE3",
+                level=Qgis.Warning,
+            )
+            return 0.0
+        total_area = 0.0
+        for feature in layer.getFeatures():
+            geom = feature.geometry()
+            if geom:
+                total_area += geom.area()
+        return total_area / 1_000_000
+
+    def _get_render_strategy(self) -> str:
+        """Determine render strategy based on analysis scale and feature count.
+
+        Uses feature count estimate to decide whether raster or vector rendering
+        is more appropriate for performance.
+
+        Returns:
+            str: 'raster' or 'vector'
+        """
+
+        analysis_scale = self.analysis_scale()
+
+        if analysis_scale == "regional":
+            return "vector"
+
+        study_area_area_km2 = self._get_study_area_area_km2()
+        cell_size_m = self.cell_size_m()
+        estimated_features = (study_area_area_km2 * 1_000_000) / (cell_size_m**2)
+
+        return "raster" if estimated_features > MAX_FEATURES_FOR_VECTOR else "vector"
+
+    def road_network_layer_path(self):
+        """Get the layer used for network analysis.
+
+        Returns:
+            str: Path to the road network layer.
+        """
+        analysis_item = self.model.get_analysis_item()
+        log_message(analysis_item.attributesAsMarkdown())
+        road_network_layer_path = analysis_item.attributes().get("road_network_layer_path", "")
+        log_message(f"Road Network layer path: {road_network_layer_path}")
+        return road_network_layer_path
+
+    def show_validation_error(self, title: str, message: str):
+        """Show validation error in inline banner.
+
+        Args:
+            title: Title of the validation error.
+            message: Error message to display.
+        """
+        self.warning_message_label.setText(f"<b>{title}:</b> {message}")
+        self.warning_widget.setVisible(True)
+
+    def hide_validation_warning(self):
+        """Hide validation warning banner."""
+        self.warning_widget.setVisible(False)
+        self.warning_message_label.setText("")
+
+    def _on_configure_clicked(self):
+        """Navigate to network config panel and dismiss warning."""
+        self.hide_validation_warning()
+        self.switch_to_network_tab.emit()
+
+    def ghsl_layer(self):
+        """Get the layer used for ghsl analysis.
+
+        Returns:
+            QgsVectorLayer: The GHSL layer.
+        """
+        ghsl_layer = QgsVectorLayer(
+            self.model.get_analysis_item().attributes().get("ghsl_layer", ""),
+            "GHSL Layer",
+            "ogr",
+        )
+        return ghsl_layer
+
+    def ghsl_layer_path(self):
+        """Get the layer used for ghsl analysis.
+
+        Returns:
+            str: Path to the GHSL layer.
+        """
+        analysis_item = self.model.get_analysis_item()
+        log_message(analysis_item.attributesAsMarkdown())
+        ghsl_layer_path = analysis_item.attributes().get("ghsl_layer_path", "")
+        log_message(f"GHSL layer path: {ghsl_layer_path}")
+        return ghsl_layer_path
 
     def queue_workflow_task(self, item, role):
         """Queue a workflow task based on the role of the item.
 
         ⭐️ These calls all pass a reference of the item to the workflow task.
             The task directly modifies the item's properties to update the tree.
+
+        Args:
+            item: The tree item to queue workflow for.
+            role: The role of the item (indicator, factor, dimension, analysis).
         """
         task = None
 
         attributes = item.attributes()
+
+        if role == "indicator" and attributes.get("analysis_mode", "") == "Do Not Use":
+            attributes["factor_weighting"] = 0.0
+            attributes["result"] = "Excluded from analysis"
+            attributes["result_file"] = ""
+            log_message(
+                f"Skipping {item.attribute('id')} because it is set to 'Do Not Use'.",
+                tag="GeoE3",
+                level=Qgis.Info,
+            )
+            return
+
+        # Validate road network layer if needed (skip for Regional scale - uses simple buffer)
+        analysis_mode = attributes.get("analysis_mode", "")
+        analysis_scale = self.model.get_analysis_item().attributes().get("analysis_scale", "national")
+        needs_road_network = analysis_mode in ["use_multi_buffer_point"] and analysis_scale != "regional"
+        road_network_path = self.road_network_layer_path()
+        if needs_road_network:
+            # Get expected CRS from study area
+            study_area_gpkg = os.path.join(self.working_directory, "study_area", "study_area.gpkg")
+            study_area_layer = QgsVectorLayer(f"{study_area_gpkg}|layername=study_area_polygons", "study_area", "ogr")
+            expected_crs = study_area_layer.crs() if study_area_layer.isValid() else None
+
+            if expected_crs:
+                is_valid, error_msg = validate_network_layer(road_network_path, expected_crs)
+                if not is_valid:
+                    self.show_validation_error("Road Network Issue", error_msg)
+                    return
+        attributes["road_network_layer_path"] = road_network_path
+
+        # Include the GHSL layer in the attributes by default
+        attributes["ghsl_layer_path"] = self.ghsl_layer_path()
+
         if attributes.get("result_file", None) and self.run_only_incomplete:
             return
         if role == item.role and role == "factor":
@@ -1280,19 +2279,36 @@ class TreePanel(QWidget):
             attributes["analysis_mode"] = "dimension_aggregation"
         if role == item.role and role == "analysis":
             attributes["analysis_mode"] = "analysis_aggregation"
-        task = self.queue_manager.add_workflow(item, self.cell_size_m())
+        task = self.queue_manager.add_workflow(item, self.cell_size_m(), self.analysis_scale())
         if task is None:
+            # The workflow declined the job (data source missing or broken).
+            # The queue manager has already marked the item (failed icon and
+            # error tooltip); repaint so that is visible, tell the user in
+            # plain language, and let the rest of the run continue.
+            reason = item.attribute("error", "") or tr("configure its data source and run it again.")
+            self.treeView.viewport().update()
+            try:
+                iface.messageBar().pushMessage(
+                    tr("GeoE3"),
+                    tr("'{name}' was skipped — {reason}").format(name=item.attribute("id", item.guid), reason=reason),
+                    level=Qgis.Warning,
+                    duration=10,
+                )
+            except Exception:  # nosec B110 — headless/test environments have no iface
+                pass
             return
+
+        self.hide_validation_warning()
 
         # Connect workflow signals to TreePanel slots
         task.job_queued.connect(partial(self.on_workflow_created, item))
         task.job_started.connect(partial(self.on_workflow_started, item))
         task.job_canceled.connect(partial(self.on_workflow_completed, item, False))
-        task.job_finished.connect(
-            lambda success: self.on_workflow_completed(item, success)
-        )
+        task.job_finished.connect(lambda success: self.on_workflow_completed(item, success))
         # Hook up the QTask feedback signal to the progress bar
         task.progressChanged.connect(self.task_progress_updated)
+        # Hook up the status message signal to the status label
+        task.status_message.connect(self.task_status_updated)
 
     def run_item(self, item, shift_pressed):
         """Run the item and the ones below it.
@@ -1306,262 +2322,608 @@ class TreePanel(QWidget):
 
         """
         self.items_to_run = 0
+        self.workflow_scope_item = item
+        self._open_report_when_done = False
         if shift_pressed:
             self.run_only_incomplete = False
         else:
             self.run_only_incomplete = True
-        indicators = item.getDescendantIndicators(
-            include_completed=not self.run_only_incomplete, include_disabled=False
-        )
-        factors = item.getDescendantFactors(
-            include_completed=not self.run_only_incomplete, include_disabled=False
-        )
-        dimensions = item.getDescendantDimensions(
-            include_completed=not self.run_only_incomplete
-        )
 
+        workflow_queue = []
+        if item.role == "indicator":
+            workflow_queue = ["indicators"]
+        elif item.role == "factor":
+            workflow_queue = ["indicators", "factors"]
+        elif item.role == "dimension":
+            workflow_queue = ["indicators", "factors", "dimensions"]
+        elif item.role == "analysis":
+            workflow_queue = ["indicators", "factors", "dimensions", "analysis"]
+        self.item_info_panel.show_progress("Analysis in progress...")
         self.overall_progress_bar.setVisible(True)
         self.workflow_progress_bar.setVisible(True)
+        self.status_label.setVisible(True)
+        self.status_label.setText("Starting...")
+        self.prepare_analysis_button.setVisible(False)
         self.help_button.setVisible(False)
         self.project_button.setVisible(False)
         self.overall_progress_bar.setValue(0)
         self.overall_progress_bar.setMaximum(self.items_to_run)
         self.workflow_progress_bar.setValue(0)
 
-        for indicator in indicators:
-            self.queue_workflow_task(indicator, indicator.role)
-        for factor in factors:
-            self.queue_workflow_task(factor, factor.role)
-        for dimension in dimensions:
-            self.queue_workflow_task(dimension, dimension.role)
-        self.queue_workflow_task(item, item.role)
-        self.items_to_run = len(indicators) + len(factors) + len(dimensions) + 1
+        items_to_run = 0
+        if "indicators" in workflow_queue:
+            items_to_run += len(
+                item.getDescendantIndicators(include_completed=not self.run_only_incomplete, include_disabled=False)
+            )
+        if "factors" in workflow_queue:
+            items_to_run += len(
+                item.getDescendantFactors(include_completed=not self.run_only_incomplete, include_disabled=False)
+            )
+        if "dimensions" in workflow_queue:
+            items_to_run += len(item.getDescendantDimensions(include_completed=not self.run_only_incomplete))
+        if "analysis" in workflow_queue:
+            items_to_run += len(item.getDescendantAnalyses(include_completed=not self.run_only_incomplete))
+        self.items_to_run = items_to_run
+        log_message(f"Total workflows to run: {self.items_to_run}")
+        self.overall_progress_bar.setMaximum(self.items_to_run)
 
-        debug_env = int(os.getenv("GEEST_DEBUG", 0))
-        if debug_env:
-            self.queue_manager.start_processing_in_foreground()
-        else:
-            self.queue_manager.start_processing()
+        self.workflow_queue = workflow_queue
+        self.run_next_workflow_queue()
 
     @pyqtSlot()
     def on_workflow_created(self, item):
         """
         Slot for handling when a workflow is created.
         Does nothing right now...
+
+        Args:
+            item: The workflow item that was created.
         """
         pass
+
+    @staticmethod
+    def _resolve_display_item(item):
+        """Return the item whose row should actually carry the spinner.
+
+        JsonTreeModel._findIndexByGuid() can resolve a visible item's own
+        index, or resolve INTO a hidden item's children, but never a
+        hidden item's own identity. A hidden item with exactly one child
+        has that child promoted to display in its place
+        (JsonTreeItem.get_effective_visible_children()), so redirect to
+        that child. This covers both an indicator whose parent factor is
+        hidden, and (worldbank/GeoE3 field report, 2026-10-24) a
+        factor-level aggregation job whose own item IS the hidden factor -
+        the latter previously hit the "index not found" bail-out below
+        before ever reaching the indicator-specific parent-row handling,
+        so no spinner showed at all for a single-indicator factor's own
+        aggregation step.
+
+        Args:
+            item: The JsonTreeItem a workflow started/stopped on.
+
+        Returns:
+            The item itself, or its promoted child if item is a hidden
+            single-child item.
+        """
+        if not item.is_visible() and len(item.childItems) == 1:
+            return item.childItems[0]
+        return item
 
     @pyqtSlot()
     def on_workflow_started(self, item):
         """
         Slot for handling when a workflow starts.
-        Update the tree item to indicate that the workflow is running.
+        Animate the tree item's own status icon (column 1, and its
+        parent's, for an indicator) in place of the normal icon to
+        indicate it's running - see
+        JsonTreeItem.set_spinner_pixmap()/getStatusIcon(). Replacing the
+        icon in place avoids a second tree column/widget, which was a
+        source of unwanted panel resizing (worldbank/GeoE3 field report,
+        2026-10-24).
+
+        Args:
+            item: The workflow item that was started.
         """
-        # Get the node index for the item
+        item = TreePanel._resolve_display_item(item)
         node_index = self.model.itemIndex(item)
         if not node_index.isValid():
             log_message(
                 f"Failed to find index for item {item} - animation not started",
-                tag="Geest",
+                tag="GeoE3",
                 level=Qgis.Warning,
             )
             return
 
-        # Ensure we work with QModelIndex instead of QPersistentModelIndex
-        child_index = QModelIndex(node_index)
+        model = self.model
 
-        # Get row height and prepare movies
-        row_height = self.treeView.rowHeight(child_index)
-        self.child_movie = QMovie(resources_path("resources", "throbber.gif"))
-        self.parent_movie = QMovie(resources_path("resources", "throbber.gif"))
+        def start_spinner(target_item):
+            """Animate target_item's own status (column 1) icon, one throbber frame at a time."""
+            movie = QMovie(resources_path("resources", "throbber.gif"))
 
-        # If this is an indicator, caclulate height for parent in case the indicator is hidden
+            def _on_frame_changed(_frame_number):
+                target_item.set_spinner_pixmap(movie.currentPixmap())
+                target_index = model.itemIndex(target_item)
+                if target_index.isValid():
+                    status_index = model.index(target_index.row(), 1, target_index.parent())
+                    model.dataChanged.emit(status_index, status_index, [Qt.ItemDataRole.DecorationRole])
+
+            movie.frameChanged.connect(_on_frame_changed)
+            movie.start()
+            # frameChanged only fires once the Qt event loop actually
+            # ticks - show the first frame immediately rather than
+            # leaving the normal icon in place until that happens.
+            _on_frame_changed(movie.currentFrameNumber())
+            return movie
+
+        # Kept local (not self.*) so two items' spinners can never clobber
+        # each other; see _item_spinners.
+        movies = [start_spinner(item)]
+
+        # Also animate the parent factor/dimension's own icon, so an
+        # ancestor visibly shows progress while a descendant indicator
+        # runs. parent_index can be invalid even for a genuinely-running
+        # indicator: JsonTreeModel._findIndexByGuid() can locate a HIDDEN
+        # item's own children but never the hidden item itself, so a
+        # single-child factor's own index is always unresolvable - there's
+        # no separate row to animate there (its indicator's row already is
+        # that row, via _resolve_display_item() above).
         if item.role == "indicator":
             parent_item = item.parent()
-            parent_index = self.model.itemIndex(parent_item)
-            row_height = self.treeView.rowHeight(parent_index)
+            if parent_item and model.itemIndex(parent_item).isValid():
+                movies.append(start_spinner(parent_item))
 
-        # Scale movies
-        self.child_movie.setScaledSize(
-            self.child_movie.currentPixmap()
-            .size()
-            .scaled(row_height, row_height, Qt.KeepAspectRatio)
-        )
-        self.parent_movie.setScaledSize(
-            self.parent_movie.currentPixmap()
-            .size()
-            .scaled(row_height, row_height, Qt.KeepAspectRatio)
-        )
-
-        # Set animated icon for the child
-        child_label = QLabel()
-        child_label.setMovie(self.child_movie)
-        self.child_movie.start()
-
-        # Place child animation
-        second_column_index = self.model.index(
-            child_index.row(), 1, child_index.parent()
-        )
-        self.treeView.setIndexWidget(second_column_index, child_label)
-
-        # Always show parent animation if this is an indicator
-        if item.role == "indicator":
-            parent_item = item.parent()
-            if parent_item:
-                parent_index = self.model.itemIndex(parent_item)
-                if parent_index.isValid():
-                    # Create parent animation
-                    parent_label = QLabel()
-                    parent_label.setMovie(self.parent_movie)
-                    self.parent_movie.start()
-
-                    # Get parent's second column index
-                    parent_second_column_index = self.model.index(
-                        parent_index.row(), 1, parent_index.parent()
-                    )
-
-                    # Set parent animation and ensure it's visible
-                    self.treeView.setIndexWidget(
-                        parent_second_column_index, parent_label
-                    )
-                    parent_label.show()
-
-                    # Force immediate update
-                    self.treeView.viewport().update()
+        self._item_spinners[item.guid] = movies
 
     def task_progress_updated(self, progress):
-        """Slot to be called when the task progress is updated."""
+        """Slot to be called when the task progress is updated.
+
+        Args:
+            progress: Progress value (0-100).
+        """
         log_message(f"Task progress: {progress}")
         self.workflow_progress_bar.setValue(int(progress))
+
+    def task_status_updated(self, status: str):
+        """Slot to be called when the task status message is updated.
+
+        Args:
+            status: A short description of the current operation.
+        """
+        # Truncate long status messages to fit the label - generous now
+        # that the label spans the full panel width, not a fixed 200px.
+        max_len = 120
+        if len(status) > max_len:
+            status = status[: max_len - 3] + "..."
+        self.status_label.setText(status)
+        self.status_label.setToolTip(status)  # Show full text on hover
+
+    def set_message_bar(self, message_bar: "QgsMessageBar") -> None:
+        """Set the dock-level message bar used for error notifications.
+
+        Args:
+            message_bar: The QgsMessageBar embedded in the plugin dock widget.
+        """
+        self._message_bar = message_bar
+
+    def on_processing_error(self, error_message: str):
+        """Slot called when a workflow job reports an error.
+
+        Updates the status label and pushes a visible error notification
+        to the plugin's own message bar (top of the dock panel).
+
+        Args:
+            error_message: The error message from the failed workflow job.
+        """
+        log_message(f"Processing error: {error_message}", level=Qgis.Critical)
+        # Update the status label (truncated, full text on hover) -
+        # generous now that the label spans the full panel width.
+        max_len = 120
+        short = error_message if len(error_message) <= max_len else error_message[: max_len - 3] + "..."
+        self.status_label.setText(short)
+        self.status_label.setToolTip(error_message)
+        # Push to the plugin-level message bar (top of dock), falling back to
+        # the QGIS main window bar if set_message_bar() was never called.
+        bar = getattr(self, "_message_bar", None) or iface.messageBar()
+        bar.pushMessage(
+            "GeoE3 Processing Error",
+            error_message,
+            level=Qgis.Critical,
+            duration=0,  # stays until dismissed
+        )
 
     @pyqtSlot(bool)
     def on_workflow_completed(self, item, success):
         """
         Slot for handling when a workflow is completed.
         Update the tree item to indicate success or failure.
+
+        Args:
+            item: The workflow item that was completed.
+            success: Whether the workflow completed successfully.
         """
+        queue_length = self.queue_manager.workflow_queue.active_queue_size()
+        log_message(f"Queued {queue_length} workflows for processing.")
         self.overall_progress_bar.setValue(self.overall_progress_bar.value() + 1)
+        self.overall_progress_bar.setMaximum(self.items_to_run - 1)
         self.workflow_progress_bar.setValue(0)
+
+        # Every ancestor's cached aggregate was computed from this item's
+        # PREVIOUS result - now stale, even though it may still show
+        # "Completed successfully" (worldbank/GeoE3 field report,
+        # 2026-10-23: a factor aggregated hours before its own child
+        # indicator was re-run stayed stuck at a stale value forever,
+        # since nothing ever told it to re-run). Only on a genuine
+        # success - a failed run leaves the item's own prior data/result
+        # untouched, so ancestors aren't actually any staler than before.
+        if success:
+            item.invalidateAncestors()
+
         self.save_json_to_working_directory()
 
-        self.add_to_map(item)
+        # For the analysis item run the post-processing insights first, so
+        # masked products exist before we decide which layer to add to the map.
+        if item.role == "analysis" and success:
+            self.calculate_analysis_insights(item)
 
-        # Now cancel the animated icon
+        # Add layer to map after workflow completes using auto-determined strategy
+        use_masked = False
+        analysis_raster_key = "result_file"
+        if item.role == "analysis":
+            use_masked, analysis_raster_key = self._analysis_display(item)
+        if item.role == "dimension":
+            column_name = f"dim_{item.attribute('id').lower().replace(' ', '_').replace('-', '_')}"
+        elif item.role == "factor":
+            column_name = f"fac_{item.attribute('id').lower().replace(' ', '_').replace('-', '_')}"
+        elif item.role == "indicator":
+            column_name = item.attribute("id").lower().replace(" ", "_").replace("-", "_")
+        elif item.role == "analysis":
+            column_name = "geoe3_masked" if use_masked else "geoe3"  # Analysis aggregation uses geoe3 column
+        else:
+            column_name = None
+
+        if item.role == "analysis" and use_masked and self._get_render_strategy() == "raster":
+            add_to_map(
+                item,
+                key=analysis_raster_key,
+                layer_name="GeoE3 Score",
+                group="GeoE3",
+            )
+        elif column_name is None or self._get_render_strategy() == "raster":
+            add_to_map(item)
+        else:
+            add_grid_layer_to_map(item, column_name, self.working_directory)
+
+        self._stop_item_spinner(item)
+
+    def _stop_item_spinner(self, item) -> None:
+        """Stop the animated throbber on_workflow_started() placed on
+        item's (and its parent's, for an indicator) own status icon
+        (column 1), and restore the normal icon.
+
+        Shared by on_workflow_completed() and download_all_resources() - any
+        caller that started the spinner via on_workflow_started() must pair
+        it with this to clear it, including the parent's icon for an
+        indicator.
+        """
+        item = TreePanel._resolve_display_item(item)
         node_index = self.model.itemIndex(item)
 
         if not node_index.isValid():
             log_message(
                 f"Failed to find index for item {item} - animation not started",
-                tag="Geest",
+                tag="GeoE3",
                 level=Qgis.Warning,
             )
             return
 
-        parent_second_column_index = None
+        # Pop this item's OWN movies - never touch another item's, which a
+        # single shared self.child_movie/self.parent_movie pair used to do
+        # whenever two items' spinners overlapped (concurrent_tasks > 1, or
+        # just two sequential items racing).
+        for movie in self._item_spinners.pop(item.guid, []):
+            movie.stop()
+
+        item.clear_spinner_pixmap()
+        status_index = self.model.index(node_index.row(), 1, node_index.parent())
+        self.model.dataChanged.emit(status_index, status_index, [Qt.ItemDataRole.DecorationRole])
+
         if item.role == "indicator":
-            # Stop the animation on its parent too
-            parent_index = node_index.parent()
-            parent_second_column_index = self.model.index(
-                parent_index.row(), 1, parent_index.parent()
+            parent_item = item.parent()
+            if parent_item:
+                parent_item.clear_spinner_pixmap()
+                parent_index = self.model.itemIndex(parent_item)
+                if parent_index.isValid():
+                    parent_status_index = self.model.index(parent_index.row(), 1, parent_index.parent())
+                    self.model.dataChanged.emit(
+                        parent_status_index, parent_status_index, [Qt.ItemDataRole.DecorationRole]
+                    )
+
+    def download_all_resources(self):
+        """Walk every indicator, download missing resources, and wire up cached ones.
+
+        Covers nighttime lights, environmental hazard rasters, and
+        OSM-matched buffer-point indicators today - see
+        geest.core.download_all_resources' module docstring for what's not
+        covered yet and why. An indicator whose resource is already cached
+        on disk but not yet set as its source (e.g. a duplicated
+        indicator, or a resource a sibling indicator already downloaded)
+        is configured immediately, with no download needed; only a
+        genuinely missing resource is actually downloaded. The tree view
+        is refreshed afterward so newly-configured indicators show their
+        updated status immediately.
+        """
+        bar = getattr(self, "_message_bar", None) or iface.messageBar()
+
+        if not self.working_directory:
+            bar.pushMessage("Download All Resources", "No working directory set.", level=Qgis.Warning, duration=5)
+            return
+
+        from geest.core.download_all_resources import (
+            DownloadAllResourcesController,
+            collect_missing_resources,
+            sync_cached_resource_attributes,
+        )
+
+        configured = sync_cached_resource_attributes(self.model.rootItem, self.working_directory)
+        if configured:
+            self.save_json_to_working_directory()
+            self._refresh_tree_view()
+
+        missing = collect_missing_resources(self.model.rootItem, self.working_directory)
+        if not missing:
+            message = (
+                f"Configured {len(configured)} indicator(s) from already-cached files. " if configured else ""
+            ) + "All downloadable resources are already cached."
+            bar.pushMessage("Download All Resources", message, level=Qgis.Info, duration=5)
+            return
+
+        gpkg_path = os.path.join(self.working_directory, "study_area", "study_area.gpkg")
+        bbox_layer = QgsVectorLayer(f"{gpkg_path}|layername=study_area_bboxes", "study_area_bboxes", "ogr")
+        if not bbox_layer.isValid() or bbox_layer.featureCount() == 0:
+            bar.pushMessage(
+                "Download All Resources",
+                "Could not load study_area_bboxes from study_area.gpkg.",
+                level=Qgis.Warning,
+                duration=5,
             )
+            return
+        extent = bbox_layer.extent()
+        extent_crs_authid = bbox_layer.crs().authid()
 
-        self.child_movie.stop()
-        self.parent_movie.stop()
+        self.item_info_panel.show_progress("Downloading resources...")
+        self.overall_progress_bar.setVisible(True)
+        self.workflow_progress_bar.setVisible(True)
+        self.status_label.setVisible(True)
+        self.status_label.setText("Starting downloads...")
+        self.prepare_analysis_button.setVisible(False)
+        self.help_button.setVisible(False)
+        self.project_button.setVisible(False)
+        self.overall_progress_bar.setValue(0)
+        self.overall_progress_bar.setMaximum(len(missing))
+        self.workflow_progress_bar.setValue(0)
 
-        second_column_index = self.model.index(node_index.row(), 1, node_index.parent())
-        self.treeView.setIndexWidget(second_column_index, None)
-        if parent_second_column_index:
-            self.treeView.setIndexWidget(parent_second_column_index, None)
+        def _on_item_started(item, spec):
+            self.status_label.setText(f"Downloading {spec.label}...")
+            self.status_label.setToolTip(spec.label)
+            self.workflow_progress_bar.setValue(0)
+            # Same animated throbber a normal single-indicator run shows on
+            # its tree row - highlights which item is downloading without
+            # touching the tree's structure/expand state.
+            self.on_workflow_started(item)
 
-        # Emit dataChanged to refresh the decoration
-        self.model.dataChanged.emit(second_column_index, second_column_index)
+        def _on_item_progress(item, spec, message):
+            self.status_label.setText(message[:60])
+            self.status_label.setToolTip(message)
 
-        if item.role == "analysis":
-            # Run some post processing on the analysis results
-            self.calculate_analysis_insights(item)
+        def _on_item_finished(item, spec, success, message):
+            self._stop_item_spinner(item)
+            self.overall_progress_bar.setValue(self.overall_progress_bar.value() + 1)
+            self.workflow_progress_bar.setValue(100)
+            if not success:
+                log_message(f"Download failed for {spec.label}: {message}", tag="GeoE3", level=Qgis.Warning)
+
+        def _on_all_finished(succeeded, failed):
+            self.overall_progress_bar.setVisible(False)
+            self.workflow_progress_bar.setVisible(False)
+            self.status_label.setVisible(False)
+            self.status_label.setText("")
+            self.item_info_panel.hide_progress()
+            self.prepare_analysis_button.setVisible(True)
+            self.help_button.setVisible(True)
+            self.project_button.setVisible(True)
+            self.save_json_to_working_directory()
+            self._refresh_tree_view()
+            summary = f"Downloaded {len(succeeded)} resource(s)."
+            if configured:
+                summary += f" Configured {len(configured)} from already-cached files."
+            if failed:
+                failed_labels = ", ".join(spec.label for _item, spec in failed)
+                summary += f" {len(failed)} failed: {failed_labels}"
+                bar.pushMessage("Download All Resources", summary, level=Qgis.Warning, duration=10)
+            else:
+                bar.pushMessage("Download All Resources", summary, level=Qgis.Info, duration=5)
+
+        self._download_all_resources_controller = DownloadAllResourcesController(
+            items_and_specs=missing,
+            working_directory=self.working_directory,
+            extent=extent,
+            extent_crs_authid=extent_crs_authid,
+            on_item_started=_on_item_started,
+            on_item_progress=_on_item_progress,
+            on_item_finished=_on_item_finished,
+            on_all_finished=_on_all_finished,
+        )
+        self._download_all_resources_controller.start()
+
+    def _refresh_tree_view(self) -> None:
+        """Repaint every item's status (e.g. "ready to run") without collapsing the tree.
+
+        Attribute changes made directly on JsonTreeItem (not through the
+        view's own edit flow) don't trigger a repaint on their own - the
+        status column is computed live from attributes each time the view
+        paints, but nothing tells it to paint again. Deliberately
+        layoutChanged, not beginResetModel()/endResetModel(): a full model
+        reset invalidates persistent indexes, which collapses every
+        expanded node and clears the current selection/scroll position -
+        needlessly disruptive here, since only item data changed, not the
+        tree's structure. layoutChanged tells the view to re-read and
+        repaint without touching expand state.
+        """
+        self.model.layoutChanged.emit()
+        self.treeView.viewport().update()
 
     def calculate_analysis_insights(self, item: JsonTreeItem):
-        """Caclulate insights for the analysis.
+        """Calculate insights for the analysis.
 
         Post process the analysis aggregation and store the output in the item.
 
         Here we compute various other insights from the aggregated data:
 
-        - WEE x Population Score
+        - GeoE3 x Population Score
         - Opportunities Mask
         - Subnational Aggregation
 
+        Args:
+            item: The analysis item to calculate insights for.
         """
         log_message("############################################")
         log_message("Calculating analysis insights")
         log_message("############################################")
         log_message(item.attributesAsMarkdown())
-        # Prepare the population data if provided
-        population_data = item.attribute("population_layer_source", None)
-        gpkg_path = os.path.join(
-            self.working_directory, "study_area", "study_area.gpkg"
-        )
+        gpkg_path = os.path.join(self.working_directory, "study_area", "study_area.gpkg")
         feedback = QgsFeedback()
         context = QgsProcessingContext()
-        population_processor = PopulationRasterProcessingTask(
-            population_raster_path=population_data,
-            working_directory=self.working_directory,
-            study_area_gpkg_path=gpkg_path,
-            cell_size_m=self.cell_size_m(),
-            feedback=feedback,
+
+        analysis_scale = item.attribute("analysis_scale", "national")
+        s2s_pop_path = item.attribute("population_s2s_output_path", None)
+        population_source = item.attribute("population_source", "raster")
+        population_data = item.attribute("population_layer_source", None)
+        population_path = str(population_data or "").split("|")[0]
+
+        use_s2s = (
+            analysis_scale == "regional"
+            and population_source == "s2s"
+            and s2s_pop_path
+            and os.path.exists(s2s_pop_path)
         )
-        population_processor.run()
-        wee_processor = WEEByPopulationScoreProcessingTask(
-            study_area_gpkg_path=gpkg_path,
-            working_directory=self.working_directory,
-            force_clear=False,
-        )
-        wee_processor.run()
-        # Shamelessly hard coded for now, needs to move to the wee processor class
-        output = os.path.join(
-            self.working_directory,
-            "wee_by_population_score",
-            "wee_by_population_score.vrt",
-        )
-        item.setAttribute("wee_by_population", output)
+        use_population_raster = bool(population_path) and os.path.exists(population_path)
+        compute_population_score = use_s2s or use_population_raster
+
+        # GeoE3 x Population Score is optional - only compute it when the
+        # user has actually configured a population input (raster or S2S
+        # demographics) in the analysis weightings dialog, same as the
+        # opportunities mask below.
+        if not compute_population_score:
+            log_message(
+                "No population raster or S2S demographics configured - skipping GeoE3 x Population "
+                "Score (optional).",
+                tag="GeoE3",
+                level=Qgis.Info,
+            )
+        elif use_s2s:
+            s2s_field = item.attribute("population_s2s_field", "") or DEFAULT_S2S_POPULATION_FIELD
+            log_message(
+                f"Using S2S demographics for population processing: {s2s_field}",
+                tag="GeoE3",
+                level=Qgis.Info,
+            )
+            population_processor = PopulationVectorProcessingTask(
+                s2s_output_path=s2s_pop_path,
+                s2s_field=s2s_field,
+                study_area_gpkg_path=gpkg_path,
+                working_directory=self.working_directory,
+                cell_size_m=self.cell_size_m(),
+            )
+            population_processor.run()
+        else:
+            population_processor = PopulationRasterProcessingTask(
+                population_raster_path=population_path,
+                working_directory=self.working_directory,
+                study_area_gpkg_path=gpkg_path,
+                cell_size_m=self.cell_size_m(),
+                feedback=feedback,
+                force_clear=True,
+            )
+            if not population_processor.run():
+                self.on_processing_error("Population raster processing failed. Check the QGIS log for details.")
+                return False
+
+        if compute_population_score:
+            geoe3_processor = WEEByPopulationScoreProcessingTask(
+                study_area_gpkg_path=gpkg_path,
+                working_directory=self.working_directory,
+                force_clear=True,
+            )
+            if not geoe3_processor.run():
+                self.on_processing_error("GeoE3 by population processing failed. Check the QGIS log for details.")
+                return False
+            # Shamelessly hard coded for now, needs to move to the geoe3 processor class
+            output = os.path.join(
+                self.working_directory,
+                "geoe3_by_population_score",
+                "geoe3_by_population_score.vrt",
+            )
+            if not os.path.exists(output):
+                self.on_processing_error("GeoE3 by population processing did not create an output raster.")
+                return False
+            item.setAttribute("geoe3_by_population", output)
 
         # Prepare the polygon mask data if provided
+        # The mask (job opportunities / GHSL) is optional - only run the
+        # mask pipeline when the user has selected a mask source in the
+        # analysis weightings dialog.
+        mask_mode = item.attribute("mask_mode", "None")
+        if mask_mode not in ("", "None", "none"):
+            try:
+                opportunities_mask_workflow = OpportunitiesMaskProcessor(
+                    item=item,
+                    study_area_gpkg_path=gpkg_path,
+                    cell_size_m=self.cell_size_m(),
+                    feedback=feedback,
+                    context=context,
+                    working_directory=self.working_directory,
+                )
+                opportunities_mask_workflow.run()
 
-        opportunities_mask_workflow = OpportunitiesMaskProcessor(
-            item=item,
-            study_area_gpkg_path=gpkg_path,
-            cell_size_m=self.cell_size_m(),
-            feedback=feedback,
-            context=context,
-            working_directory=self.working_directory,
-        )
-        opportunities_mask_workflow.run()
+                # Now apply the opportunities mask to the GeoE3 Score and GeoE3 Score x Population
+                # leaving us with 4 potential products:
+                # GeoE3 Score Unmasked (already created above)
+                # GeoE3 Score x Population Unmasked (already created above)
+                # GeoE3 Score Masked by Job Opportunities
+                # GeoE3 Score x Population masked by Job Opportunities
+                mask_processor = OpportunitiesByWeeScoreProcessingTask(
+                    item=item,
+                    study_area_gpkg_path=gpkg_path,
+                    working_directory=self.working_directory,
+                    force_clear=False,
+                )
+                mask_processor.run()
 
-        # Now apply the opportunities mask to the WEE Score and WEE Score x Population
-        # leaving us with 4 potential products:
-        # WEE Score Unmasked (already created above)
-        # WEE Score x Population Unmasked (already created above)
-        # WEE Score Masked by Job Opportunities
-        # WEE Score x Population masked by Job Opportunities
-        mask_processor = OpportunitiesByWeeScoreProcessingTask(
-            item=item,
-            study_area_gpkg_path=gpkg_path,
-            working_directory=self.working_directory,
-            force_clear=False,
-        )
-        mask_processor.run()
-
-        mask_processor = OpportunitiesByWeeScorePopulationProcessingTask(
-            item=item,
-            study_area_gpkg_path=gpkg_path,
-            working_directory=self.working_directory,
-            force_clear=False,
-        )
-        mask_processor.run()
+                if compute_population_score:
+                    mask_processor = OpportunitiesByWeeScorePopulationProcessingTask(
+                        item=item,
+                        study_area_gpkg_path=gpkg_path,
+                        working_directory=self.working_directory,
+                        force_clear=False,
+                    )
+                    mask_processor.run()
+            except Exception as e:
+                log_message(
+                    f"Failed to run opportunities mask pipeline: {e}",
+                    tag="GeoE3",
+                    level=Qgis.Critical,
+                )
+                log_message(traceback.format_exc(), level=Qgis.Critical)
+        else:
+            log_message(
+                f"No mask source selected (mask_mode={mask_mode!r}), skipping opportunities mask.",
+                tag="GeoE3",
+                level=Qgis.Info,
+            )
         # Now prepare the aggregation layers if an aggregation polygon layer is provided
         # leaving us with 2 potential products:
-        # Subnational Aggregation fpr WEE Score x Population Unmasked
-        # Subnational Aggregation for WEE Score x Population masked by Job Opportunities
+        # Subnational Aggregation fpr GeoE3 Score x Population Unmasked
+        # Subnational Aggregation for GeoE3 Score x Population masked by Job Opportunities
         try:
             subnational_processor = SubnationalAggregationProcessingTask(
                 item,
@@ -1581,8 +2943,10 @@ class TreePanel(QWidget):
     def update_tree_item_status(self, item, status):
         """
         Update the tree item to show the workflow status.
-        :param item: The tree item representing the workflow.
-        :param status: The status message or icon to display.
+
+        Args:
+            item: The tree item representing the workflow.
+            status: The status message or icon to display.
         """
         # Assuming column 1 is where status updates are shown
         item.setData(1, status)
@@ -1590,6 +2954,8 @@ class TreePanel(QWidget):
     def run_all(self):
         """Run all workflows in the tree, regardless of their status."""
         self.run_only_incomplete = False
+        self.workflow_scope_item = None
+        self._open_report_when_done = True
         self.clear_workflows()
         self._count_workflows_to_run()
         log_message(f"Total items to process: {self.items_to_run}")
@@ -1602,6 +2968,8 @@ class TreePanel(QWidget):
         processes each one whilst showing an animated icon.
         """
         self.run_only_incomplete = True
+        self.workflow_scope_item = None
+        self._open_report_when_done = False
         self._count_workflows_to_run()
         self._queue_workflows()
 
@@ -1611,8 +2979,12 @@ class TreePanel(QWidget):
         logical order of indicators then factors then dimensions, then the whole analysis.
         """
         self.workflow_queue = ["indicators", "factors", "dimensions", "analysis"]
+        self.item_info_panel.show_progress("Analysis in progress...")
         self.overall_progress_bar.setVisible(True)
         self.workflow_progress_bar.setVisible(True)
+        self.status_label.setVisible(True)
+        self.status_label.setText("Starting...")
+        self.prepare_analysis_button.setVisible(False)
         self.help_button.setVisible(False)
         self.project_button.setVisible(False)
         self.overall_progress_bar.setValue(0)
@@ -1628,13 +3000,36 @@ class TreePanel(QWidget):
         if len(self.workflow_queue) == 0:
             self.overall_progress_bar.setVisible(False)
             self.workflow_progress_bar.setVisible(False)
+            self.status_label.setVisible(False)
+            self.status_label.setText("")
+            self.item_info_panel.hide_progress()
+            self.prepare_analysis_button.setVisible(True)
             self.help_button.setVisible(True)
             self.project_button.setVisible(True)
+            self.workflow_scope_item = None
+            # All workflows have finished writing — verify the study area
+            # GeoPackage is still sound and self-heal it if not.
+            self.check_study_area_gpkg_health(reason="after workflows")
+            open_report = self._open_report_when_done
+            self._open_report_when_done = False
+            if open_report:
+                analysis_item = self.model.get_analysis_item()
+                status = analysis_item.getStatus() if analysis_item else ""
+                if status == "Completed successfully":
+                    log_message("Complete analysis run succeeded — generating the analysis report")
+                    self.generate_analysis_report()
+                else:
+                    log_message(
+                        f"Analysis run finished with status '{status}' — skipping the automatic report",
+                        tag="GeoE3",
+                        level=Qgis.Warning,
+                    )
             return
         # pop the first item from the queue
         next_workflow = self.workflow_queue.pop(0)
         self.start_workflows(workflow_type=next_workflow)
-        debug_env = int(os.getenv("GEEST_DEBUG", 0))
+
+        debug_env = int(os.getenv("GEOE3_DEBUG") or os.getenv("GEEST_DEBUG", 0))
         if debug_env:
             self.queue_manager.start_processing_in_foreground()
         else:
@@ -1642,9 +3037,10 @@ class TreePanel(QWidget):
 
     def expand_all_nodes(self, index=None):
         """
-        :param index: QModelIndex - if None the root index is used
-
         Recursively expand all nodes in the tree view starting from the root.
+
+        Args:
+            index: QModelIndex - if None the root index is used.
         """
         if self.treeView.model() is None:
             return
@@ -1673,3 +3069,67 @@ class TreePanel(QWidget):
         """Enable all widgets in the panel."""
         for widget in self.findChildren(QWidget):
             widget.setEnabled(True)
+
+    def animate_results(self):
+        """
+        Animate the selection of tree items sequentially with a 2s pause on each.
+        """
+        from qgis.PyQt.QtCore import QTimer
+
+        # If already animating, do nothing
+        if getattr(self, "_is_animating", False):
+            return
+        self._is_animating = True
+
+        # Get all items in the tree in a flat list (preorder traversal)
+        def collect_items(item, items):
+            """🔄 Collect items.
+
+            Args:
+                item: Item.
+                items: Items.
+            """
+            items.append(item)
+            for i in range(item.childCount()):
+                collect_items(item.child(i), items)
+
+        items = []
+        collect_items(self.model.rootItem, items)
+        # Remove the root item if you don't want to animate it
+        if len(items) > 1:
+            items = items[1:]
+
+        self._animate_items = items
+        self._animate_index = 0
+
+        if hasattr(self, "_animate_timer") and self._animate_timer is not None:
+            self._animate_timer.stop()
+
+        self._animate_timer = QTimer(self)
+        self._animate_timer.setInterval(1000)  # 1s
+        self._animate_timer.timeout.connect(self._animate_next_item)
+        self._animate_next_item()  # Start immediately
+        self._animate_timer.start()
+
+    def stop_animation(self):
+        """Stop the animation if running."""
+        if hasattr(self, "_animate_timer") and self._animate_timer is not None:
+            self._animate_timer.stop()
+        self._is_animating = False
+        self._animate_items = []
+        self._animate_index = 0
+
+    def _animate_next_item(self):
+        if not hasattr(self, "_animate_items") or self._animate_index >= len(self._animate_items):
+            if hasattr(self, "_animate_timer"):
+                self._animate_timer.stop()
+            self._is_animating = False
+            return
+        item = self._animate_items[self._animate_index]
+        index = self.model.itemIndex(item)
+        if index.isValid():
+            self.treeView.setCurrentIndex(index)
+            self.treeView.scrollTo(index)
+            # Call the item clicked logic for each item as it is selected
+            self.on_item_clicked(index)
+        self._animate_index += 1

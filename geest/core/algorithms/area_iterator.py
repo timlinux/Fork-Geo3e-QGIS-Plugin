@@ -1,10 +1,15 @@
-from qgis.core import (
-    QgsFeatureRequest,
-    QgsVectorLayer,
-    QgsGeometry,
-    Qgis,
-)
+# -*- coding: utf-8 -*-
+
+"""📦 Area Iterator module.
+
+This module contains functionality for area iterator.
+"""
+
 from typing import Iterator, Tuple
+
+from qgis.core import Qgis, QgsFeatureRequest, QgsGeometry, QgsVectorLayer
+
+from geest.core.grid_column_utils import populated_area_names
 from geest.utilities import log_message
 
 
@@ -13,16 +18,21 @@ class AreaIterator:
     An iterator to yield sets of geometries from polygon, study_area_clip_polygons and bbox layers
     found in a GeoPackage file, along with a progress percentage.
 
+    This iterator matches features across layers using the 'area_name' field rather than
+    Feature IDs (FIDs), ensuring correct pairing across layers.
+
     Attributes:
         gpkg_path (str): The path to the GeoPackage file.
 
     Precondition:
-        study_area_polygons (QgsVectorLayer): The vector layer containing polygons.
+        study_area_polygons (QgsVectorLayer): The vector layer containing polygons with 'area_name' field.
         study_area_clip_polygons (QgsVectorLayer): The vector layer containing polygons expanded to
-            completely include the intersecting grid cells along the boundary.
-        study_area_bboxes (QgsVectorLayer): The vector layer containing bounding boxes.
+            completely include the intersecting grid cells along the boundary, with matching 'area_name' field.
+        study_area_bboxes (QgsVectorLayer): The vector layer containing bounding boxes with matching 'area_name' field.
 
-        There should be a one-to-one correspondence between the polygons and bounding boxes.
+        All three layers must have the 'area_name' attribute for matching.
+        There should be a one-to-one correspondence between polygons and bounding boxes.
+        Clip polygons may be missing for some areas; in such cases, the polygon geometry is used as a fallback.
 
     Example usage:
         To use the iterator, simply pass the path to the GeoPackage:
@@ -35,7 +45,7 @@ class AreaIterator:
             area_iterator
         ):
 
-            log_message(f"Polygon ID: {id}")
+            log_message(f"Area Name: {area_name}")
             log_message(f"Polygon Geometry: {polygon_geometry.asWkt()}")
             log_message(f"Clip Polygon Geometry: {clip_geometry.asWkt()}")
             log_message(f"BBox Geometry: {bbox_geometry.asWkt()}")
@@ -69,51 +79,99 @@ class AreaIterator:
         if not self.polygon_layer.isValid():
             log_message(
                 "Error: 'study_area_polygons' layer failed to load from the GeoPackage",
-                tag="Geest",
+                tag="GeoE3",
                 level=Qgis.Critical,
             )
-            raise ValueError(
-                "Failed to load 'study_area_polygons' layer from the GeoPackage."
-            )
+            raise ValueError("Failed to load 'study_area_polygons' layer from the GeoPackage.")
 
         if not self.clip_polygon_layer.isValid():
             log_message(
                 "Error: 'study_area_clip_polygons' layer failed to load from the GeoPackage",
-                tag="Geest",
+                tag="GeoE3",
                 level=Qgis.Critical,
             )
-            raise ValueError(
-                "Failed to load 'study_area_clip_polygons' layer from the GeoPackage."
-            )
+            raise ValueError("Failed to load 'study_area_clip_polygons' layer from the GeoPackage.")
 
         if not self.bbox_layer.isValid():
             log_message(
                 "Error: 'study_area_bboxes' layer failed to load from the GeoPackage",
-                tag="Geest",
+                tag="GeoE3",
                 level=Qgis.Critical,
             )
-            raise ValueError(
-                "Failed to load 'study_area_bboxes' layer from the GeoPackage."
-            )
+            raise ValueError("Failed to load 'study_area_bboxes' layer from the GeoPackage.")
+
+        # Areas with zero study_area_grid cells (GHSL-filtered at study area
+        # creation time, or a genuine sliver too small for one cell) have
+        # nothing for any workflow to process - every indicator used to
+        # rediscover this independently, on every single run, after running
+        # its full per-area pipeline (raster subset, mask, neutral fallback,
+        # rasterize attempt) only to find there was nothing to write.
+        # Skipping them here, once, means they're never iterated at all.
+        self._populated_area_names = populated_area_names(gpkg_path)
 
         # Get the total number of polygon features for progress calculation
-        self.total_features: int = self.polygon_layer.featureCount()
+        # (filtered to populated areas only, so progress reaches 100% against
+        # the areas actually yielded, not the raw unfiltered feature count).
+        if self._populated_area_names is None:
+            self.total_features: int = self.polygon_layer.featureCount()
+        else:
+            self.total_features = sum(
+                1 for feature in self.polygon_layer.getFeatures() if feature["area_name"] in self._populated_area_names
+            )
 
-    def __iter__(self) -> Iterator[Tuple[QgsGeometry, QgsGeometry, float]]:
+    def __enter__(self):
+        """
+        Context manager entry point.
+
+        Usage:
+            with AreaIterator(gpkg_path) as iterator:
+                for area, clip, bbox, progress in iterator:
+                    # process area
+
+        Returns:
+            self: The AreaIterator instance.
+        """
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """
+        Context manager exit point.
+
+        Args:
+            exc_type: Exception type if an exception occurred, None otherwise.
+            exc_val: Exception value if an exception occurred, None otherwise.
+            exc_tb: Exception traceback if an exception occurred, None otherwise.
+
+        Returns:
+            False: Does not suppress exceptions.
+        """
+        # Return False to propagate any exceptions that occurred
+        return False
+
+    def area_count(self) -> int:
+        """
+        Return the total number of areas to be processed.
+
+        Returns:
+            int: The total number of polygon features.
+        """
+        return self.total_features
+
+    def __iter__(self) -> Iterator[Tuple[QgsGeometry, QgsGeometry, QgsGeometry, float, str]]:
         """
         Iterator that yields pairs of geometries from the polygon layer and the corresponding bbox layer,
-        along with a progress percentage.
+        along with a progress percentage and area name.
 
         Yields:
-            Iterator[Tuple[QgsGeometry, QgsGeometry, float]]: Yields a tuple of polygon and bbox geometries,
-            along with a progress value representing the percentage of the iteration completed.
+            Iterator[Tuple[QgsGeometry, QgsGeometry, QgsGeometry, float, str]]: Yields a tuple of
+            polygon geometry, clip geometry, bbox geometry, progress percentage, and area name.
         """
         try:
             # Ensure all  layers have the same CRS
             if self.polygon_layer.crs() != self.bbox_layer.crs():
                 log_message(
                     "Warning: CRS mismatch between polygon and bbox layers",
-                    tag="Geest",
+                    tag="GeoE3",
                     level=Qgis.Warning,
                 )
                 return
@@ -121,45 +179,92 @@ class AreaIterator:
             if self.polygon_layer.crs() != self.clip_polygon_layer.crs():
                 log_message(
                     "Warning: CRS mismatch between polygon and clip layers",
-                    tag="Geest",
+                    tag="GeoE3",
                     level=Qgis.Warning,
                 )
                 return
 
             # Iterate over each polygon feature and calculate progress
 
-            # Sort polygon features by area in ascending order
-            sorted_features = sorted(
-                self.polygon_layer.getFeatures(), key=lambda f: f.geometry().area()
-            )
-            for index, polygon_feature in enumerate(sorted_features):
-                polygon_id: int = polygon_feature.id()
-                # Request the corresponding bbox feature based on the polygon's ID
-                feature_request: QgsFeatureRequest = QgsFeatureRequest().setFilterFid(
-                    polygon_id
-                )
-                clip_feature = next(
-                    self.clip_polygon_layer.getFeatures(feature_request), None
-                )
-                bbox_feature = next(self.bbox_layer.getFeatures(feature_request), None)
+            # Memory-efficient approach: use stored area attribute if available,
+            # otherwise compute it (for backwards compatibility with older data)
+            feature_areas = []
+            has_area_field = "geom_area" in [f.name() for f in self.polygon_layer.fields()]
 
-                if bbox_feature and clip_feature:
+            for feature in self.polygon_layer.getFeatures():
+                geom = feature.geometry()
+                if geom and not geom.isEmpty():
+                    # Use stored area if available (faster), otherwise compute
+                    if has_area_field:
+                        area = feature["geom_area"]
+                        if area is None or area == 0:
+                            area = geom.area()
+                    else:
+                        area = geom.area()
+                    feature_areas.append((feature.id(), area))
+
+            # Sort by area (ascending) - only IDs and areas in memory, not full features
+            feature_areas.sort(key=lambda x: x[1])
+
+            # Now iterate in sorted order, fetching features one at a time
+            yielded_count = 0
+            for fid, _area in feature_areas:
+                # Fetch the polygon feature by ID
+                request = QgsFeatureRequest().setFilterFid(fid)
+                polygon_feature = next(self.polygon_layer.getFeatures(request), None)
+                if polygon_feature is None:
+                    continue
+
+                # Get the area_name from the polygon feature for matching
+                # This is more reliable than FID matching
+                area_name = polygon_feature["area_name"]
+
+                if self._populated_area_names is not None and area_name not in self._populated_area_names:
+                    log_message(
+                        f"Skipping area '{area_name}' - no study_area_grid cells (GHSL-filtered or a "
+                        "sliver too small for one cell); nothing for any workflow to process here.",
+                        tag="GeoE3",
+                        level=Qgis.Info,
+                    )
+                    continue
+
+                # Query clip_polygon and bbox by area_name instead of FID
+                # This ensures correct matching even when feature IDs don't align
+                clip_request = QgsFeatureRequest().setFilterExpression(f"area_name = '{area_name}'")
+                bbox_request = QgsFeatureRequest().setFilterExpression(f"area_name = '{area_name}'")
+
+                clip_feature = next(self.clip_polygon_layer.getFeatures(clip_request), None)
+                bbox_feature = next(self.bbox_layer.getFeatures(bbox_request), None)
+
+                # Require bbox_feature but allow clip_feature to be missing
+                if bbox_feature:
+                    yielded_count += 1
                     # Calculate the progress as the percentage of features processed
-                    progress_percent: float = ((index + 1) / self.total_features) * 100
+                    progress_percent: float = (yielded_count / self.total_features) * 100
 
-                    # Yield a tuple with polygon geometry, bbox geometry, and progress percentage
-                    yield polygon_feature.geometry(), clip_feature.geometry(), bbox_feature.geometry(), progress_percent
+                    # Use clip_feature geometry if available, otherwise fall back to polygon geometry
+                    clip_geom = clip_feature.geometry() if clip_feature else polygon_feature.geometry()
+
+                    if not clip_feature:
+                        log_message(
+                            f"Info: No clip_polygon found for area '{area_name}', using polygon geometry as fallback",
+                            tag="GeoE3",
+                            level=Qgis.Info,
+                        )
+
+                    # Yield a tuple with polygon geometry, clip geometry, bbox geometry, progress percentage, and area name
+                    yield polygon_feature.geometry(), clip_geom, bbox_feature.geometry(), progress_percent, area_name
 
                 else:
                     log_message(
-                        f"Warning: No matching bbox or clip feature found for polygon ID {polygon_id}",
-                        tag="Geest",
+                        f"Warning: No matching bbox feature found for area '{area_name}'",
+                        tag="GeoE3",
                         level=Qgis.Warning,
                     )
 
         except Exception as e:
             log_message(
                 f"Critical: Error during iteration - {str(e)}",
-                tag="Geest",
+                tag="GeoE3",
                 level=Qgis.Critical,
             )

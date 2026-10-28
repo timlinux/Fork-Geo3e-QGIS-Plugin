@@ -1,15 +1,31 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""📦 Generate Model module.
+
+This module contains functionality for generate model.
+"""
+
+import json
 
 import pandas as pd
-import json
-import os
 
 
 class SpreadsheetToJsonParser:
+    """🎯 Spreadsheet To Json Parser.
+
+    Attributes:
+        aggregate_output_filenames: Aggregate output filenames.
+        dataframe: Dataframe.
+        result: Result.
+        spreadsheet_path: Spreadsheet path.
+    """
+
     def __init__(self, spreadsheet_path):
-        """
-        Constructor for SpreadsheetToJsonParser class.
-        Takes in the path to an ODS spreadsheet file.
+        """Initialize SpreadsheetToJsonParser with path to ODS spreadsheet.
+
+        Args:
+            spreadsheet_path: Path to an ODS spreadsheet file.
         """
         self.spreadsheet_path = spreadsheet_path
         self.dataframe = None
@@ -20,14 +36,14 @@ class SpreadsheetToJsonParser:
             "accessibility": "Accessibility_score",
             "active_transport": "AT_output",
             "place_characterization": "Place_score",
-            "analysis_dimension": "WEE",
-            "level_of_enablement_classification": "WEE_score",
+            "analysis_dimension": "GeoE3",
+            "level_of_enablement_classification": "GeoE3_score",
             "relative_population_count": "Population",
-            "combined_level_of_enablement_and_relative_population_count": "WEE_pop_score",
-            "enablement": "WEE_pop_adm_score",
-            "jobs_raster_locations": "AOI_WEE_score",  # Tim propoposes to change to something more generic e.g. Opportunities_WEE_Score
-            "jobs_point_locations": "POI_WEE_score",  # Tim propoposes to change to something more generic e.g. Opportunities_WEE_Score
-            "jobs_polygon_locations": "POA_WEE_score",  # Tim propoposes to change to something more generic e.g. Opportunities_WEE_Score
+            "combined_level_of_enablement_and_relative_population_count": "GeoE3_pop_score",
+            "enablement": "GeoE3_pop_adm_score",
+            "jobs_raster_locations": "AOI_GeoE3_score",  # Tim propoposes to change to something more generic e.g. Opportunities_GeoE3_Score
+            "jobs_point_locations": "POI_GeoE3_score",  # Tim propoposes to change to something more generic e.g. Opportunities_GeoE3_Score
+            "jobs_polygon_locations": "POA_GeoE3_score",  # Tim propoposes to change to something more generic e.g. Opportunities_GeoE3_Score
         }
 
     def load_spreadsheet(self):
@@ -73,8 +89,13 @@ class SpreadsheetToJsonParser:
         self.dataframe["Factor"] = self.dataframe["Factor"].ffill()
 
     def create_id(self, name):
-        """
-        Helper method to create a lowercase, underscore-separated id from the name.
+        """Create a lowercase, underscore-separated id from the name.
+
+        Args:
+            name: The name to convert to an id.
+
+        Returns:
+            Lowercase, underscore-separated id string.
         """
         return name.lower().replace(" ", "_").replace("'", "_")
 
@@ -101,9 +122,9 @@ class SpreadsheetToJsonParser:
                 if dimension_id == "contextual":
                     description = "The Contextual Dimension refers to the laws and policies that shape workplace gender discrimination, financial autonomy, and overall gender empowerment. Although this dimension may vary between countries due to differences in legal frameworks, it remains consistent within a single country, as national policies and regulations are typically applied uniformly across countries."
                 elif dimension_id == "accessibility":
-                    description = "The Accessibility Dimension evaluates women’s daily mobility by examining their access to essential services. Levels of enablement for work access in this dimension are determined by service areas, which represent the geographic zones that facilities like childcare, supermarkets, universities, banks, and clinics can serve based on proximity. The nearer these facilities are to where women live, the more supportive and enabling the environment becomes for their participation in the workforce."
+                    description = "The Accessibility Dimension evaluates daily mobility by examining access to essential services. Levels of enablement for work access in this dimension are determined by service areas, which represent the geographic zones that facilities like childcare, supermarkets, universities, banks, and clinics can serve based on proximity. The nearer these facilities are to where people live, the more supportive and enabling the environment becomes for their participation in the workforce."
                 elif dimension_id == "place_characterization":
-                    description = "The Place-Characterization Dimension refers to the social, environmental, and infrastructural attributes of geographical locations, such as walkability, safety, and vulnerability to natural hazards. Unlike the Accessibility Dimension, these factors do not involve mobility but focus on the inherent characteristics of a place that influence women’s ability to participate in the workforce."
+                    description = "The Place-Characterization Dimension refers to the social, environmental, and infrastructural attributes of geographical locations, such as walkability, safety, and vulnerability to natural hazards. Unlike the Accessibility Dimension, these factors do not involve mobility but focus on the inherent characteristics of a place that influence the ability to participate in the workforce."
             if dimension_id in self.aggregate_output_filenames:
                 output_filename = self.aggregate_output_filenames[dimension_id]
             else:
@@ -146,11 +167,7 @@ class SpreadsheetToJsonParser:
                     # Initialise the weighting to the default value
                     "dimension_weighting": default_factor_dimension_weighting,
                     "indicators": [],
-                    "description": (
-                        row["Factor Description"]
-                        if not pd.isna(row["Factor Description"])
-                        else ""
-                    ),
+                    "description": (row["Factor Description"] if not pd.isna(row["Factor Description"]) else ""),
                 }
                 analysis_model[dimension]["factors"].append(new_factor)
                 factor_map[factor] = new_factor
@@ -166,44 +183,25 @@ class SpreadsheetToJsonParser:
                 "indicator": row["Indicator"] if not pd.isna(row["Indicator"]) else "",
                 "id": row["ID"] if not pd.isna(row["ID"]) else "",
                 "output_filename": (
-                    row["Naming convention for outputs"]
-                    if not pd.isna(row["Naming convention for outputs"])
-                    else ""
+                    row["Naming convention for outputs"] if not pd.isna(row["Naming convention for outputs"]) else ""
                 ),
                 "description": "",
                 "default_factor_weighting": default_factor_weighting,
                 # Initialise the weighting to the default value
                 "factor_weighting": default_factor_weighting,
-                "index_score": (
-                    row["Index Score"] if not pd.isna(row["Index Score"]) else ""
-                ),
-                "index_score": (
-                    row["Index Score"] if not pd.isna(row["Index Score"]) else ""
-                ),
-                "use_index_score": (
-                    row["Use Index Score"]
-                    if not pd.isna(row["Use Index Score"])
-                    else ""
-                ),
+                "index_score": (row["Index Score"] if not pd.isna(row["Index Score"]) else ""),
+                "use_index_score": (row["Use Index Score"] if not pd.isna(row["Use Index Score"]) else ""),
                 "default_multi_buffer_distances": (
-                    row["Default Multi Buffer Distances"]
-                    if not pd.isna(row["Default Multi Buffer Distances"])
-                    else ""
+                    row["Default Multi Buffer Distances"] if not pd.isna(row["Default Multi Buffer Distances"]) else ""
                 ),
                 "use_multi_buffer_point": (
-                    row["Use Multi Buffer Point"]
-                    if not pd.isna(row["Use Multi Buffer Point"])
-                    else ""
+                    row["Use Multi Buffer Point"] if not pd.isna(row["Use Multi Buffer Point"]) else ""
                 ),
                 "default_single_buffer_distance": (
-                    row["Default Single Buffer Distance"]
-                    if not pd.isna(row["Default Single Buffer Distance"])
-                    else ""
+                    row["Default Single Buffer Distance"] if not pd.isna(row["Default Single Buffer Distance"]) else ""
                 ),
                 "use_single_buffer_point": (
-                    row["Use Single Buffer Point"]
-                    if not pd.isna(row["Use Single Buffer Point"])
-                    else ""
+                    row["Use Single Buffer Point"] if not pd.isna(row["Use Single Buffer Point"]) else ""
                 ),
                 "use_classify_polygon_into_classes": (
                     row["Use Classify Polygon into Classes"]
@@ -216,54 +214,50 @@ class SpreadsheetToJsonParser:
                     else ""
                 ),
                 "use_csv_to_point_layer": (
-                    row["Use CSV to Point Layer"]
-                    if not pd.isna(row["Use CSV to Point Layer"])
-                    else ""
+                    row["Use CSV to Point Layer"] if not pd.isna(row["Use CSV to Point Layer"]) else ""
                 ),
                 "use_polygon_per_cell": (
-                    row["Use Polygon per Cell"]
-                    if not pd.isna(row["Use Polygon per Cell"])
-                    else ""
+                    row["Use Polygon per Cell"] if not pd.isna(row["Use Polygon per Cell"]) else ""
+                ),
+                "use_s2s_urban_rural_share": (
+                    row["Use S2S Urban Rural Share"]
+                    if "Use S2S Urban Rural Share" in row.index and not pd.isna(row["Use S2S Urban Rural Share"])
+                    else 0
                 ),
                 "use_polyline_per_cell": (
-                    row["Use Polyline per Cell"]
-                    if not pd.isna(row["Use Polyline per Cell"])
+                    row["Use Polyline per Cell"] if not pd.isna(row["Use Polyline per Cell"]) else ""
+                ),
+                "use_osm_transport_polyline_per_cell": (
+                    row["Use OSM Transport Polyline per Cell"]
+                    if not pd.isna(row["Use OSM Transport Polyline per Cell"])
                     else ""
                 ),
-                "use_point_per_cell": (
-                    row["Use Point per Cell"]
-                    if not pd.isna(row["Use Point per Cell"])
-                    else ""
-                ),
+                "use_point_per_cell": (row["Use Point per Cell"] if not pd.isna(row["Use Point per Cell"]) else ""),
                 "use_nighttime_lights": (
-                    row["Use Nighttime Lights"]
-                    if not pd.isna(row["Use Nighttime Lights"])
-                    else ""
+                    row["Use Nighttime Lights"] if not pd.isna(row["Use Nighttime Lights"]) else ""
                 ),
                 "use_environmental_hazards": (
-                    row["Use Environmental Hazards"]
-                    if not pd.isna(row["Use Environmental Hazards"])
-                    else ""
+                    row["Use Environmental Hazards"] if not pd.isna(row["Use Environmental Hazards"]) else ""
                 ),
-                "use_street_lights": (
-                    row["Use Street Lights"]
-                    if not pd.isna(row["Use Street Lights"])
-                    else ""
-                ),
+                "use_street_lights": (row["Use Street Lights"] if not pd.isna(row["Use Street Lights"]) else ""),
                 "analysis_mode": "Do Not Use",
             }
 
             factor_map[factor]["indicators"].append(indicator_data)
 
     def get_json(self):
-        """
-        Return the parsed JSON structure.
+        """Return the parsed JSON structure.
+
+        Returns:
+            The parsed JSON structure as a dictionary.
         """
         return self.result
 
     def save_json_to_file(self, output_json_path="model.json"):
-        """
-        Save the parsed JSON structure to a file.
+        """Save the parsed JSON structure to a file.
+
+        Args:
+            output_json_path: Path to save the JSON file. Defaults to model.json.
         """
         with open(output_json_path, "w") as json_file:
             json.dump(self.result, json_file, indent=4)
@@ -271,8 +265,8 @@ class SpreadsheetToJsonParser:
 
 
 if __name__ == "__main__":
-    parser = SpreadsheetToJsonParser("geest/resources/geest2.ods")
+    parser = SpreadsheetToJsonParser("geoe3/resources/geoe3.ods")
     parser.load_spreadsheet()
     parser.parse_to_json()
     json_data = parser.get_json()
-    parser.save_json_to_file("geest/resources/model.json")
+    parser.save_json_to_file("geoe3/resources/model.json")

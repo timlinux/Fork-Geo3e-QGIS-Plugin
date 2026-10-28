@@ -1,0 +1,82 @@
+# -*- coding: utf-8 -*-
+"""Analysis Report Generation Task.
+
+This module contains the QgsTask for generating analysis reports in the background.
+"""
+
+import os
+
+from qgis.core import Qgis, QgsTask
+
+from geest.core.reports.analysis_report import AnalysisReport
+from geest.utilities import log_message, open_with_system_handler
+
+
+class AnalysisReportTask(QgsTask):
+    """Background task for analysis report generation."""
+
+    def __init__(self, working_dir: str, model_path: str):
+        """Initialize the task.
+
+        Args:
+            working_dir: Working directory where report will be saved.
+            model_path: Path to the model JSON file.
+        """
+        super().__init__("Generating Analysis Report", QgsTask.CanCancel)
+        self.working_dir = working_dir
+        self.model_path = model_path
+        self.pdf_path = os.path.join(working_dir, "analysis_report.pdf")
+        self.qpt_path = os.path.join(working_dir, "analysis_report.qpt")
+        self.exception = None
+
+    def run(self):
+        """Generate the report in background thread.
+
+        Returns:
+            bool: True if successful, False otherwise.
+        """
+        try:
+            log_message("Starting analysis report generation...", tag="GeoE3", level=Qgis.Info)
+
+            # Context manager guarantees cleanup: the report registers its
+            # result rasters in the project registry (legend-less) while
+            # rendering, and without cleanup every generation leaked ~20
+            # orphaned layers into the session.
+            with AnalysisReport(
+                model_path=self.model_path,
+                working_directory=self.working_dir,
+                report_name="GeoE3 Analysis Report",
+            ) as report:
+                report.create_layout()
+                report.export_pdf(self.pdf_path)
+                report.export_qpt(self.qpt_path)
+
+            log_message(
+                f"Analysis report generated successfully: {self.pdf_path}",
+                tag="GeoE3",
+                level=Qgis.Info,
+            )
+            return True
+
+        except Exception as e:
+            self.exception = e
+            log_message(f"Error generating analysis report: {e}", tag="GeoE3", level=Qgis.Critical)
+            return False
+
+    def finished(self, result: bool):
+        """Called when task finishes (in main thread).
+
+        Args:
+            result: True if task succeeded, False otherwise.
+        """
+        if result:
+            # Open the PDF using the system PDF viewer (detached — this
+            # runs on the main thread and must not block the event loop).
+            open_with_system_handler(self.pdf_path)
+        else:
+            log_message("Analysis report generation failed.", tag="GeoE3", level=Qgis.Critical)
+
+    def cancel(self):
+        """Called when task is cancelled."""
+        log_message("Analysis report generation cancelled.", tag="GeoE3", level=Qgis.Warning)
+        super().cancel()

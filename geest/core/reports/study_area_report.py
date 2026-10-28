@@ -1,34 +1,29 @@
-from collections import defaultdict
+# -*- coding: utf-8 -*-
+"""📦 Study Area Report module.
 
-from qgis.core import (
-    QgsProject,
-    QgsVectorLayer,
-    QgsLayout,
-    QgsLayoutItemLabel,
-    QgsLayoutPoint,
-    QgsUnitTypes,
-    QgsLayoutExporter,
-    QgsLayoutItemMap,
-    QgsLayoutSize,
-    QgsLayoutItemPage,
-    QgsLayoutMeasurement,
-    QgsRectangle,
-    QgsLayoutItemLabel,
-    QgsLayoutItemMap,
-    QgsReadWriteContext,
-    QgsLayoutExporter,
-    QgsVectorLayer,
-    QgsLayoutItemMapGrid,
-    QgsUnitTypes,
-    QgsCoordinateReferenceSystem,
-)
-from qgis.PyQt.QtXml import QDomDocument
-from qgis.PyQt.QtGui import QFont, QColor
+This module contains functionality for study area report.
+"""
+
+from qgis.core import QgsLayout, QgsProject, QgsVectorLayer
 from qgis.PyQt.QtCore import Qt
+
 from geest.utilities import log_message, resources_path
 
+from .base_report import CHARCOAL, CONTENT_W, CYAN, GREY, HEADER_H, MARGIN, MIST, NAVY, BaseReport
 
-class StudyAreaReport:
+# Friendly page titles for the raw GeoPackage layer names.
+LAYER_DISPLAY_NAMES = {
+    "study_area_bbox": "Study Area Bounding Box",
+    "study_area_bboxes": "Part Bounding Boxes",
+    "study_area_polygons": "Study Area Polygons",
+    "study_area_clip_polygons": "Clip Polygons",
+    "chunks": "Processing Chunks",
+    "study_area_creation_status": "Creation Timings",
+    "ghsl_settlements": "GHSL Settlements",
+}
+
+
+class StudyAreaReport(BaseReport):
     """
     A class to generate a PDF report from a GeoPackage table of study area creation status data.
 
@@ -49,6 +44,12 @@ class StudyAreaReport:
             ValueError: If the layer cannot be loaded from the given file path.
             TypeError: If layer_input is neither a string nor a QgsVectorLayer.
         """
+        # Shares the analysis report cover (artwork + frosted title panel)
+        # so the two reports form a matched set.
+        template_path = resources_path("resources", "qpt", "analysis_summary_report_template.qpt")
+        super().__init__(template_path, report_name)
+
+        self.layers = None  # Will hold the loaded layers from the GeoPackage
 
         uri = f"{gpkg_path}|layername=study_area_creation_status"
         self.gpkg_path = gpkg_path
@@ -57,12 +58,15 @@ class StudyAreaReport:
             raise ValueError("Failed to load layer from the given file path.")
 
         self.report_name = report_name
-        self.layout = None  # Will hold the QgsLayout for the report
-        self.layers = self.load_layers_from_gpkg()
-        self.template_path = resources_path(
-            "resources", "qpt", f"study_area_report_template.qpt"
-        )
+        self.load_layers_from_gpkg()
         self.page_descriptions = {}
+        self.page_descriptions[
+            "summary"
+        ] = """
+        How long each step of the study area preparation took, followed by the
+        processed study area itself. Each internal data product used by the
+        analysis is described on the pages that follow.
+        """
         self.page_descriptions[
             "study_area_bbox"
         ] = """
@@ -73,7 +77,7 @@ class StudyAreaReport:
         self.page_descriptions[
             "study_area_bboxes"
         ] = """
-        The study area bboxes are a set of smaller bounding boxes that surround each 
+        The study area bboxes are a set of smaller bounding boxes that surround each
         polygon in the study area. They are grid aligned such that the origin and
         furthest corners are guaranteed to be a factor of the analysis dimension
         apart.
@@ -81,13 +85,13 @@ class StudyAreaReport:
         self.page_descriptions[
             "study_area_polygons"
         ] = """
-        The study area polygons are the single part form of all polygons in the 
+        The study area polygons are the single part form of all polygons in the
         study area. Any invalid geometries will have been discarded.
         """
         self.page_descriptions[
             "study_area_grid"
         ] = """
-        The study area grid is a set of polygon squares that each have the 
+        The study area grid is a set of polygon squares that each have the
         x and y dimension of the analysis cell size. They are guaranteed to
         be aligned to the study area bbox and bboxes layers. The grid is used
         to create a version of the study_area_polygons that have been expanded
@@ -116,71 +120,81 @@ class StudyAreaReport:
         ] = """
         The study area creation status is a record of the time taken to process each part of the study area.
         """
+        self.page_descriptions[
+            "ghsl_settlements"
+        ] = """
+        The Global Human Settlement Layer is used to identify settled areas within the study region. Study area polygons are marked with whether they intersect GHSL settlement data, which is used in various analysis workflows.
+        """
+        self._cleanup_done = False
 
-    def __del__(self):
-        """
-        Destructor to clean up layers from the QGIS project.
-        """
-        for layer_name, layer in self.layers.items():
-            if layer:
-                del layer
-                log_message(f"Layer '{layer_name}' deleted.")
+    def __enter__(self):
+        """Context manager entry."""
+        return self
 
-    def load_layers_from_gpkg(self):
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - ensures cleanup happens."""
+        self.cleanup()
+        return False  # Don't suppress exceptions
+
+    def cleanup(self):
         """
-        Load all vector layers from the specified GeoPackage.
+        Explicitly clean up layers. Call this when done with the report,
+        or use the context manager pattern.
+        """
+        if self._cleanup_done:
+            return
+        if self.layers:
+            for layer_name, layer in self.layers.items():
+                if layer and layer.isValid():
+                    try:
+                        QgsProject.instance().removeMapLayer(layer.id())
+                        log_message(f"Layer '{layer_name}' removed from project.")
+                    except Exception as e:
+                        log_message(f"Could not remove layer '{layer_name}': {e}")
+            self.layers = None
+        self._cleanup_done = True
+
+    def compute_ghsl_statistics(self):
+        """
+        Compute GHSL intersection statistics from the study_area_polygons layer.
 
         Returns:
-            dict: A dictionary mapping layer names to QgsVectorLayer objects.
+            dict: A dictionary containing 'total', 'intersects', 'percentage', and 'has_ghsl'.
+                  Returns None if GHSL data is not available.
         """
-        layers = {}
-        # Create a temporary layer to access the data provider
-        temp_layer = QgsVectorLayer(self.gpkg_path, "temp", "ogr")
-        if not temp_layer.isValid():
-            log_message(f"Failed to load GeoPackage: {self.gpkg_path}")
-            self.layers = []
-            return layers
+        uri = f"{self.gpkg_path}|layername=study_area_polygons"
+        layer = QgsVectorLayer(uri, "study_area_polygons", "ogr")
 
-        # Retrieve subLayers information
-        sub_layers = temp_layer.dataProvider().subLayers()
-        for sub_layer in sub_layers:
-            # sub_layer is a string in the format "layer_id!!::!!layer_name"
-            log_message(f"Loading layer: {sub_layer}")
-            parts = sub_layer.split("!!::!!")
-            layer_id = parts[0]
-            layer_name = parts[1]
-            uri = f"{self.gpkg_path}|layername={layer_name}"
-            layer = QgsVectorLayer(uri, layer_name, "ogr")
-            if layer.isValid():
-                layers[layer_name] = layer
-            else:
-                log_message(f"Failed to load layer: {layer_name}")
-        self.layers = layers  # For cleanup in dtor
-        return layers
+        if not layer.isValid():
+            return None
 
-    def compute_statistics(self, layer):
-        """
-        Compute summary statistics for a given vector layer.
+        # Check if intersects_ghsl field exists
+        field_names = [field.name() for field in layer.fields()]
+        if "intersects_ghsl" not in field_names:
+            return None
 
-        Parameters:
-            layer (QgsVectorLayer): The vector layer to analyze.
-
-        Returns:
-            dict: A dictionary containing summary statistics.
-        """
-        area_counts = defaultdict(int)
         total_count = 0
+        intersects_count = 0
 
-        for feature in layer.getFeatures():
-            area_name = feature["area_name"]
-            area_counts[area_name] += 1
+        for feat in layer.getFeatures():
             total_count += 1
+            intersects_ghsl = feat["intersects_ghsl"]
+            if intersects_ghsl == 1:
+                intersects_count += 1
 
-        return {"area_counts": dict(area_counts), "total_count": total_count}
+        if total_count == 0:
+            return None
 
-    def compute_study_area_creation_statistics(
-        self, field_name="geom_total_duration_secs"
-    ):
+        percentage = (intersects_count / total_count) * 100
+
+        return {
+            "total": total_count,
+            "intersects": intersects_count,
+            "percentage": percentage,
+            "has_ghsl": True,
+        }
+
+    def compute_study_area_creation_statistics(self, field_name="geom_total_duration_secs"):
         """
         Compute statistical summary for a given field in the layer.
 
@@ -218,269 +232,164 @@ class StudyAreaReport:
             "std_dev": std_dev,
         }
 
+    def add_ghsl_info_to_page(self, current_page, y: float = 214):
+        """Add GHSL statistics and attribution as a styled panel.
+
+        Parameters:
+            current_page (int): The page number where the GHSL info should be added.
+            y (float): Top of the panel in mm.
+        """
+        ghsl_stats = self.compute_ghsl_statistics()
+        if not ghsl_stats:
+            return
+        panel_h = 42
+        self._rect(MARGIN, y, CONTENT_W, panel_h, MIST, current_page)
+        self._rect(MARGIN, y, 2.2, panel_h, CYAN, current_page)
+        self._label(
+            "Settlement coverage",
+            MARGIN + 8,
+            y + 4.5,
+            CONTENT_W - 16,
+            7,
+            current_page,
+            size=12,
+            color=NAVY,
+            bold=True,
+        )
+        self._label(
+            f"<p>{ghsl_stats['intersects']} of {ghsl_stats['total']} study area parts "
+            f"({ghsl_stats['percentage']:.1f}%) intersect GHSL settlement data.<br/>"  # noqa E231
+            "Source: Copernicus / EC JRC — GHS-SMOD R2023A, licensed CC BY 4.0.</p>",
+            MARGIN + 8,
+            y + 13,
+            CONTENT_W - 16,
+            panel_h - 17,
+            current_page,
+            size=9.5,
+            color=CHARCOAL,
+            html=True,
+        )
+
+    def make_summary_page(self, current_page: int) -> int:
+        """Add the summary page: creation statistics as stat cards over a map.
+
+        Returns the next free page number.
+        """
+        self.make_page(
+            title="Study Area Summary",
+            description_key="summary",
+            current_page=current_page,
+            show_header_and_footer=True,
+        )
+        stats = self.compute_study_area_creation_statistics()
+        cards = [
+            (f"{stats['count']}", "Parts processed"),
+            (f"{stats['sum']:.1f} s", "Total processing time"),  # noqa E231
+            (f"{stats['mean']:.1f} s", "Average per part"),  # noqa E231
+            (f"{stats['min']:.1f} s", "Fastest part"),  # noqa E231
+            (f"{stats['max']:.1f} s", "Slowest part"),  # noqa E231
+            (f"{stats['std_dev']:.1f} s", "Standard deviation"),  # noqa E231
+        ]
+        card_w = 56
+        card_h = 24
+        gap = (CONTENT_W - 3 * card_w) / 2
+        top = HEADER_H + 26
+        for i, (value, caption) in enumerate(cards):
+            x = MARGIN + (i % 3) * (card_w + gap)
+            y = top + (i // 3) * (card_h + 6)
+            self._rect(x, y, card_w, card_h, MIST, current_page)
+            self._rect(x, y, card_w, 1.4, CYAN, current_page)
+            self._label(
+                value,
+                x,
+                y + 4,
+                card_w,
+                10,
+                current_page,
+                size=15,
+                color=NAVY,
+                bold=True,
+                halign=Qt.AlignmentFlag.AlignHCenter,
+            )
+            self._label(
+                caption,
+                x,
+                y + 15.5,
+                card_w,
+                6,
+                current_page,
+                size=8,
+                color=GREY,
+                halign=Qt.AlignmentFlag.AlignHCenter,
+            )
+        polygons_layer = self.layers.get("study_area_polygons")
+        if polygons_layer:
+            self.make_map(
+                layers=[polygons_layer],
+                crs=polygons_layer.crs(),
+                current_page=current_page,
+                x=MARGIN,
+                y=top + 2 * card_h + 14,
+                map_width_mm=CONTENT_W,
+                map_height_mm=160,
+            )
+        return current_page + 1
+
     def create_layout(self):
         """
-        Create a QGIS layout (report) that includes a title and a label with summary statistics.
+        Create a QGIS layout (report) with a styled cover, credits, a summary
+        page, and one page per internal data product.
 
         The layout is stored in the attribute self.layout.
         """
         project = QgsProject.instance()
         self.layout = QgsLayout(project)
         self.layout.initializeDefaults()
+        self.load_template()
+        self.style_cover_page()
 
-        self.layout.initializeDefaults()
+        self.make_credits_page(current_page=1)
+        current_page = self.make_summary_page(current_page=2)
 
-        # Load the QPT template
-        try:
-            with open(self.template_path, "r") as template_file:
-                template_content = template_file.read()
-        except IOError:
-            raise FileNotFoundError(
-                f"Template file '{self.template_path}' not found or cannot be read."
+        # One page per remaining layer. The grid is skipped (too many
+        # features to render); the polygons layer is the summary page's map.
+        layers_to_skip = {"study_area_grid", "study_area_polygons"}
+        for layer_name, layer in self.layers.items():
+            if layer_name in layers_to_skip:
+                log_message(f"Skipping layer '{layer_name}' in report")
+                continue
+            title = LAYER_DISPLAY_NAMES.get(layer_name, layer_name.replace("_", " ").title())
+            self.make_page(
+                title=title,
+                description_key=layer_name,
+                current_page=current_page,
+                show_header_and_footer=True,
             )
-
-        document = QDomDocument()
-        if not document.setContent(template_content):
-            raise ValueError(
-                f"Failed to parse the template content from '{self.template_path}'."
-            )
-
-        context = QgsReadWriteContext()
-        if not self.layout.loadFromTemplate(document, context):
-            raise ValueError(
-                f"Failed to load the template into the layout from '{self.template_path}'."
-            )
-
-        # Compute statistics and add a summary label
-        stats = self.compute_study_area_creation_statistics()
-        summary_text = (
-            f"Total parts: {stats['count']}\n"
-            f"Minimum processing time: {stats['min']:.3f} sec\n"
-            f"Maximum processing time: {stats['max']:.3f} sec\n"
-            f"Average processing time: {stats['mean']:.3f} sec\n"
-            f"Total processing time: {stats['sum']:.3f} sec\n"
-            f"Standard Deviation: {stats['std_dev']:.3f} sec"
-        )
-        summary_label = QgsLayoutItemLabel(self.layout)
-        summary_label.setText(summary_text)
-        summary_label.setFont(QFont("Arial", 12))
-        summary_label.adjustSizeToText()
-        summary_label.attemptMove(
-            QgsLayoutPoint(80, 200, QgsUnitTypes.LayoutMillimeters), page=0
-        )
-        self.layout.addLayoutItem(summary_label)
-
-        # Compute and add summary statistics for each layer on separate pages
-        current_page = 1
-        for page_number, (layer_name, layer) in enumerate(self.layers.items()):
-            # Add a new page for each layer
-            page = QgsLayoutItemPage(self.layout)
-            page.setPageSize("A4", QgsLayoutItemPage.Portrait)
-            self.layout.pageCollection().addPage(page)
-            # Add a title label
-            title = QgsLayoutItemLabel(self.layout)
-            # Put title in title case
-            title_text = layer_name.replace("_", " ").title()
-            title.setText(title_text)
-            title.setFont(QFont("Arial", 20))
-            title.setFixedSize(QgsLayoutSize(200, 40, QgsUnitTypes.LayoutMillimeters))
-            title.attemptMove(
-                QgsLayoutPoint(20, 20, QgsUnitTypes.LayoutMillimeters),
-                page=current_page,
-            )
-            self.layout.addLayoutItem(title)
-            # Compute statistics for the current layer
-            try:
-                summary_text = f"Layer: {layer_name}\n"
-                stats = self.compute_statistics(layer)
-                # feature_count = 0
-                # for area_name, count in stats["area_counts"].items():
-                #    feature_count += count
-                summary_text += f"Total count: {stats['total_count']} features"
-            except Exception as e:
-                log_message(f"Error computing statistics for layer '{layer_name}': {e}")
-
-            description_text = self.page_descriptions.get(layer_name, "")
-            # Add description label to the current page
-            description_label = QgsLayoutItemLabel(self.layout)
-            description_label.setText(description_text)
-            description_label.setFont(QFont("Arial", 12))
-            description_label.adjustSizeToText()
-            description_label.setMode(QgsLayoutItemLabel.ModeHtml)
-
-            # Position the label on the current page
-            description_label.attemptMove(
-                QgsLayoutPoint(20, 40, QgsUnitTypes.LayoutMillimeters),
-                page=current_page,
-            )
-            description_label.setFixedSize(
-                QgsLayoutSize(80, 40, QgsUnitTypes.LayoutMillimeters)
-            )
-            description_label.setHAlign(Qt.AlignJustify)
-            self.layout.addLayoutItem(description_label)
-
-            # Add summary label to the current page
-            summary_label = QgsLayoutItemLabel(self.layout)
-            summary_label.setText(summary_text)
-            summary_label.setFont(QFont("Arial", 12))
-            summary_label.adjustSizeToText()
-            # Position the label on the current page
-            summary_label.attemptMove(
-                QgsLayoutPoint(120, 60, QgsUnitTypes.LayoutMillimeters),
-                page=current_page,
-            )
-            self.layout.addLayoutItem(summary_label)
-
-            # Add a map item for the current layer
-            map_item = QgsLayoutItemMap(self.layout)
-            map_item.setLayers([layer])
-            map_item.attemptMove(
-                QgsLayoutPoint(20, 110, QgsUnitTypes.LayoutMillimeters),
-                page=current_page,
-            )
-            map_width_mm = 170
-            map_height_mm = 100
-            map_item.attemptResize(
-                # 170mm width x 100mm height
-                QgsLayoutSize(
-                    map_width_mm, map_height_mm, QgsUnitTypes.LayoutMillimeters
+            if layer_name == "study_area_creation_status":
+                self.make_text_table(
+                    vector_layer=layer,
+                    sort_column="geom_total_duration_secs",
+                    current_page=current_page,
                 )
-            )
-            # if the extent does not have the same aspect ratio as
-            # the map item, the extent will be expanded to fit the map item
-            # Calculate the aspect ratio of the map item
-            map_aspect_ratio = map_width_mm / map_height_mm
-            # ---------------------------
-            # Set up a grid over the map
-            # ---------------------------
-            # Create a new map grid for the map item
-            grid = QgsLayoutItemMapGrid("Grid 1", map_item)
-            grid.setEnabled(True)
-            grid.setCrs(QgsCoordinateReferenceSystem("EPSG:4326"))
-
-            # Specify that the grid is a graticule (i.e. based on geographic coordinates)
-            # grid.setGridType(QgsLayoutItemMapGrid.Graticule)
-
-            # Define a grid interval of 1 degree.
-            grid.setIntervalX(1)
-            grid.setIntervalY(1)
-
-            grid.setAnnotationDirection(
-                QgsLayoutItemMapGrid.Vertical, QgsLayoutItemMapGrid.Bottom
-            )
-            grid.setAnnotationDirection(
-                QgsLayoutItemMapGrid.Vertical, QgsLayoutItemMapGrid.Top
-            )
-
-            # (Optional) Enable and configure annotations for the grid lines
-            grid.setAnnotationEnabled(True)
-            # Example format: degrees and minutes (you can customize this format as needed)
-            # grid.setAnnotationFormat("dd° mm'")
-
-            # Add the grid to the map item. The map_item.grids() returns a list;
-            # append our configured grid to it.
-            map_item.grids().addGrid(grid)
-
-            # If needed, refresh or update your layout to see the grid applied.
-
-            # Get the current extent of the layer
-            layer_extent = layer.extent()
-
-            # Calculate the aspect ratio of the layer's extent
-            layer_aspect_ratio = layer_extent.width() / layer_extent.height()
-
-            # Initialize variables for the new extent
-            new_extent = QgsRectangle(layer_extent)
-
-            # Adjust the extent to match the map item's aspect ratio
-            if layer_aspect_ratio > map_aspect_ratio:
-                # Layer is wider than the map item; adjust height
-                new_height = layer_extent.width() / map_aspect_ratio
-                height_diff = new_height - layer_extent.height()
-                new_extent.setYMinimum(layer_extent.yMinimum() - height_diff / 2)
-                new_extent.setYMaximum(layer_extent.yMaximum() + height_diff / 2)
+            elif layer_name == "ghsl_settlements":
+                self.make_map(
+                    layers=[layer],
+                    crs=layer.crs(),
+                    current_page=current_page,
+                    x=MARGIN,
+                    y=64,
+                    map_width_mm=CONTENT_W,
+                    map_height_mm=140,
+                )
+                self.add_ghsl_info_to_page(current_page)
             else:
-                # Layer is taller than the map item; adjust width
-                new_width = layer_extent.height() * map_aspect_ratio
-                width_diff = new_width - layer_extent.width()
-                new_extent.setXMinimum(layer_extent.xMinimum() - width_diff / 2)
-                new_extent.setXMaximum(layer_extent.xMaximum() + width_diff / 2)
-
-            # Set the new extent to the map item
-            map_item.setExtent(new_extent)
-
-            map_item.refresh()
-            self.layout.addLayoutItem(map_item)
-            # Add a black frame around the map item
-            map_item.setFrameEnabled(True)
-            map_item.setFrameStrokeColor(QColor(0, 0, 0))
-            map_item.setFrameStrokeWidth(QgsLayoutMeasurement(0.5))
-            # Add the page footer
-            self.add_header_and_footer(page_number=current_page)
+                self.make_map(
+                    layers=[layer],
+                    crs=layer.crs(),
+                    current_page=current_page,
+                    x=MARGIN,
+                    y=64,
+                    map_width_mm=CONTENT_W,
+                    map_height_mm=195,
+                )
             current_page += 1
-
-    def add_header_and_footer(self, page_number):
-        """_summary_
-
-        Args:
-            page_number (_type_): _description_
-        """
-        footer_text = """
-         <p>This plugin is built with support from the <strong>Canada Clean Energy and 
-         Forest Climate Facility (CCEFCF)</strong>, the <strong>Geospatial Operational 
-         Support Team (GOST, DECSC)</strong> for the project Geospatial Assessment of 
-         Women Employment and Business Opportunities in the Renewable Energy Sector. 
-         This project is open source; you can download the code at 
-         <a href="https://github.com/worldbank/GEEST">https://github.com/worldbank/GEEST</a>.</p>
-"""
-        credits_text = """Developed by <a href="https://kartoza.com">Kartoza</a> for and 
-        with The World Bank."""
-        # Add summary label to the current page
-        footer_label = QgsLayoutItemLabel(self.layout)
-        footer_label.setText(footer_text)
-        footer_label.setFont(QFont("Arial", 8))
-        footer_label.setFixedSize(
-            QgsLayoutSize(160, 40, QgsUnitTypes.LayoutMillimeters)
-        )
-        # Use html mode
-        footer_label.setMode(QgsLayoutItemLabel.ModeHtml)
-        # Position the label on the current page
-        footer_label.attemptMove(
-            QgsLayoutPoint(20, 270, QgsUnitTypes.LayoutMillimeters), page=page_number
-        )
-        footer_label.setHAlign(Qt.AlignJustify)
-        self.layout.addLayoutItem(footer_label)
-
-        # Add credits label to the current page
-        credits_label = QgsLayoutItemLabel(self.layout)
-        credits_label.setText(credits_text)
-        credits_label.setFont(QFont("Arial", 8))
-        credits_label.setFixedSize(
-            QgsLayoutSize(160, 40, QgsUnitTypes.LayoutMillimeters)
-        )
-        # Use html mode
-        credits_label.setMode(QgsLayoutItemLabel.ModeHtml)
-        # Position the label on the current page
-        credits_label.attemptMove(
-            QgsLayoutPoint(20, 288, QgsUnitTypes.LayoutMillimeters), page=page_number
-        )
-        credits_label.setHAlign(Qt.AlignCenter)
-        self.layout.addLayoutItem(credits_label)
-
-    def export_pdf(self, output_path):
-        """
-        Export the current layout as a PDF file in raster mode.
-
-        Parameters:
-            output_path (str): The full file path (including filename) for the output PDF.
-
-        Returns:
-            bool: True if the export was successful, False otherwise.
-        """
-        if self.layout is None:
-            self.create_layout()
-        export_settings = QgsLayoutExporter.PdfExportSettings()
-        export_settings.rasterizeWholeImage = True
-        exporter = QgsLayoutExporter(self.layout)
-        result = exporter.exportToPdf(output_path, export_settings)
-        return result == QgsLayoutExporter.Success

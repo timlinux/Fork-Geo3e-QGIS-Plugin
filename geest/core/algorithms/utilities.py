@@ -1,50 +1,54 @@
+# -*- coding: utf-8 -*-
+"""📦 Utilities module.
+
+This module contains functionality for utilities.
+"""
+
 import os
 import shutil
-from qgis.core import (
-    QgsProcessingException,
-    QgsCoordinateReferenceSystem,
-    QgsGeometry,
-    QgsFeature,
-    QgsWkbTypes,
-    QgsVectorLayer,
-    QgsRasterLayer,
-    Qgis,
-    QgsProcessingFeedback,
-)
+from typing import Optional
+
 from qgis import processing
+from qgis.core import (  # QgsWkbTypes,
+    Qgis,
+    QgsCoordinateReferenceSystem,
+    QgsFeature,
+    QgsGeometry,
+    QgsProcessingException,
+    QgsProcessingFeedback,
+    QgsRasterLayer,
+    QgsVectorLayer,
+)
+
 from geest.utilities import log_message
 
 
 # Call QGIS process to assign a CRS to a layer
-def assign_crs_to_raster_layer(
-    layer: QgsRasterLayer, crs: QgsCoordinateReferenceSystem
-) -> QgsVectorLayer:
+def assign_crs_to_raster_layer(layer: QgsRasterLayer, crs: QgsCoordinateReferenceSystem) -> QgsRasterLayer:
     """
-    Assigns a CRS to a layer and returns the layer.
+    Assigns a CRS to a raster layer and returns the layer.
 
     Args:
-        layer: The layer to assign the CRS to.
-        crs: The CRS to assign to the layer.
+        layer (QgsRasterLayer): The raster layer to assign the CRS to.
+        crs (QgsCoordinateReferenceSystem): The CRS to assign to the layer.
 
     Returns:
-        The layer with the assigned CRS.
+        QgsRasterLayer: The layer with the assigned CRS.
     """
     processing.run("gdal:assignprojection", {"INPUT": layer, "CRS": crs})
     return layer
 
 
-def assign_crs_to_vector_layer(
-    layer: QgsVectorLayer, crs: QgsCoordinateReferenceSystem
-) -> QgsVectorLayer:
+def assign_crs_to_vector_layer(layer: QgsVectorLayer, crs: QgsCoordinateReferenceSystem) -> QgsVectorLayer:
     """
-    Assigns a CRS to a layer and returns the layer.
+    Assigns a CRS to a vector layer and returns the layer.
 
     Args:
-        layer: The layer to assign the CRS to.
-        crs: The CRS to assign to the layer.
+        layer (QgsVectorLayer): The vector layer to assign the CRS to.
+        crs (QgsCoordinateReferenceSystem): The CRS to assign to the layer.
 
     Returns:
-        The layer with the assigned CRS.
+        QgsVectorLayer: The layer with the assigned CRS.
     """
     output = processing.run(
         "native:assignprojection",
@@ -63,30 +67,31 @@ def subset_vector_layer(
     Select features from the features layer that intersect with the given area geometry.
 
     Args:
+        workflow_directory (str): Directory to save output files.
         features_layer (QgsVectorLayer): The input features layer.
         area_geom (QgsGeometry): The current area geometry for which intersections are evaluated.
         output_prefix (str): A name for the output temporary layer to store selected features.
 
     Returns:
-        QgsVectorLayer: A new temporary layer containing features that intersect with the given area geometry.
+        QgsVectorLayer: A new temporary layer containing features that intersect with the given area geometry, or None if input layer is invalid.
     """
-    if type(features_layer) != QgsVectorLayer:
+    if type(features_layer) is not QgsVectorLayer:
         return None
-    log_message(f"subset_vector_layer Select Features Started")
+    log_message("subset_vector_layer Select Features Started")
     output_path = os.path.join(workflow_directory, f"{output_prefix}.shp")
 
     # Get the WKB type (geometry type) of the input layer (e.g., Point, LineString, Polygon)
-    geometry_type = features_layer.wkbType()
+    # geometry_type = features_layer.wkbType()
 
-    # Determine geometry type name based on input layer's geometry
-    if QgsWkbTypes.geometryType(geometry_type) == QgsWkbTypes.PointGeometry:
-        geometry_name = "Point"
-    elif QgsWkbTypes.geometryType(geometry_type) == QgsWkbTypes.LineGeometry:
-        geometry_name = "LineString"
-    elif QgsWkbTypes.geometryType(geometry_type) == QgsWkbTypes.PolygonGeometry:
-        geometry_name = "Polygon"
-    else:
-        raise QgsProcessingException(f"Unsupported geometry type: {geometry_type}")
+    # # Determine geometry type name based on input layer's geometry
+    # if QgsWkbTypes.geometryType(geometry_type) == QgsWkbTypes.GeometryType.PointGeometry:
+    #     geometry_name = "Point"
+    # elif QgsWkbTypes.geometryType(geometry_type) == QgsWkbTypes.GeometryType.LineGeometry:
+    #     geometry_name = "LineString"
+    # elif QgsWkbTypes.geometryType(geometry_type) == QgsWkbTypes.GeometryType.PolygonGeometry:
+    #     geometry_name = "Polygon"
+    # else:
+    #     raise QgsProcessingException(f"Unsupported geometry type: {geometry_type}")
 
     params = {
         "INPUT": features_layer,
@@ -101,30 +106,46 @@ def subset_vector_layer(
 
 def geometry_to_memory_layer(
     geometry: QgsGeometry, target_crs: QgsCoordinateReferenceSystem, layer_name: str
-):
+) -> QgsVectorLayer:
     """
     Convert a QgsGeometry to a memory layer.
 
     Args:
         geometry (QgsGeometry): The polygon geometry to convert.
-        target_crs (QgsCoordinateReferenceSystem): The CRS to assign to the memory layer
+        target_crs (QgsCoordinateReferenceSystem): The CRS to assign to the memory layer.
         layer_name (str): The name to assign to the memory layer.
 
     Returns:
         QgsVectorLayer: The memory layer containing the geometry.
+
+    Raises:
+        ValueError: If geometry is None, empty, or invalid.
     """
+    # Validate geometry before creating layer
+    if geometry is None:
+        raise ValueError("Cannot create memory layer from None geometry")
+    if geometry.isEmpty():
+        raise ValueError("Cannot create memory layer from empty geometry")
+    if not geometry.isGeosValid():
+        # Try to fix invalid geometry
+        geometry = geometry.makeValid()
+        if not geometry.isGeosValid():
+            raise ValueError("Cannot create memory layer from invalid geometry that could not be fixed")
+
     memory_layer = QgsVectorLayer("Polygon", layer_name, "memory")
     memory_layer.setCrs(target_crs)
     feature = QgsFeature()
     feature.setGeometry(geometry)
     memory_layer.dataProvider().addFeatures([feature])
-    memory_layer.commitChanges()
+    # Note: commitChanges() not needed when using dataProvider().addFeatures() directly
+    # as this bypasses the editing buffer
+    memory_layer.updateExtents()
     return memory_layer
 
 
 def check_and_reproject_layer(
     features_layer: QgsVectorLayer, target_crs: QgsCoordinateReferenceSystem
-):
+) -> QgsVectorLayer:
     """
     Checks if the features layer has valid geometries and the expected CRS.
 
@@ -139,7 +160,8 @@ def check_and_reproject_layer(
     Returns:
         QgsVectorLayer: The input layer, either reprojected or unchanged.
 
-    Note: Also updates self.features_layer to point to the reprojected layer.
+    Raises:
+        QgsProcessingException: If layer has no CRS or reprojected layer is invalid.
     """
     # check if the layer has a valid CRS
     if not features_layer.crs().isValid():
@@ -156,7 +178,7 @@ def check_and_reproject_layer(
     if fixed_features_layer.crs() != target_crs:
         log_message(
             f"Reprojecting layer from {fixed_features_layer.crs().authid()} to {target_crs.authid()}",
-            tag="Geest",
+            tag="GeoE3",
             level=Qgis.Info,
         )
         reproject_result = processing.run(
@@ -182,24 +204,24 @@ def combine_rasters_to_vrt(
     rasters: list,
     target_crs: QgsCoordinateReferenceSystem,
     vrt_filepath: str,
-    source_qml: str = None,
-) -> None:
+    source_qml: str = Optional[None],
+) -> str:
     """
     Combine all the rasters into a single VRT file.
 
     Args:
-        rasters: The rasters to combine into a VRT.
-        target_crs: The CRS to assign to the VRT.
-        vrt_filepath: The full path of the output VRT file to create.
-        source_qml: The source QML file to apply to the VRT.
+        rasters (list): The rasters to combine into a VRT.
+        target_crs (QgsCoordinateReferenceSystem): The CRS to assign to the VRT.
+        vrt_filepath (str): The full path of the output VRT file to create.
+        source_qml (str): The source QML file to apply to the VRT. Defaults to None.
 
     Returns:
-        vrtpath (str): The file path to the VRT file.
+        str: The file path to the VRT file, or None if no valid rasters found.
     """
     if not rasters:
         log_message(
             "No valid raster layers found to combine into VRT.",
-            tag="Geest",
+            tag="GeoE3",
             level=Qgis.Warning,
         )
         return
@@ -212,14 +234,14 @@ def combine_rasters_to_vrt(
         else:
             log_message(
                 f"Skipping invalid or non-existent raster: {raster}",
-                tag="Geest",
+                tag="GeoE3",
                 level=Qgis.Warning,
             )
 
     if not checked_rasters:
         log_message(
             "No valid raster layers found to combine into VRT.",
-            tag="Geest",
+            tag="GeoE3",
             level=Qgis.Warning,
         )
         return

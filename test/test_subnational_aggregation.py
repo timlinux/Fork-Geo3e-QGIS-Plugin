@@ -1,14 +1,10 @@
+# -*- coding: utf-8 -*-
 import os
 import unittest
-from qgis.core import (
-    QgsVectorLayer,
-    QgsProcessingContext,
-    QgsFeedback,
-)
-from geest.core.tasks import (
-    StudyAreaProcessingTask,
-)  # Adjust the import path as necessary
+
+from qgis.core import QgsFeedback, QgsProcessingContext
 from utilities_for_testing import prepare_fixtures
+
 from geest.core.algorithms import SubnationalAggregationProcessingTask
 
 
@@ -27,13 +23,11 @@ class TestSubnationalAggregationProcessingTask(unittest.TestCase):
             "subnational_aggregation",
             "subnational_aggregation.gpkg|layername=subnational_aggregation",
         )
-        cls.study_area_gpkg_path = os.path.join(
-            cls.working_directory, "study_area", "study_area.gpkg"
-        )
+        cls.study_area_gpkg_path = os.path.join(cls.working_directory, "study_area", "study_area.gpkg")
 
     def setUp(self):
         self.task = SubnationalAggregationProcessingTask(
-            # geest_raster_path=f"{self.working_directory}/wee_masked_0.tif",
+            # geoe3_raster_path=f"{self.working_directory}/wee_masked_0.tif",
             # pop_raster_path=f"{self.working_directory}/population/reclassified_0.tif",
             study_area_gpkg_path=self.study_area_gpkg_path,
             aggregation_areas_path=self.aggregation_areas_path,
@@ -51,6 +45,4 @@ class TestSubnationalAggregationProcessingTask(unittest.TestCase):
 
     def test_run_task(self):
         result = self.task.run()
-        self.assertTrue(
-            result, msg=f"Subnational Aggregation failed in {self.working_directory}"
-        )
+        self.assertTrue(result, msg=f"Subnational Aggregation failed in {self.working_directory}")

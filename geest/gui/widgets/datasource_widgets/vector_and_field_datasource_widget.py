@@ -1,24 +1,28 @@
-import os
-from qgis.PyQt.QtWidgets import (
-    QLineEdit,
-    QToolButton,
-    QFileDialog,
-)
-from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtCore import QSettings, Qt
+# -*- coding: utf-8 -*-
+"""📦 Vector And Field Datasource Widget module.
 
-from qgis.gui import QgsMapLayerComboBox, QgsFieldComboBox
+This module contains functionality for vector and field datasource widget.
+"""
+
+import os
+from urllib.parse import quote, unquote
+
 from qgis.core import (
+    Qgis,
+    QgsFieldProxyModel,
     QgsMapLayerProxyModel,
     QgsProject,
-    QgsFieldProxyModel,
     QgsVectorLayer,
     QgsWkbTypes,
-    Qgis,
 )
+from qgis.gui import QgsFieldComboBox, QgsMapLayerComboBox
+from qgis.PyQt.QtCore import QSettings, Qt
+from qgis.PyQt.QtGui import QIcon
+from qgis.PyQt.QtWidgets import QFileDialog, QLineEdit, QStyle, QToolButton
+
+from geest.utilities import log_message, resources_path
 
 from .base_datasource_widget import BaseDataSourceWidget
-from geest.utilities import log_message, resources_path
 
 
 class VectorAndFieldDataSourceWidget(BaseDataSourceWidget):
@@ -39,29 +43,23 @@ class VectorAndFieldDataSourceWidget(BaseDataSourceWidget):
             self.layer_combo = QgsMapLayerComboBox()
             filter = None
             if self.attributes.get("use_classify_polygon_into_classes", 0):
-                filter = QgsMapLayerProxyModel.PolygonLayer
+                filter = QgsMapLayerProxyModel.Filter.PolygonLayer
             elif self.attributes.get("use_classify_safety_polygon_into_classes", 0):
-                filter = QgsMapLayerProxyModel.PolygonLayer
+                filter = QgsMapLayerProxyModel.Filter.PolygonLayer
             else:
-                filter = QgsMapLayerProxyModel.PointLayer
+                filter = QgsMapLayerProxyModel.Filter.PointLayer
 
             self.layer_combo = QgsMapLayerComboBox()
             self.layer_combo.setFilters(filter)
             self.layer_combo.setAllowEmptyLayer(True)
             # Insert placeholder text at the top (only visually, not as a selectable item)
             self.layer_combo.setCurrentIndex(-1)  # Ensure no selection initially
-            self.layer_combo.setEditable(
-                True
-            )  # Make editable temporarily for placeholder
-            self.layer_combo.lineEdit().setPlaceholderText(
-                "Select item"
-            )  # Add placeholder text
+            self.layer_combo.setEditable(True)  # Make editable temporarily for placeholder
+            self.layer_combo.lineEdit().setPlaceholderText("Select item")  # Add placeholder text
 
             # Disable editing after setting placeholder (ensures only layer names are selectable)
             self.layer_combo.lineEdit().setReadOnly(True)
-            self.layer_combo.setEditable(
-                False
-            )  # Lock back to non-editable after setting placeholder
+            self.layer_combo.setEditable(False)  # Lock back to non-editable after setting placeholder
 
             self.layout.addWidget(self.layer_combo)
 
@@ -81,14 +79,12 @@ class VectorAndFieldDataSourceWidget(BaseDataSourceWidget):
             clear_icon = QIcon(resources_path("resources", "icons", "clear.svg"))
             self.clear_button.setIcon(clear_icon)
             self.clear_button.setToolTip("Clear")
-            self.clear_button.setCursor(Qt.ArrowCursor)
+            self.clear_button.setCursor(Qt.CursorShape.ArrowCursor)
             self.clear_button.setStyleSheet("border: 0px; padding: 0px;")
             self.clear_button.clicked.connect(self.clear_shapefile)
             self.clear_button.setVisible(False)
 
-            self.shapefile_line_edit.textChanged.connect(
-                lambda text: self.clear_button.setVisible(bool(text))
-            )
+            self.shapefile_line_edit.textChanged.connect(lambda text: self.clear_button.setVisible(bool(text)))
             self.shapefile_line_edit.textChanged.connect(self.resize_clear_button)
 
             # Add a button to select a shapefile
@@ -96,9 +92,7 @@ class VectorAndFieldDataSourceWidget(BaseDataSourceWidget):
             self.shapefile_button.setText("...")
             self.shapefile_button.clicked.connect(self.select_shapefile)
             if self.attributes.get(f"{self.widget_key}_shapefile", False):
-                self.shapefile_line_edit.setText(
-                    self.attributes[f"{self.widget_key}_shapefile"]
-                )
+                self.shapefile_line_edit.setText(unquote(self.attributes[f"{self.widget_key}_shapefile"]))
                 self.shapefile_line_edit.setVisible(True)
                 self.layer_combo.setVisible(False)
             else:
@@ -113,12 +107,8 @@ class VectorAndFieldDataSourceWidget(BaseDataSourceWidget):
             if self.attributes.get("id", None) == "Street_Lights":
                 field_type = QgsFieldProxyModel.String
             self.field_selection_combo = QgsFieldComboBox()
-            self.field_selection_combo.setFilters(
-                field_type
-            )  # Filter for numeric fields
-            self.field_selection_combo.setEnabled(
-                False
-            )  # Disable initially until a layer is selected
+            self.field_selection_combo.setFilters(field_type)  # Filter for numeric fields
+            self.field_selection_combo.setEnabled(False)  # Disable initially until a layer is selected
             # self.field_selection_combo.setMinimumWidth(150)  # Set a reasonable minimum width
             # self.field_selection_combo.setSizeAdjustPolicy(QgsFieldComboBox.AdjustToContents)
             self.layout.addWidget(self.field_selection_combo)
@@ -131,9 +121,7 @@ class VectorAndFieldDataSourceWidget(BaseDataSourceWidget):
             self.shapefile_line_edit.textChanged.connect(self.update_field_combo)
 
             # Connect the field combo box to update the attributes when a field is selected
-            self.field_selection_combo.currentIndexChanged.connect(
-                self.update_selected_field
-            )
+            self.field_selection_combo.currentIndexChanged.connect(self.update_selected_field)
 
             self.update_field_combo()  # Populate fields for the initially selected layer
 
@@ -157,28 +145,27 @@ class VectorAndFieldDataSourceWidget(BaseDataSourceWidget):
         """Reposition the clear button when the line edit is resized."""
         log_message("Resizing clear button")
         # Position the clear button inside the line edit
-        frame_width = self.shapefile_line_edit.style().pixelMetric(
-            self.shapefile_line_edit.style().PM_DefaultFrameWidth
-        )
+        frame_width = self.shapefile_line_edit.style().pixelMetric(QStyle.PixelMetric.PM_DefaultFrameWidth)
         self.shapefile_line_edit.setStyleSheet(
-            f"QLineEdit {{ padding-right: {self.clear_button.sizeHint().width() + frame_width}px; }}"
+            f"QLineEdit {{ padding-right: {self.clear_button.sizeHint().width() + frame_width}px; }}"  # noqa E702,E202,E201
         )
         sz = self.clear_button.sizeHint()
-        self.clear_button.move(
-            self.shapefile_line_edit.width() - sz.width() - frame_width - 5, 6
-        )
+        self.clear_button.move(self.shapefile_line_edit.width() - sz.width() - frame_width - 5, 6)
 
     def select_shapefile(self):
         """
-        Opens a file dialog to select a shapefile and stores the last directory in QSettings.
+        Opens a file dialog to select a vector file and stores the last directory in QSettings.
         """
         try:
             settings = QSettings()
-            last_dir = settings.value("Geest/lastShapefileDir", "")
+            last_dir = settings.value("GeoE3/lastShapefileDir", "")
 
-            # Open file dialog to select a shapefile
+            # Open file dialog to select a vector file
             file_path, _ = QFileDialog.getOpenFileName(
-                self, "Select Shapefile", last_dir, "Shapefiles (*.shp)"
+                self,
+                "Select Vector File",
+                last_dir,
+                "GeoPackage and Shapefiles (*.gpkg *.shp);;GeoPackage (*.gpkg);;Shapefiles (*.shp)",
             )
 
             if file_path:
@@ -191,7 +178,7 @@ class VectorAndFieldDataSourceWidget(BaseDataSourceWidget):
                 # Trigger resize event explicitly
                 self.resizeEvent(None)
                 # Save the directory of the selected file to QSettings
-                settings.setValue("Geest/lastShapefileDir", os.path.dirname(file_path))
+                settings.setValue("GeoE3/lastShapefileDir", os.path.dirname(file_path))
 
         except Exception as e:
             log_message(f"Error selecting shapefile: {e}", level=Qgis.Critical)
@@ -215,25 +202,24 @@ class VectorAndFieldDataSourceWidget(BaseDataSourceWidget):
         """
         try:
             # Store the currently selected field
-            previous_field = self.settings.value(
-                f"{self.widget_key}_selected_field", None
-            )
+            previous_field = self.settings.value(f"{self.widget_key}_selected_field", None)
 
             vector_layer = QgsVectorLayer(shapefile_path, "layer", "ogr")
             if not vector_layer.isValid():
                 log_message(f"Failed to load shapefile: {shapefile_path}")
                 return
 
-            # Set the vector layer on the field selection combo box, which will automatically populate it
-            QgsProject.instance().addMapLayer(vector_layer, False)
+            # Set the vector layer on the field selection combo box, which
+            # will automatically populate it. Keep a python reference so the
+            # layer outlives this method — registering it in the project
+            # (the previous approach) orphaned a legend-less layer in the
+            # registry on every shapefile selection.
+            self._field_source_layer = vector_layer
             self.field_selection_combo.setLayer(vector_layer)
             self.field_selection_combo.setEnabled(True)  # Enable once layer is valid
 
             # Reapply the previously selected field if it exists
-            if (
-                previous_field
-                and self.field_selection_combo.findText(previous_field) != -1
-            ):
+            if previous_field and self.field_selection_combo.findText(previous_field) != -1:  # noqa E503  # noqa E503
                 self.field_selection_combo.setCurrentText(previous_field)
 
         except Exception as e:
@@ -243,45 +229,86 @@ class VectorAndFieldDataSourceWidget(BaseDataSourceWidget):
         """
         Updates the selected field in the attributes dictionary when the field selection changes.
         """
-        if not self.field_selection_combo.isEnabled():
-            self.attributes[f"{self.widget_key}_selected_field"] = None
+        try:
+            if not self.field_selection_combo.isEnabled():
+                self.attributes[f"{self.widget_key}_selected_field"] = None
+                self.data_changed.emit(self.attributes)
+                return
+
+            selected_field = (self.field_selection_combo.currentText() or "").strip()
+            self.attributes[f"{self.widget_key}_selected_field"] = selected_field
+            if not selected_field:
+                self.data_changed.emit(self.attributes)
+                return
+
+            # Store the selected field in QSettings
+            self.settings.setValue(f"{self.widget_key}_selected_field", selected_field)
+            if self._supports_unique_value_mapping():
+                vector_layer = self._resolve_layer_for_unique_values()
+                values_dict = {}
+
+                if vector_layer is not None:
+                    fields = vector_layer.fields()
+                    if fields is not None:
+                        idx = fields.indexOf(selected_field)
+                        if idx >= 0:
+                            values = vector_layer.uniqueValues(idx)
+                            # Keep string keys only to avoid QVariant/empty-row artifacts.
+                            for value in values:
+                                if isinstance(value, str):
+                                    values_dict[value] = None
+
+                # Preserve existing values if they exist
+                existing_values = self.attributes.get(f"{self.widget_key}_unique_values", {})
+
+                for key in values_dict.keys():
+                    if key not in existing_values:
+                        values_dict[key] = None
+                    else:
+                        values_dict[key] = existing_values[key]
+                log_message(f"Existing values: {existing_values}")
+                log_message(f"New      values: {values_dict}")
+                # will drop any keys in the json item that are not in values_dict
+                self.attributes[f"{self.widget_key}_unique_values"] = values_dict
             self.data_changed.emit(self.attributes)
+        except (RuntimeError, AttributeError):
+            # Can occur while dialog widgets/layers are being destroyed during close.
             return
 
-        selected_field = self.field_selection_combo.currentText()
-        self.attributes[f"{self.widget_key}_selected_field"] = selected_field
+    def _supports_unique_value_mapping(self) -> bool:
+        """Return True when this widget should maintain unique value mappings."""
+        return (
+            self.attributes.get("id", None) == "Street_Lights"
+            or bool(self.attributes.get("use_classify_polygon_into_classes", 0))
+            or bool(self.attributes.get("use_classify_safety_polygon_into_classes", 0))
+        )
 
-        # Store the selected field in QSettings
-        self.settings.setValue(f"{self.widget_key}_selected_field", selected_field)
-        if self.attributes.get("id", None) == "Street_Lights":
-            # retrieve the unique values for the selected field
+    def _resolve_layer_for_unique_values(self):
+        """Resolve the layer used to derive unique values.
+
+        Priority:
+        1. Active layer selected in combo box.
+        2. Vector file path set in shapefile line edit.
+        """
+        try:
             vector_layer = self.layer_combo.currentLayer()
-            idx = vector_layer.fields().indexOf(selected_field)
-            values = vector_layer.uniqueValues(idx)
-            values_dict = {}
+        except RuntimeError:
+            return None
+        if vector_layer:
+            return vector_layer
 
-            #  list the data type of each value
-            for value in values:
-                # log_message(f"{type(value)} value {value}")
-                # Dont remove this! It cleans to contents to remove QVariants
-                # introduced from empty table rows!
-                if isinstance(value, str):
-                    values_dict[value] = None
-            # Preserve existing values if they exist
-            existing_values = self.attributes.get(
-                f"{self.widget_key}_unique_values", {}
-            )
+        try:
+            shapefile_path = unquote(self.shapefile_line_edit.text()).strip()
+        except RuntimeError:
+            return None
+        if not shapefile_path:
+            return None
 
-            for key in values_dict.keys():
-                if key not in existing_values:
-                    values_dict[key] = None
-                else:
-                    values_dict[key] = existing_values[key]
-            log_message(f"Existing values: {existing_values}")
-            log_message(f"New      values: {values_dict}")
-            # will drop any keys in the json item that are not in values_dict
-            self.attributes[f"{self.widget_key}_unique_values"] = values_dict
-        self.data_changed.emit(self.attributes)
+        vector_layer = QgsVectorLayer(shapefile_path, "layer", "ogr")
+        if not vector_layer.isValid():
+            log_message(f"Failed to load vector file for unique value extraction: {shapefile_path}", level=Qgis.Warning)
+            return None
+        return vector_layer
 
     def update_field_combo(self) -> None:
         """
@@ -318,19 +345,11 @@ class VectorAndFieldDataSourceWidget(BaseDataSourceWidget):
         else:
             self.attributes[f"{self.widget_key}_layer_name"] = layer.name()
             self.attributes[f"{self.widget_key}_layer_source"] = layer.source()
-            self.attributes[f"{self.widget_key}_layer_provider_type"] = (
-                layer.providerType()
-            )
-            self.attributes[f"{self.widget_key}_layer_crs"] = (
-                layer.crs().authid()
-            )  # Coordinate Reference System
-            self.attributes[f"{self.widget_key}_layer_wkb_type"] = (
-                QgsWkbTypes.displayString(layer.wkbType())
+            self.attributes[f"{self.widget_key}_layer_provider_type"] = layer.providerType()
+            self.attributes[f"{self.widget_key}_layer_crs"] = layer.crs().authid()  # Coordinate Reference System
+            self.attributes[f"{self.widget_key}_layer_wkb_type"] = QgsWkbTypes.displayString(
+                layer.wkbType()
             )  # Geometry type (e.g., Point, Polygon)
-            self.attributes[f"{self.widget_key}_layer_id"] = (
-                layer.id()
-            )  # Unique ID of the layer
-        self.attributes[f"{self.widget_key}_shapefile"] = (
-            self.shapefile_line_edit.text()
-        )
+            self.attributes[f"{self.widget_key}_layer_id"] = layer.id()  # Unique ID of the layer
+        self.attributes[f"{self.widget_key}_shapefile"] = quote(self.shapefile_line_edit.text())
         self.data_changed.emit(self.attributes)

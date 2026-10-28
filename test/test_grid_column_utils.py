@@ -1,0 +1,1058 @@
+# -*- coding: utf-8 -*-
+"""Tests for key-based grid column write utilities."""
+
+import os
+import shutil
+import tempfile
+import unittest
+from unittest import mock
+
+from osgeo import ogr
+
+from geest.core.grid_column_utils import (
+    _ensure_column_exists,
+    add_model_columns_to_grid,
+    clear_grid_column,
+    clear_grid_columns,
+    get_aggregate_column_names,
+    populated_area_names,
+    rasterize_grid_column,
+    write_aggregation_to_grid,
+    write_joined_values_to_grid,
+    write_percentage_scores_to_grid,
+    write_spatial_join_to_grid,
+)
+
+
+class TestWriteJoinedValuesToGrid(unittest.TestCase):
+    """Validate direct key join writes from external GPKG into study_area_grid."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp(prefix="test_grid_join_")
+        self.main_gpkg = os.path.join(self.temp_dir, "study_area.gpkg")
+        self.source_gpkg = os.path.join(self.temp_dir, "s2s.gpkg")
+
+        self._create_study_area_grid()
+        self._create_source_layer()
+
+    def tearDown(self):
+        if os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+
+    def _create_study_area_grid(self):
+        driver = ogr.GetDriverByName("GPKG")
+        dataset = driver.CreateDataSource(self.main_gpkg)
+        layer = dataset.CreateLayer("study_area_grid", geom_type=ogr.wkbPolygon)
+        layer.CreateField(ogr.FieldDefn("h3_index", ogr.OFTString))
+        layer.CreateField(ogr.FieldDefn("area_name", ogr.OFTString))
+
+        layer_defn = layer.GetLayerDefn()
+        for hex_id, area_name in [
+            ("h3_a", "Area 1"),
+            ("h3_b", "Area 1"),
+            ("h3_c", "Area 2"),
+        ]:
+            feature = ogr.Feature(layer_defn)
+            feature.SetField("h3_index", hex_id)
+            feature.SetField("area_name", area_name)
+            layer.CreateFeature(feature)
+
+        dataset = None
+
+    def _create_source_layer(self):
+        driver = ogr.GetDriverByName("GPKG")
+        dataset = driver.CreateDataSource(self.source_gpkg)
+        layer = dataset.CreateLayer("s2s_nighttime_lights", geom_type=ogr.wkbPoint)
+        layer.CreateField(ogr.FieldDefn("hex_id", ogr.OFTString))
+        layer.CreateField(ogr.FieldDefn("sum_viirs_ntl_2024", ogr.OFTReal))
+
+        layer_defn = layer.GetLayerDefn()
+        for hex_id, value in [
+            ("h3_a", 10.5),
+            ("h3_b", 20.5),
+            ("h3_extra", 999.0),
+        ]:
+            feature = ogr.Feature(layer_defn)
+            feature.SetField("hex_id", hex_id)
+            feature.SetField("sum_viirs_ntl_2024", value)
+            layer.CreateFeature(feature)
+
+        dataset = None
+
+    def _read_grid_values(self, column_name):
+        dataset = ogr.Open(self.main_gpkg, 0)
+        layer = dataset.GetLayerByName("study_area_grid")
+        values = {}
+        for feature in layer:
+            values[feature.GetField("h3_index")] = feature.GetField(column_name)
+        dataset = None
+        return values
+
+    def test_write_joined_values_to_grid_updates_matching_rows(self):
+        updated_count = write_joined_values_to_grid(
+            gpkg_path=self.main_gpkg,
+            column_name="nighttime_lights",
+            source_gpkg=self.source_gpkg,
+            source_layer="s2s_nighttime_lights",
+            source_key_field="hex_id",
+            target_key_field="h3_index",
+            source_value_field="sum_viirs_ntl_2024",
+        )
+
+        self.assertEqual(updated_count, 2)
+        values = self._read_grid_values("nighttime_lights")
+        self.assertAlmostEqual(values["h3_a"], 10.5)
+        self.assertAlmostEqual(values["h3_b"], 20.5)
+        self.assertIsNone(values["h3_c"])
+
+    def test_write_joined_values_to_grid_respects_area_filter(self):
+        updated_count = write_joined_values_to_grid(
+            gpkg_path=self.main_gpkg,
+            column_name="nighttime_lights",
+            source_gpkg=self.source_gpkg,
+            source_layer="s2s_nighttime_lights",
+            source_key_field="hex_id",
+            target_key_field="h3_index",
+            source_value_field="sum_viirs_ntl_2024",
+            area_name="Area 1",
+        )
+
+        self.assertEqual(updated_count, 2)
+        values = self._read_grid_values("nighttime_lights")
+        self.assertAlmostEqual(values["h3_a"], 10.5)
+        self.assertAlmostEqual(values["h3_b"], 20.5)
+        self.assertIsNone(values["h3_c"])
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class TestWriteBufferValuesToGrid(unittest.TestCase):
+    """Buffer-to-grid scoring must survive invalid geometries and CRS drift.
+
+    Field regression: scored isochrone hulls (frequently self-intersecting)
+    produced 'Found 0 grid cells with intersecting buffers' on strict GEOS
+    builds, writing 0 into every cell while the run reported success.
+    """
+
+    ORIGIN_X = 700000.0
+    ORIGIN_Y = 1516000.0
+    CELL = 1000.0
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp(prefix="test_grid_buffer_")
+        self.main_gpkg = os.path.join(self.temp_dir, "study_area.gpkg")
+        driver = ogr.GetDriverByName("GPKG")
+        dataset = driver.CreateDataSource(self.main_gpkg)
+        from osgeo import osr
+
+        srs = osr.SpatialReference()
+        srs.ImportFromEPSG(32620)
+        layer = dataset.CreateLayer("study_area_grid", srs, geom_type=ogr.wkbPolygon)
+        layer.CreateField(ogr.FieldDefn("area_name", ogr.OFTString))
+        layer_defn = layer.GetLayerDefn()
+        for row in range(2):
+            for col in range(2):
+                x0 = self.ORIGIN_X + col * self.CELL
+                y0 = self.ORIGIN_Y + row * self.CELL
+                ring = ogr.Geometry(ogr.wkbLinearRing)
+                for px, py in [
+                    (x0, y0),
+                    (x0 + self.CELL, y0),
+                    (x0 + self.CELL, y0 + self.CELL),
+                    (x0, y0 + self.CELL),
+                    (x0, y0),
+                ]:
+                    ring.AddPoint(px, py)
+                polygon = ogr.Geometry(ogr.wkbPolygon)
+                polygon.AddGeometry(ring)
+                feature = ogr.Feature(layer_defn)
+                feature.SetField("area_name", "test_area")
+                feature.SetGeometry(polygon)
+                layer.CreateFeature(feature)
+        dataset = None
+
+    def tearDown(self):
+        if os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+
+    def _scored_cells(self, column):
+        dataset = ogr.Open(self.main_gpkg, 0)
+        layer = dataset.GetLayerByName("study_area_grid")
+        values = [feature.GetField(column) for feature in layer]
+        dataset = None
+        return values
+
+    def _buffer_layer(self, wkt, crs="EPSG:32620"):
+        from qgis.core import QgsFeature, QgsGeometry, QgsVectorLayer
+
+        layer = QgsVectorLayer(f"Polygon?crs={crs}&field=value:integer", "buffers", "memory")
+        feature = QgsFeature(layer.fields())
+        feature.setAttribute("value", 5)
+        feature.setGeometry(QgsGeometry.fromWkt(wkt))
+        layer.dataProvider().addFeature(feature)
+        layer.updateExtents()
+        return layer
+
+    def test_invalid_bowtie_buffer_is_repaired_and_scores_cells(self):
+        from geest.core.grid_column_utils import write_buffer_values_to_grid
+
+        x0, y0 = self.ORIGIN_X, self.ORIGIN_Y
+        x1, y1 = x0 + 2 * self.CELL, y0 + 2 * self.CELL
+        # Self-intersecting hourglass spanning the whole grid
+        bowtie = f"POLYGON(({x0} {y0}, {x1} {y1}, {x1} {y0}, {x0} {y1}, {x0} {y0}))"
+        layer = self._buffer_layer(bowtie)
+        self.assertFalse(next(layer.getFeatures()).geometry().isGeosValid(), "fixture must be invalid")
+
+        updated = write_buffer_values_to_grid(self.main_gpkg, "bowtie_col", layer)
+        self.assertGreater(updated, 0, "invalid buffer geometry must be repaired, not silently score nothing")
+        self.assertIn(5.0, self._scored_cells("bowtie_col"))
+
+    def test_mismatched_crs_buffer_is_reprojected(self):
+        from qgis.core import (
+            QgsCoordinateReferenceSystem,
+            QgsCoordinateTransform,
+            QgsGeometry,
+            QgsProject,
+            QgsRectangle,
+        )
+
+        from geest.core.grid_column_utils import write_buffer_values_to_grid
+
+        rect = QgsRectangle(self.ORIGIN_X, self.ORIGIN_Y, self.ORIGIN_X + 2 * self.CELL, self.ORIGIN_Y + 2 * self.CELL)
+        transform = QgsCoordinateTransform(
+            QgsCoordinateReferenceSystem("EPSG:32620"),
+            QgsCoordinateReferenceSystem("EPSG:4326"),
+            QgsProject.instance(),
+        )
+        rect4326 = transform.transformBoundingBox(rect)
+        wkt = QgsGeometry.fromRect(rect4326).asWkt()
+        layer = self._buffer_layer(wkt, crs="EPSG:4326")
+
+        updated = write_buffer_values_to_grid(self.main_gpkg, "crs_col", layer)
+        self.assertGreater(updated, 0, "a 4326 buffer over a 32620 grid must be reprojected, not score nothing")
+        self.assertIn(5.0, self._scored_cells("crs_col"))
+
+
+class TestWriteBufferValuesToGridMultiBand(unittest.TestCase):
+    """Regression tests for the band-descending MAX shortcut.
+
+    write_buffer_values_to_grid() processes MAX-aggregated bands
+    score-descending, dropping each matched cell from consideration before
+    testing the next (lower-scoring) band - safe only because every caller
+    builds bands from increasing distance thresholds, so a farther band's
+    area is always a superset of a closer one's. These tests prove: (1)
+    the shortcut doesn't let a wide, low-scoring band overwrite a cell a
+    narrower, high-scoring band already claimed, and (2) MIN/AVG - which
+    need every intersecting band, not just the best one - still consider
+    bands this shortcut would otherwise skip.
+    """
+
+    ORIGIN_X = 700000.0
+    ORIGIN_Y = 1516000.0
+    CELL = 1000.0
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp(prefix="test_grid_buffer_multiband_")
+        self.main_gpkg = os.path.join(self.temp_dir, "study_area.gpkg")
+        driver = ogr.GetDriverByName("GPKG")
+        dataset = driver.CreateDataSource(self.main_gpkg)
+        from osgeo import osr
+
+        srs = osr.SpatialReference()
+        srs.ImportFromEPSG(32620)
+        layer = dataset.CreateLayer("study_area_grid", srs, geom_type=ogr.wkbPolygon)
+        layer_defn = layer.GetLayerDefn()
+        # A 2x2 grid: cell (0, 0) is the near band's only target; the far
+        # band covers all four cells.
+        for row in range(2):
+            for col in range(2):
+                x0 = self.ORIGIN_X + col * self.CELL
+                y0 = self.ORIGIN_Y + row * self.CELL
+                ring = ogr.Geometry(ogr.wkbLinearRing)
+                for px, py in [
+                    (x0, y0),
+                    (x0 + self.CELL, y0),
+                    (x0 + self.CELL, y0 + self.CELL),
+                    (x0, y0 + self.CELL),
+                    (x0, y0),
+                ]:
+                    ring.AddPoint(px, py)
+                polygon = ogr.Geometry(ogr.wkbPolygon)
+                polygon.AddGeometry(ring)
+                feature = ogr.Feature(layer_defn)
+                feature.SetGeometry(polygon)
+                layer.CreateFeature(feature)
+        dataset = None
+
+    def tearDown(self):
+        if os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+
+    def _scored_cells(self, column):
+        dataset = ogr.Open(self.main_gpkg, 0)
+        layer = dataset.GetLayerByName("study_area_grid")
+        values = sorted(feature.GetField(column) for feature in layer)
+        dataset = None
+        return values
+
+    def _near_and_far_bands(self):
+        """Near band covers only the interior of cell (0, 0) - inset from
+        the cell's edges so it doesn't *touch* (and thus, under GEOS/OGC
+        semantics, "intersect") the neighbouring cells it shares a
+        boundary with - scored 5; far band covers the whole 2x2 grid,
+        scored 2 - mirroring real isochrone bands, where a farther
+        distance's reachable area is a superset of a closer one's."""
+        from qgis.core import QgsFeature, QgsGeometry, QgsVectorLayer
+
+        layer = QgsVectorLayer("Polygon?crs=EPSG:32620&field=value:integer", "buffers", "memory")
+        provider = layer.dataProvider()
+
+        inset = self.CELL / 10
+        near_wkt = (
+            f"POLYGON(({self.ORIGIN_X + inset} {self.ORIGIN_Y + inset}, "
+            f"{self.ORIGIN_X + self.CELL - inset} {self.ORIGIN_Y + inset}, "
+            f"{self.ORIGIN_X + self.CELL - inset} {self.ORIGIN_Y + self.CELL - inset}, "
+            f"{self.ORIGIN_X + inset} {self.ORIGIN_Y + self.CELL - inset}, "
+            f"{self.ORIGIN_X + inset} {self.ORIGIN_Y + inset}))"
+        )
+        far_wkt = (
+            f"POLYGON(({self.ORIGIN_X} {self.ORIGIN_Y}, {self.ORIGIN_X + 2 * self.CELL} {self.ORIGIN_Y}, "
+            f"{self.ORIGIN_X + 2 * self.CELL} {self.ORIGIN_Y + 2 * self.CELL}, "
+            f"{self.ORIGIN_X} {self.ORIGIN_Y + 2 * self.CELL}, {self.ORIGIN_X} {self.ORIGIN_Y}))"
+        )
+
+        near_feature = QgsFeature(layer.fields())
+        near_feature.setAttribute("value", 5)
+        near_feature.setGeometry(QgsGeometry.fromWkt(near_wkt))
+
+        far_feature = QgsFeature(layer.fields())
+        far_feature.setAttribute("value", 2)
+        far_feature.setGeometry(QgsGeometry.fromWkt(far_wkt))
+
+        provider.addFeatures([near_feature, far_feature])
+        layer.updateExtents()
+        return layer
+
+    def test_max_keeps_the_near_bands_score_even_though_the_far_band_also_covers_it(self):
+        from geest.core.grid_column_utils import write_buffer_values_to_grid
+
+        layer = self._near_and_far_bands()
+
+        updated = write_buffer_values_to_grid(self.main_gpkg, "max_col", layer, aggregation_method="MAX")
+
+        self.assertEqual(updated, 4)
+        # Cell (0, 0) is covered by both bands - MAX must keep the near
+        # band's 5, not let the far band's 2 overwrite it once it's
+        # already been dropped from the remaining-cells set.
+        self.assertEqual(self._scored_cells("max_col"), [2.0, 2.0, 2.0, 5.0])
+
+    def test_min_still_considers_the_far_band_even_though_max_would_skip_it(self):
+        from geest.core.grid_column_utils import write_buffer_values_to_grid
+
+        layer = self._near_and_far_bands()
+
+        updated = write_buffer_values_to_grid(self.main_gpkg, "min_col", layer, aggregation_method="MIN")
+
+        self.assertEqual(updated, 4)
+        # Cell (0, 0) intersects both bands - MIN must see both scores
+        # (5 and 2) and keep the lower one, proving the far band wasn't
+        # skipped just because the near band matched first.
+        self.assertEqual(self._scored_cells("min_col"), [2.0, 2.0, 2.0, 2.0])
+
+    def test_avg_still_considers_the_far_band_even_though_max_would_skip_it(self):
+        from geest.core.grid_column_utils import write_buffer_values_to_grid
+
+        layer = self._near_and_far_bands()
+
+        updated = write_buffer_values_to_grid(self.main_gpkg, "avg_col", layer, aggregation_method="AVG")
+
+        self.assertEqual(updated, 4)
+        # Cell (0, 0) must average both intersecting bands' scores
+        # ((5 + 2) / 2 = 3.5); the other three cells see only the far
+        # band (2.0).
+        self.assertEqual(self._scored_cells("avg_col"), [2.0, 2.0, 2.0, 3.5])
+
+
+class TestRasterizeGridColumn(unittest.TestCase):
+    """A sliver area with no matching study_area_grid rows must be skipped.
+
+    Field regression: a tiny island fragment had no grid cells assigned to
+    it, but rasterize_grid_column still "succeeded" by falling back to the
+    full (unfiltered) grid extent - burning nothing and producing a
+    country-sized, all-nodata raster that later broke VRT generation
+    downstream. It must now refuse to rasterize and return False instead.
+    """
+
+    ORIGIN_X = 700000.0
+    ORIGIN_Y = 1516000.0
+    CELL = 1000.0
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp(prefix="test_grid_rasterize_")
+        self.main_gpkg = os.path.join(self.temp_dir, "study_area.gpkg")
+        driver = ogr.GetDriverByName("GPKG")
+        dataset = driver.CreateDataSource(self.main_gpkg)
+        from osgeo import osr
+
+        srs = osr.SpatialReference()
+        srs.ImportFromEPSG(32620)
+        layer = dataset.CreateLayer("study_area_grid", srs, geom_type=ogr.wkbPolygon)
+        layer.CreateField(ogr.FieldDefn("area_name", ogr.OFTString))
+        layer.CreateField(ogr.FieldDefn("score_col", ogr.OFTReal))
+        layer_defn = layer.GetLayerDefn()
+        x0, y0 = self.ORIGIN_X, self.ORIGIN_Y
+        ring = ogr.Geometry(ogr.wkbLinearRing)
+        for px, py in [
+            (x0, y0),
+            (x0 + self.CELL, y0),
+            (x0 + self.CELL, y0 + self.CELL),
+            (x0, y0 + self.CELL),
+            (x0, y0),
+        ]:
+            ring.AddPoint(px, py)
+        polygon = ogr.Geometry(ogr.wkbPolygon)
+        polygon.AddGeometry(ring)
+        feature = ogr.Feature(layer_defn)
+        feature.SetField("area_name", "normal_area")
+        feature.SetField("score_col", 2.0)
+        feature.SetGeometry(polygon)
+        layer.CreateFeature(feature)
+        dataset = None
+
+    def tearDown(self):
+        if os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+
+    def test_area_with_no_grid_cells_is_skipped_not_rasterized(self):
+        output_path = os.path.join(self.temp_dir, "sliver.tif")
+        ok = rasterize_grid_column(
+            gpkg_path=self.main_gpkg,
+            column_name="score_col",
+            output_raster_path=output_path,
+            cell_size=100.0,
+            extent=(self.ORIGIN_X, self.ORIGIN_Y, self.ORIGIN_X + 100.0, self.ORIGIN_Y + 100.0),
+            area_name="sliver_with_no_grid_cells",
+        )
+        self.assertFalse(ok, "rasterizing an area with zero matching grid cells must fail, not fall back silently")
+        self.assertFalse(os.path.exists(output_path))
+
+    def test_area_with_grid_cells_still_rasterizes(self):
+        output_path = os.path.join(self.temp_dir, "normal.tif")
+        ok = rasterize_grid_column(
+            gpkg_path=self.main_gpkg,
+            column_name="score_col",
+            output_raster_path=output_path,
+            cell_size=100.0,
+            extent=(self.ORIGIN_X, self.ORIGIN_Y, self.ORIGIN_X + self.CELL, self.ORIGIN_Y + self.CELL),
+            area_name="normal_area",
+        )
+        self.assertTrue(ok)
+        self.assertTrue(os.path.exists(output_path))
+
+    def test_area_name_unused_in_grid_still_rasterizes(self):
+        """A single, un-partitioned study area may leave area_name NULL on
+        every grid row while still naming the area itself (e.g. "none_part0").
+
+        Field regression: that legitimate case was indistinguishable from a
+        sliver with no grid cells, since both filter to zero matching rows -
+        it must rasterize from the whole (unfiltered) grid, not be skipped.
+        """
+        gpkg = os.path.join(self.temp_dir, "unpartitioned.gpkg")
+        driver = ogr.GetDriverByName("GPKG")
+        dataset = driver.CreateDataSource(gpkg)
+        from osgeo import osr
+
+        srs = osr.SpatialReference()
+        srs.ImportFromEPSG(32620)
+        layer = dataset.CreateLayer("study_area_grid", srs, geom_type=ogr.wkbPolygon)
+        layer.CreateField(ogr.FieldDefn("area_name", ogr.OFTString))
+        layer.CreateField(ogr.FieldDefn("score_col", ogr.OFTReal))
+        layer_defn = layer.GetLayerDefn()
+        x0, y0 = self.ORIGIN_X, self.ORIGIN_Y
+        ring = ogr.Geometry(ogr.wkbLinearRing)
+        for px, py in [
+            (x0, y0),
+            (x0 + self.CELL, y0),
+            (x0 + self.CELL, y0 + self.CELL),
+            (x0, y0 + self.CELL),
+            (x0, y0),
+        ]:
+            ring.AddPoint(px, py)
+        polygon = ogr.Geometry(ogr.wkbPolygon)
+        polygon.AddGeometry(ring)
+        feature = ogr.Feature(layer_defn)
+        feature.SetField("score_col", 3.0)  # area_name left NULL
+        feature.SetGeometry(polygon)
+        layer.CreateFeature(feature)
+        dataset = None
+
+        output_path = os.path.join(self.temp_dir, "unpartitioned.tif")
+        ok = rasterize_grid_column(
+            gpkg_path=gpkg,
+            column_name="score_col",
+            output_raster_path=output_path,
+            cell_size=100.0,
+            extent=(self.ORIGIN_X, self.ORIGIN_Y, self.ORIGIN_X + self.CELL, self.ORIGIN_Y + self.CELL),
+            area_name="none_part0",
+        )
+        self.assertTrue(ok, "area_name being unused in the grid must not be treated as a missing sliver")
+        self.assertTrue(os.path.exists(output_path))
+
+
+class TestWriteSpatialJoinToGrid(unittest.TestCase):
+    """write_spatial_join_to_grid was rewritten to build a QgsSpatialIndex
+
+    once over the (typically small) features layer instead of re-querying
+    it with SetSpatialFilter for every grid cell - the old per-cell
+    re-query was the dominant cost scaling with grid cell count
+    (worldbank/GeoE3#445: a 100x finer grid turned a 7-minute run into a
+    7.5-hour stall). These tests pin the observable behaviour so the
+    rewrite can't silently change results.
+    """
+
+    ORIGIN_X = 700000.0
+    ORIGIN_Y = 1516000.0
+    CELL = 1000.0
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp(prefix="test_grid_spatial_join_")
+        self.main_gpkg = os.path.join(self.temp_dir, "study_area.gpkg")
+        self.features_gpkg = os.path.join(self.temp_dir, "features.gpkg")
+        self._create_grid()
+
+    def tearDown(self):
+        if os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+
+    def _create_grid(self):
+        from osgeo import osr
+
+        driver = ogr.GetDriverByName("GPKG")
+        dataset = driver.CreateDataSource(self.main_gpkg)
+        srs = osr.SpatialReference()
+        srs.ImportFromEPSG(32620)
+        layer = dataset.CreateLayer("study_area_grid", srs, geom_type=ogr.wkbPolygon)
+        layer.CreateField(ogr.FieldDefn("area_name", ogr.OFTString))
+        layer.CreateField(ogr.FieldDefn("score_col", ogr.OFTReal))
+        layer_defn = layer.GetLayerDefn()
+        for row in range(2):
+            for col in range(2):
+                x0 = self.ORIGIN_X + col * self.CELL
+                y0 = self.ORIGIN_Y + row * self.CELL
+                ring = ogr.Geometry(ogr.wkbLinearRing)
+                for px, py in [
+                    (x0, y0),
+                    (x0 + self.CELL, y0),
+                    (x0 + self.CELL, y0 + self.CELL),
+                    (x0, y0 + self.CELL),
+                    (x0, y0),
+                ]:
+                    ring.AddPoint(px, py)
+                polygon = ogr.Geometry(ogr.wkbPolygon)
+                polygon.AddGeometry(ring)
+                feature = ogr.Feature(layer_defn)
+                feature.SetField("area_name", "test_area")
+                feature.SetGeometry(polygon)
+                layer.CreateFeature(feature)
+        dataset = None
+
+    def _create_features(self, scored_points, epsg=32620):
+        """Create a point features GPKG with a 'score' field.
+
+        Args:
+            scored_points: list of (x, y, score) tuples. Each point is
+                placed inside cell (0, 0) when x/y fall in its range.
+        """
+        from osgeo import osr
+
+        driver = ogr.GetDriverByName("GPKG")
+        dataset = driver.CreateDataSource(self.features_gpkg)
+        srs = osr.SpatialReference()
+        srs.ImportFromEPSG(epsg)
+        layer = dataset.CreateLayer("features", srs, geom_type=ogr.wkbPoint)
+        layer.CreateField(ogr.FieldDefn("score", ogr.OFTReal))
+        layer_defn = layer.GetLayerDefn()
+        for x, y, score in scored_points:
+            point = ogr.Geometry(ogr.wkbPoint)
+            point.AddPoint(x, y)
+            feature = ogr.Feature(layer_defn)
+            feature.SetField("score", score)
+            feature.SetGeometry(point)
+            layer.CreateFeature(feature)
+        dataset = None
+
+    def test_aggregation_methods(self):
+        # Two points inside cell (0,0): origin+100 and origin+200.
+        self._create_features(
+            [
+                (self.ORIGIN_X + 100, self.ORIGIN_Y + 100, 2.0),
+                (self.ORIGIN_X + 200, self.ORIGIN_Y + 200, 8.0),
+            ]
+        )
+        for method, expected in [
+            ("MAX", 8.0),
+            ("MIN", 2.0),
+            ("AVG", 5.0),
+            ("SUM", 10.0),
+            ("COUNT", 2.0),
+        ]:
+            updated = write_spatial_join_to_grid(
+                gpkg_path=self.main_gpkg,
+                column_name=f"score_{method.lower()}",
+                features_gpkg=self.features_gpkg,
+                features_layer="features",
+                score_expression="score",
+                aggregation_method=method,
+                save_buffers=False,
+            )
+            self.assertEqual(updated, 1, f"aggregation method {method} should update exactly 1 cell")
+            values = self._read_scores(f"score_{method.lower()}")
+            self.assertEqual(values.get((0, 0)), expected, f"{method} aggregation mismatch")
+            self.assertIsNone(values.get((1, 1)), f"{method}: untouched cell must stay NULL")
+
+    def test_callable_score_expression(self):
+        self._create_features([(self.ORIGIN_X + 100, self.ORIGIN_Y + 100, 1.0)])
+        constant = 4.5
+        updated = write_spatial_join_to_grid(
+            gpkg_path=self.main_gpkg,
+            column_name="score_col",
+            features_gpkg=self.features_gpkg,
+            features_layer="features",
+            score_expression=lambda feat: constant,
+            aggregation_method="MAX",
+            save_buffers=False,
+        )
+        self.assertEqual(updated, 1)
+        self.assertEqual(self._read_scores("score_col").get((0, 0)), constant)
+
+    def test_area_name_filter_restricts_to_one_area(self):
+        # Points inside both grid cells, but area_name filter should only
+        # touch cell (0,0) since that's the only one tagged 'test_area' in
+        # this fixture — exercising the same filter used per-area in production.
+        self._create_features(
+            [
+                (self.ORIGIN_X + 100, self.ORIGIN_Y + 100, 3.0),
+                (self.ORIGIN_X + 1100, self.ORIGIN_Y + 1100, 3.0),
+            ]
+        )
+        updated = write_spatial_join_to_grid(
+            gpkg_path=self.main_gpkg,
+            column_name="score_col",
+            features_gpkg=self.features_gpkg,
+            features_layer="features",
+            score_expression="score",
+            area_name="test_area",
+            aggregation_method="MAX",
+            save_buffers=False,
+        )
+        self.assertEqual(updated, 2, "both cells share area_name='test_area' in this fixture")
+
+    def test_no_intersecting_features_updates_nothing(self):
+        self._create_features([(self.ORIGIN_X - 10000, self.ORIGIN_Y - 10000, 9.0)])
+        updated = write_spatial_join_to_grid(
+            gpkg_path=self.main_gpkg,
+            column_name="score_col",
+            features_gpkg=self.features_gpkg,
+            features_layer="features",
+            score_expression="score",
+            aggregation_method="MAX",
+            save_buffers=False,
+        )
+        self.assertEqual(updated, 0)
+
+    def _read_scores(self, column):
+        dataset = ogr.Open(self.main_gpkg, 0)
+        layer = dataset.GetLayerByName("study_area_grid")
+        result = {}
+        for feature in layer:
+            geom = feature.GetGeometryRef()
+            x0, _x1, y0, _y1 = geom.GetEnvelope()
+            col = round((x0 - self.ORIGIN_X) / self.CELL)
+            row = round((y0 - self.ORIGIN_Y) / self.CELL)
+            result[(row, col)] = feature.GetField(column)
+        dataset = None
+        return result
+
+
+class TestWritePercentageScoresToGrid(unittest.TestCase):
+    """write_percentage_scores_to_grid gained a bbox pre-filter before the
+
+    expensive exact GEOS intersection (worldbank/GeoE3#445/#448) - these
+    tests confirm cells far from any buffer still correctly score 0 and
+    cells overlapping a buffer still score correctly, i.e. the fast-reject
+    path doesn't change results.
+    """
+
+    ORIGIN_X = 700000.0
+    ORIGIN_Y = 1516000.0
+    CELL = 1000.0
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp(prefix="test_grid_pct_")
+        self.main_gpkg = os.path.join(self.temp_dir, "study_area.gpkg")
+        driver = ogr.GetDriverByName("GPKG")
+        dataset = driver.CreateDataSource(self.main_gpkg)
+        from osgeo import osr
+
+        srs = osr.SpatialReference()
+        srs.ImportFromEPSG(32620)
+        layer = dataset.CreateLayer("study_area_grid", srs, geom_type=ogr.wkbPolygon)
+        layer.CreateField(ogr.FieldDefn("area_name", ogr.OFTString))
+        layer_defn = layer.GetLayerDefn()
+        # Two cells side by side: (0,0) will overlap the buffer, (0,1) (far
+        # to the east) will not.
+        for col, x0 in [(0, self.ORIGIN_X), (1, self.ORIGIN_X + 100 * self.CELL)]:
+            ring = ogr.Geometry(ogr.wkbLinearRing)
+            for px, py in [
+                (x0, self.ORIGIN_Y),
+                (x0 + self.CELL, self.ORIGIN_Y),
+                (x0 + self.CELL, self.ORIGIN_Y + self.CELL),
+                (x0, self.ORIGIN_Y + self.CELL),
+                (x0, self.ORIGIN_Y),
+            ]:
+                ring.AddPoint(px, py)
+            polygon = ogr.Geometry(ogr.wkbPolygon)
+            polygon.AddGeometry(ring)
+            feature = ogr.Feature(layer_defn)
+            feature.SetField("area_name", "test_area")
+            feature.SetGeometry(polygon)
+            layer.CreateFeature(feature)
+        dataset = None
+
+    def tearDown(self):
+        if os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+
+    def _buffer_layer_covering_cell_0(self):
+        from qgis.core import QgsFeature, QgsGeometry, QgsVectorLayer
+
+        layer = QgsVectorLayer("Polygon?crs=EPSG:32620", "buffers", "memory")
+        feature = QgsFeature(layer.fields())
+        # Fully covers cell (0,0): 100% intersection.
+        wkt = (
+            f"POLYGON(({self.ORIGIN_X} {self.ORIGIN_Y}, "
+            f"{self.ORIGIN_X + self.CELL} {self.ORIGIN_Y}, "
+            f"{self.ORIGIN_X + self.CELL} {self.ORIGIN_Y + self.CELL}, "
+            f"{self.ORIGIN_X} {self.ORIGIN_Y + self.CELL}, "
+            f"{self.ORIGIN_X} {self.ORIGIN_Y}))"
+        )
+        feature.setGeometry(QgsGeometry.fromWkt(wkt))
+        layer.dataProvider().addFeature(feature)
+        layer.updateExtents()
+        return layer
+
+    def _read_scores(self, column):
+        dataset = ogr.Open(self.main_gpkg, 0)
+        layer = dataset.GetLayerByName("study_area_grid")
+        result = {}
+        for feature in layer:
+            geom = feature.GetGeometryRef()
+            x0 = geom.GetEnvelope()[0]
+            col = round((x0 - self.ORIGIN_X) / self.CELL) if x0 < self.ORIGIN_X + 50 * self.CELL else 1
+            result[col] = feature.GetField(column)
+        dataset = None
+        return result
+
+    def test_overlapping_cell_scores_full_coverage_far_cell_scores_zero(self):
+        buffer_layer = self._buffer_layer_covering_cell_0()
+        updated = write_percentage_scores_to_grid(
+            gpkg_path=self.main_gpkg,
+            column_name="pct_col",
+            buffer_layer=buffer_layer,
+            percentage_scores={0: 0, 50: 3, 100: 5},
+        )
+        self.assertGreaterEqual(updated, 1)
+        scores = self._read_scores("pct_col")
+        self.assertEqual(scores.get(0), 5, "cell fully inside the buffer must score the top class")
+        self.assertEqual(scores.get(1), 0, "cell far from the buffer (rejected by the bbox pre-filter) must score 0")
+
+
+class TestWriteAggregationToGrid(unittest.TestCase):
+    """Regression test: an aggregated column must be visible to a FRESH connection.
+
+    write_aggregation_to_grid() used to close its dataset with plain
+    `ds = None` - no WAL checkpoint/FlushCache beforehand, unlike every
+    other grid-write function in this module. Under WAL mode, the UPDATE
+    itself commits fine, but a later reader opening its own connection
+    (QGIS reopening the project, this test's _read_grid_values helper, a
+    real run's downstream rasterization step) can still see the pre-update
+    NULL values if the WAL was never merged into the main .gpkg file.
+    Reading back through the SAME ogr.Dataset that did the write would not
+    catch this - it has to be a separate connection, like a real caller.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp(prefix="test_grid_aggregation_")
+        self.main_gpkg = os.path.join(self.temp_dir, "study_area.gpkg")
+
+        driver = ogr.GetDriverByName("GPKG")
+        dataset = driver.CreateDataSource(self.main_gpkg)
+        layer = dataset.CreateLayer("study_area_grid", geom_type=ogr.wkbPolygon)
+        layer.CreateField(ogr.FieldDefn("indicator_a", ogr.OFTReal))
+        layer.CreateField(ogr.FieldDefn("indicator_b", ogr.OFTReal))
+        layer.CreateField(ogr.FieldDefn("fac_example", ogr.OFTReal))
+
+        layer_defn = layer.GetLayerDefn()
+        for value_a, value_b in [(2.0, 4.0), (3.0, None), (None, None)]:
+            feature = ogr.Feature(layer_defn)
+            if value_a is not None:
+                feature.SetField("indicator_a", value_a)
+            if value_b is not None:
+                feature.SetField("indicator_b", value_b)
+            layer.CreateFeature(feature)
+        dataset = None
+
+    def tearDown(self):
+        if os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+
+    def _read_grid_values(self, column_name):
+        dataset = ogr.Open(self.main_gpkg, 0)
+        layer = dataset.GetLayerByName("study_area_grid")
+        values = [feature.GetField(column_name) for feature in layer]
+        dataset = None
+        return values
+
+    def test_aggregated_column_is_visible_from_a_fresh_connection(self):
+        result = write_aggregation_to_grid(
+            gpkg_path=self.main_gpkg,
+            target_column="fac_example",
+            source_columns_weights={"indicator_a": 0.5, "indicator_b": 0.5},
+        )
+
+        self.assertEqual(result, 0)
+        values = self._read_grid_values("fac_example")
+        self.assertEqual(len(values), 3)
+        self.assertTrue(all(v is not None for v in values), f"expected no NULLs, got {values}")
+        self.assertAlmostEqual(values[0], 0.5 * 2.0 + 0.5 * 4.0)
+        self.assertAlmostEqual(values[1], 0.5 * 3.0 + 0.5 * 0.0)
+        self.assertAlmostEqual(values[2], 0.0)
+
+
+class TestPopulatedAreaNames(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp(prefix="test_populated_area_names_")
+        self.gpkg_path = os.path.join(self.temp_dir, "study_area.gpkg")
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _make_grid(self, rows):
+        """rows: list of area_name values (None allowed) for one cell each."""
+        driver = ogr.GetDriverByName("GPKG")
+        dataset = driver.CreateDataSource(self.gpkg_path)
+        layer = dataset.CreateLayer("study_area_grid", geom_type=ogr.wkbPolygon)
+        layer.CreateField(ogr.FieldDefn("area_name", ogr.OFTString))
+        layer_defn = layer.GetLayerDefn()
+        for area_name in rows:
+            feature = ogr.Feature(layer_defn)
+            if area_name is not None:
+                feature.SetField("area_name", area_name)
+            layer.CreateFeature(feature)
+        dataset = None
+
+    def test_returns_only_areas_with_cells(self):
+        self._make_grid(["area_a", "area_a", "area_b"])
+
+        self.assertEqual(populated_area_names(self.gpkg_path), {"area_a", "area_b"})
+
+    def test_returns_none_when_area_name_is_entirely_null(self):
+        """A single, un-partitioned study area - callers must not filter."""
+        self._make_grid([None, None, None])
+
+        self.assertIsNone(populated_area_names(self.gpkg_path))
+
+    def test_returns_none_when_table_is_missing_entirely(self):
+        ogr.GetDriverByName("GPKG").CreateDataSource(self.gpkg_path)
+
+        self.assertIsNone(populated_area_names(self.gpkg_path))
+
+
+class TestEnsureColumnExistsRefusesBlankNames(unittest.TestCase):
+    """A blank/whitespace column name must never reach ogr.CreateField().
+
+    Regression test: worldbank/GeoE3 field report, 2026-10-23 - an item
+    with an empty/missing "id" attribute reached here and silently added a
+    permanent, unnamed, all-NULL column to study_area_grid.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp(prefix="test_ensure_column_exists_")
+        self.gpkg_path = os.path.join(self.temp_dir, "study_area.gpkg")
+        driver = ogr.GetDriverByName("GPKG")
+        dataset = driver.CreateDataSource(self.gpkg_path)
+        dataset.CreateLayer("study_area_grid", geom_type=ogr.wkbPolygon)
+        dataset = None
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _field_names(self):
+        dataset = ogr.Open(self.gpkg_path)
+        layer = dataset.GetLayerByName("study_area_grid")
+        layer_defn = layer.GetLayerDefn()
+        names = [layer_defn.GetFieldDefn(i).GetName() for i in range(layer_defn.GetFieldCount())]
+        dataset = None
+        return names
+
+    def test_empty_name_is_refused(self):
+        self.assertFalse(_ensure_column_exists(self.gpkg_path, ""))
+        self.assertEqual(self._field_names(), [])
+
+    def test_valid_name_still_creates_the_column(self):
+        self.assertTrue(_ensure_column_exists(self.gpkg_path, "some_indicator"))
+        self.assertEqual(self._field_names(), ["some_indicator"])
+
+
+class TestAddModelColumnsToGridSkipsBlankNames(unittest.TestCase):
+    """A blank entry in the model-derived column list must be skipped, not created.
+
+    get_all_column_names() is already guarded against emitting a blank
+    name from a real model.json (extract_model_ids() only appends
+    truthy ids), so this patches it directly to exercise
+    add_model_columns_to_grid()'s own defensive skip as a safety net.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp(prefix="test_add_model_columns_blank_")
+        self.gpkg_path = os.path.join(self.temp_dir, "study_area.gpkg")
+        self.model_path = os.path.join(self.temp_dir, "model.json")
+        driver = ogr.GetDriverByName("GPKG")
+        dataset = driver.CreateDataSource(self.gpkg_path)
+        dataset.CreateLayer("study_area_grid", geom_type=ogr.wkbPolygon)
+        dataset = None
+        with open(self.model_path, "w", encoding="utf-8") as f:
+            f.write("{}")
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _field_names(self):
+        dataset = ogr.Open(self.gpkg_path)
+        layer = dataset.GetLayerByName("study_area_grid")
+        layer_defn = layer.GetLayerDefn()
+        names = [layer_defn.GetFieldDefn(i).GetName() for i in range(layer_defn.GetFieldCount())]
+        dataset = None
+        return names
+
+    def test_blank_entry_is_skipped_but_valid_entries_are_still_added(self):
+        with mock.patch(
+            "geest.core.grid_column_utils.get_all_column_names",
+            return_value=["some_indicator", ""],
+        ):
+            self.assertTrue(add_model_columns_to_grid(self.gpkg_path, self.model_path))
+
+        self.assertEqual(self._field_names(), ["some_indicator"])
+
+
+class TestGetAggregateColumnNamesExcludesDeadColumns(unittest.TestCase):
+    """contextual_score/accessibility_score/place_characterization_score were
+    reserved but never implemented (confirmed via git history) - they must
+    not appear in the aggregate column list, and must not silently
+    reappear if someone re-adds them without checking.
+    """
+
+    def test_dead_score_columns_are_absent(self):
+        names = get_aggregate_column_names()
+
+        for dead_name in (
+            "contextual_score",
+            "accessibility_score",
+            "place_characterization_score",
+        ):
+            self.assertNotIn(dead_name, names)
+
+    def test_real_aggregate_columns_are_still_present(self):
+        names = get_aggregate_column_names()
+
+        for real_name in (
+            "geoe3",
+            "geoe3_by_population",
+            "geoe3_masked",
+            "geoe3_by_population_masked",
+            "opportunities_mask",
+        ):
+            self.assertIn(real_name, names)
+
+
+class TestClearGridColumns(unittest.TestCase):
+    """clear_grid_columns() - the batched sibling of clear_grid_column(),
+    used to clear the Analysis tree item's 5 own columns in one
+    open/transaction/WAL-checkpoint instead of 5 separate ones (see its
+    docstring for why that mattered: it's what made "Clear Item" on the
+    Analysis node noticeably slower than on any other role).
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp(prefix="test_clear_grid_columns_")
+        self.gpkg_path = os.path.join(self.temp_dir, "study_area.gpkg")
+        driver = ogr.GetDriverByName("GPKG")
+        dataset = driver.CreateDataSource(self.gpkg_path)
+        layer = dataset.CreateLayer("study_area_grid", geom_type=ogr.wkbPolygon)
+        layer.CreateField(ogr.FieldDefn("geoe3", ogr.OFTReal))
+        layer.CreateField(ogr.FieldDefn("geoe3_by_population", ogr.OFTReal))
+        layer.CreateField(ogr.FieldDefn("unrelated", ogr.OFTReal))
+
+        layer_defn = layer.GetLayerDefn()
+        for value in (1.0, 2.0, 3.0):
+            feature = ogr.Feature(layer_defn)
+            feature.SetField("geoe3", value)
+            feature.SetField("geoe3_by_population", value * 10)
+            feature.SetField("unrelated", value * 100)
+            layer.CreateFeature(feature)
+        dataset = None
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _column_values(self, column_name):
+        dataset = ogr.Open(self.gpkg_path, 0)
+        layer = dataset.GetLayerByName("study_area_grid")
+        values = [feature.GetField(column_name) for feature in layer]
+        dataset = None
+        return values
+
+    def test_clears_every_listed_column_across_every_row(self):
+        result = clear_grid_columns(self.gpkg_path, ["geoe3", "geoe3_by_population"])
+
+        self.assertTrue(result)
+        self.assertEqual(self._column_values("geoe3"), [None, None, None])
+        self.assertEqual(self._column_values("geoe3_by_population"), [None, None, None])
+
+    def test_leaves_columns_not_in_the_list_untouched(self):
+        clear_grid_columns(self.gpkg_path, ["geoe3"])
+
+        self.assertEqual(self._column_values("unrelated"), [100.0, 200.0, 300.0])
+
+    def test_blank_name_in_the_list_is_skipped_but_valid_ones_still_clear(self):
+        result = clear_grid_columns(self.gpkg_path, ["geoe3", ""])
+
+        self.assertTrue(result)
+        self.assertEqual(self._column_values("geoe3"), [None, None, None])
+
+    def test_all_blank_names_returns_false_without_crashing(self):
+        result = clear_grid_columns(self.gpkg_path, ["", ""])
+
+        self.assertFalse(result)
+        self.assertEqual(self._column_values("unrelated"), [100.0, 200.0, 300.0])
+
+    def test_missing_gpkg_returns_false(self):
+        result = clear_grid_columns(os.path.join(self.temp_dir, "nonexistent.gpkg"), ["geoe3"])
+
+        self.assertFalse(result)
+
+    def test_single_call_matches_what_several_clear_grid_column_calls_would_do(self):
+        # Same end state as calling clear_grid_column() once per name -
+        # clear_grid_columns() only changes how many times the GeoPackage
+        # is opened/committed/checkpointed to get there, not the result.
+        for column in ("geoe3", "geoe3_by_population"):
+            clear_grid_column(self.gpkg_path, column)
+
+        self.assertEqual(self._column_values("geoe3"), [None, None, None])
+        self.assertEqual(self._column_values("geoe3_by_population"), [None, None, None])
+
+
+if __name__ == "__main__":
+    unittest.main()

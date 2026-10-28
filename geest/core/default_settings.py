@@ -17,4 +17,8 @@ __revision__ = "$Format:%H$"
 # (at your option) any later version.
 # ---------------------------------------------------------------------
 
-default_settings = {}
+default_settings = {
+    "filter_study_areas_by_ghsl": True,  # Ignore study area polygons that do not intersect with GHSL settlements
+    "grid_creation_workers": 4,  # Number of parallel workers for grid creation (1=sequential, 2-8=parallel)
+    "use_ors_for_accessibility": False,  # Use ORS instead of native routing for accessibility
+}

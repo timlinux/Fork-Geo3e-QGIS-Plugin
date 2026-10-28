@@ -1,13 +1,10 @@
+# -*- coding: utf-8 -*-
 import os
 import unittest
-from qgis.core import (
-    QgsProcessingContext,
-    QgsFeedback,
-)
-from geest.core.tasks import (
-    StudyAreaProcessingTask,
-)  # Adjust the import path as necessary
+
+from qgis.core import QgsFeedback, QgsProcessingContext
 from utilities_for_testing import prepare_fixtures
+
 from geest.core.algorithms import OpportunitiesMaskProcessor
 from geest.core.json_tree_item import JsonTreeItem
 
@@ -22,12 +19,8 @@ class TestPolygonOpportunitiesMask(unittest.TestCase):
         cls.working_directory = os.path.join(prepare_fixtures(), "wee_score")
         cls.context = QgsProcessingContext()
         cls.feedback = QgsFeedback()
-        cls.mask_areas_path = os.path.join(
-            cls.working_directory, "masks", "polygon_mask.gpkg|layername=polygon_mask"
-        )
-        cls.study_area_gpkg_path = os.path.join(
-            cls.working_directory, "study_area", "study_area.gpkg"
-        )
+        cls.mask_areas_path = os.path.join(cls.working_directory, "masks", "polygon_mask.gpkg|layername=polygon_mask")
+        cls.study_area_gpkg_path = os.path.join(cls.working_directory, "study_area", "study_area.gpkg")
 
     def setUp(self):
         self.test_data = [
@@ -47,6 +40,7 @@ class TestPolygonOpportunitiesMask(unittest.TestCase):
                 "aggregation_layer_wkb_type": 6,
                 "aggregation_shapefile": "",
                 "analysis_cell_size_m": 1000,
+                "network_layer_path": "",
                 "analysis_mode": "analysis_aggregation",
                 "analysis_name": "Women's Economic Empowerment - wee_score",
                 "buffer_distance_m": 100,
@@ -58,7 +52,7 @@ class TestPolygonOpportunitiesMask(unittest.TestCase):
                 "mask_mode": "point",
                 "opportunities_mask_result": "",
                 "opportunities_mask_result_file": "",
-                "output_filename": "WEE_Score",
+                "output_filename": "GeoE3_Score",
                 "point_mask_layer": None,
                 "point_mask_layer_crs": "EPSG:32620",
                 "point_mask_layer_id": "fake_childcare_6a120423_4837_409e_893c_cc06dd1bde8f",

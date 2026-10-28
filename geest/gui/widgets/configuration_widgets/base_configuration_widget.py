@@ -1,8 +1,53 @@
+# -*- coding: utf-8 -*-
+"""📦 Base Configuration Widget module.
+
+This module contains functionality for base configuration widget.
+"""
+
 from abc import abstractmethod
-from qgis.PyQt.QtWidgets import QRadioButton, QVBoxLayout, QWidget, QSizePolicy
-from qgis.PyQt.QtCore import pyqtSignal
+from typing import Optional, Union
+
 from qgis.core import Qgis
+from qgis.PyQt.QtCore import pyqtSignal
+from qgis.PyQt.QtGui import QColor
+from qgis.PyQt.QtWidgets import QRadioButton, QSizePolicy, QVBoxLayout, QWidget
+
+from geest.core.constants import SCORE_LEGEND_COLORS
 from geest.utilities import log_message
+
+
+def legend_color_for_score(score: Union[int, float, str]) -> Optional[str]:
+    """Return the hex colour for a 0-5 index score, or None if unmapped.
+
+    Matches the discrete 5-class ramp every result map/raster uses (see
+    SCORE_LEGEND_COLORS) - the same colour a user sees on the map for a
+    cell scoring this value.
+    """
+    try:
+        score_int = int(round(float(score)))
+    except (TypeError, ValueError):
+        return None
+    return SCORE_LEGEND_COLORS.get(max(0, min(5, score_int)))
+
+
+def legend_cell_html(score: Union[int, float, str]) -> str:
+    """A `<td>` showing a solid colour swatch for a value-range|score table row.
+
+    For use in the HTML mapping tables the configuration widgets render
+    (indicator/factor properties dialogs), so a user can see at a glance
+    which map colour a given row's score corresponds to, without having
+    to cross-reference the separate map legend.
+    """
+    color = legend_color_for_score(score)
+    if color is None:
+        return "<td></td>"
+    return f'<td style="background-color:{color};">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</td>'
+
+
+def legend_table_item_color(score: Union[int, float, str]) -> Optional[QColor]:
+    """QColor for a QTableWidgetItem's background - see legend_cell_html()."""
+    color = legend_color_for_score(score)
+    return QColor(color) if color else None
 
 
 class BaseConfigurationWidget(QWidget):
@@ -23,16 +68,19 @@ class BaseConfigurationWidget(QWidget):
         parent: QWidget = None,
     ) -> None:
         """
+        Initialize the base configuration widget.
 
         Args:
-            analysis_mode (str): The analysis mode for the widget.
-            attributes (dict): The json tree items attributes for the widget.
-            humanised_label (str): Optional custom label for the radio button.
+            analysis_mode: The analysis mode for the widget.
+            attributes: The json tree items attributes for the widget.
+            humanised_label: Optional custom label for the radio button.
+            parent: Parent widget.
         """
         super().__init__(parent)
         self.analysis_mode = analysis_mode
         if not humanised_label:
             humanised_label = analysis_mode.replace("_", " ").title()
+            humanised_label = humanised_label.replace("Ghsl", "GHSL")
 
         self.attributes = attributes
         # Main layout
@@ -46,9 +94,7 @@ class BaseConfigurationWidget(QWidget):
         # Internal container for the internal widgets
         self.internal_container: QWidget = QWidget(self)
         self.internal_container.setVisible(False)  # Initially hidden
-        self.internal_container.setSizePolicy(
-            QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        )
+        self.internal_container.setSizePolicy(QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed))
         self.internal_layout: QVBoxLayout = QVBoxLayout(self.internal_container)
         self.internal_layout.setContentsMargins(0, 0, 0, 0)
         self.layout.addWidget(self.internal_container)
@@ -57,9 +103,7 @@ class BaseConfigurationWidget(QWidget):
         self.radio_button.toggled.connect(self.on_toggled)
 
         # Log creation of widget
-        log_message(
-            f"Creating Indicator Configuration Widget '{analysis_mode}' humanised as '{humanised_label}'"
-        )
+        log_message(f"Creating Indicator Configuration Widget '{analysis_mode}' humanised as '{humanised_label}'")
 
         try:
             self.add_internal_widgets()
@@ -72,12 +116,18 @@ class BaseConfigurationWidget(QWidget):
     def isChecked(self) -> bool:
         """
         Return whether the radio button is checked.
+
+        Returns:
+            bool: True if the radio button is checked, False otherwise.
         """
         return self.radio_button.isChecked()
 
     def setChecked(self, checked: bool):
         """
         Set the radio button's checked state.
+
+        Args:
+            checked: The checked state to set.
         """
         self.radio_button.setChecked(checked)
 
@@ -101,6 +151,9 @@ class BaseConfigurationWidget(QWidget):
         """
         Updates the internal widgets with the current attributes.
         To be implemented by subclasses.
+
+        Args:
+            attributes: The attributes to update widgets with.
         """
         raise NotImplementedError("Subclasses must implement update_widgets.")
 
@@ -118,7 +171,7 @@ class BaseConfigurationWidget(QWidget):
                     # to avoid breaking the datasource widget logic.
                     data = self.attributes
                 data["analysis_mode"] = self.analysis_mode
-                log_message(f"\nData changed:\n\n********\n {data}\n\n********")
+                log_message(f"\nData changed: \n\n********\n {data}\n\n********")
                 self.data_changed.emit(data)
             except Exception as e:
                 log_message(f"Error in update_data: {e}", level=Qgis.Critical)
@@ -130,6 +183,9 @@ class BaseConfigurationWidget(QWidget):
         """
         Slot for when the radio button is toggled.
         Enables/disables internal widgets based on the radio button state.
+
+        Args:
+            checked: The new checked state of the radio button.
         """
         log_message(f"Radio button toggled: {checked}")
         # self.set_internal_widgets_enabled(checked)
@@ -144,7 +200,8 @@ class BaseConfigurationWidget(QWidget):
         """
         Enables or disables the internal widgets based on the radio button state.
         To be implemented by subclasses to manage their internal widgets.
+
+        Args:
+            enabled: Whether to enable or disable the internal widgets.
         """
-        raise NotImplementedError(
-            "Subclasses must implement set_internal_widgets_enabled."
-        )
+        raise NotImplementedError("Subclasses must implement set_internal_widgets_enabled.")

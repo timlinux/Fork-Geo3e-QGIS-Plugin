@@ -1,11 +1,29 @@
-import os
-from qgis.PyQt.QtWidgets import (
-    QDoubleSpinBox,
-)
-from qgis.PyQt.QtCore import QSettings
+# -*- coding: utf-8 -*-
+"""GEOE3 GUI widgets."""
+
+__copyright__ = "Copyright 2022, Tim Sutton"
+__license__ = "GPL version 3"
+__email__ = "tim@kartoza.com"
+__revision__ = "$Format:%H$"
+
+# -----------------------------------------------------------
+# Copyright (C) 2022 Tim Sutton
+# -----------------------------------------------------------
+# Licensed under the terms of GNU GPL 3
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# ---------------------------------------------------------------------
+
 from qgis.core import Qgis
-from .base_datasource_widget import BaseDataSourceWidget
+from qgis.PyQt.QtCore import QSettings
+from qgis.PyQt.QtWidgets import QDoubleSpinBox
+
 from geest.utilities import log_message
+
+from .base_datasource_widget import BaseDataSourceWidget
 
 
 class FixedValueDataSourceWidget(BaseDataSourceWidget):
@@ -47,7 +65,7 @@ class FixedValueDataSourceWidget(BaseDataSourceWidget):
         self.spin_box = QDoubleSpinBox()
         self.spin_box.setRange(0, 100)
         self.spin_box.setSingleStep(1)
-        self.spin_box.setValue(self.attributes.get(f"index_score", 0))
+        self.spin_box.setValue(self.attributes.get("index_score", 0))
         self.layout.addWidget(self.spin_box)
 
     def update_attributes(self):
@@ -61,4 +79,14 @@ class FixedValueDataSourceWidget(BaseDataSourceWidget):
         """
         # Collect data for the raster layerfactorlayer_data_weighting
         value = self.spin_box.value()
+        previous_value = self.attributes.get("index_score", 0)
         self.attributes["index_score"] = value
+        if value != previous_value:
+            # This indicator is often hidden behind its single-child factor
+            # row and can't be cleared directly from the tree - without
+            # this, its "Completed successfully" status/result_file is left
+            # untouched, so queue_workflow_task()'s run_only_incomplete skip
+            # (a plain Run, no Shift) silently keeps using the OLD score's
+            # grid value instead of picking up this edit.
+            self.attributes["result"] = "Not Run"
+            self.attributes["result_file"] = ""

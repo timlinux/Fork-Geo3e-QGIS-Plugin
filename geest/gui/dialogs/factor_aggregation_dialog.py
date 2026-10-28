@@ -1,90 +1,145 @@
+# -*- coding: utf-8 -*-
+"""📦 Factor Aggregation Dialog module.
+
+This module contains functionality for factor aggregation dialog.
+"""
+
+import copy
+from typing import Optional, Sequence
+
+from qgis.core import Qgis
+from qgis.PyQt.QtCore import QByteArray, QSettings, Qt, QUrl
+from qgis.PyQt.QtGui import QDesktopServices, QFont, QPixmap
 from qgis.PyQt.QtWidgets import (
-    QDialog,
+    QApplication,
+    QCheckBox,
+    QDialogButtonBox,
+    QDoubleSpinBox,
+    QHBoxLayout,
     QHeaderView,
     QLabel,
-    QDoubleSpinBox,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
+    QSpacerItem,
     QTableWidget,
     QTableWidgetItem,
+    QToolButton,
     QVBoxLayout,
-    QDialogButtonBox,
     QWidget,
-    QCheckBox,
-    QHBoxLayout,
-    QSpacerItem,
 )
-from qgis.PyQt.QtGui import QPixmap, QDesktopServices
-from qgis.PyQt.QtCore import Qt, QUrl
-from qgis.core import Qgis
-from geest.utilities import resources_path, setting
+
+from geest.core.json_tree_item import JsonTreeItem as tree_item
+from geest.gui.widgets import CustomBannerLabel
+from geest.utilities import (
+    is_qgis_dark_theme_active,
+    log_message,
+    resources_path,
+    setting,
+)
+
 from ..datasource_widget_factory import DataSourceWidgetFactory
 from ..factor_configuration_widget import FactorConfigurationWidget
-from geest.utilities import log_message, is_qgis_dark_theme_active
-from geest.gui.widgets import CustomBannerLabel
+from .custom_base_dialog import CustomBaseDialog
 
 
-class FactorAggregationDialog(QDialog):
+class FactorAggregationDialog(CustomBaseDialog):
+    """🎯 Factor Aggregation Dialog.
 
-    def __init__(self, factor_name, factor_data, factor_item, parent=None):
+    Attributes:
+        banner_label: Banner label.
+        button_box: Button box.
+        configuration_widget: Configuration widget.
+        data_sources: Data sources.
+        factor_data: Factor data.
+    """
+
+    def __init__(
+        self,
+        factor_name,
+        factor_data,
+        factor_item,
+        parent=None,
+        selected_guids: Optional[Sequence[str]] = None,
+    ):
+        """🏗️ Initialize the instance.
+
+        Args:
+            factor_name: Factor name.
+            factor_data: Factor data.
+            factor_item: Factor item.
+            parent: Parent.
+        """
         super().__init__(parent)
 
         self.setWindowTitle(factor_name)
         self.factor_name = factor_name
         self.factor_data = factor_data
-        self.tree_item = factor_item  # Reference to the QTreeView item to update
+        self.tree_item: tree_item = factor_item  # Reference to the QTreeView item to update
 
         # Initialize dictionaries
         self.guids = self.tree_item.getFactorIndicatorGuids()
+        if selected_guids is not None:
+            selected_guid_set = set(selected_guids)
+            self.guids = [guid for guid in self.guids if guid in selected_guid_set]
+            if not self.guids:
+                self.guids = self.tree_item.getFactorIndicatorGuids()
         # If the indicators do not have a usable analysis mode set, iterate through them
         # and set it to the first available usable mode
         for guid in self.guids:
             item = self.tree_item.getItemByGuid(guid)
-            item.ensureValidAnalysisMode()
+            if item and (
+                not item.attribute("analysis_mode", "") or item.attribute("analysis_mode", "") == "Do Not Use"
+            ):
+                item.ensureValidAnalysisMode()
 
         self.weightings = {}  # Temporary weightings
         self.data_sources = {}  # Temporary data sources
+        self._initial_indicator_attributes = {
+            guid: copy.deepcopy(self.tree_item.getItemByGuid(guid).attributes())
+            for guid in self.guids
+            if self.tree_item.getItemByGuid(guid) is not None
+        }
 
         self.weighting_column_visible = len(self.guids) > 1
 
-        # Layout setup
-        layout = QVBoxLayout(self)
-        self.resize(800, 600)
-        layout.setContentsMargins(20, 20, 20, 20)  # Add padding around the layout
+        # Layout setup: outer layout holds scroll area + button box
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 10)
+
+        # Scrollable body
+        scroll_area = QScrollArea(self)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        scroll_widget = QWidget()
+        layout = QVBoxLayout(scroll_widget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        scroll_area.setWidget(scroll_widget)
+        outer_layout.addWidget(scroll_area)
 
         self.banner_label = CustomBannerLabel(
-            "The Gender Enabling Environments Spatial Tool",
-            resources_path("resources", "geest-banner.png"),
+            "The Geospatial Enabling Environments for Employment Tool",
+            resources_path("resources", "geoe3-banner.png"),
         )
         layout.addWidget(self.banner_label)
         # Title label
-        self.title_label = QLabel(
-            "The Gender Enabling Environments Spatial Tool", self.banner_label
-        )
+        self.title_label = QLabel("The Geospatial Enabling Environments for Employment Tool", self.banner_label)
         self.title_label.setWordWrap(True)
         self.title_label.setStyleSheet(
             "color: white; font-size: 16px; background-color: rgba(0, 0, 0, 0.5); padding: 5px;"
         )
-        self.title_label.setAlignment(Qt.AlignLeft | Qt.AlignBottom)
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom)
 
         # Positioning the title label with a 10px offset from the left and bottom of the banner
-        self.title_label.setGeometry(
-            10, self.banner_label.height() - 30, self.banner_label.width() - 20, 20
-        )
+        self.title_label.setGeometry(10, self.banner_label.height() - 30, self.banner_label.width() - 20, 20)
         self.title_label.setMargin(10)
-
-        # Update layout
-        layout.addWidget(self.banner_label)
         # Hierarchy label
         parent_item = self.tree_item.parent()
         if parent_item:
-            hierarchy_label = QLabel(
-                f"{parent_item.data(0)} :: {self.tree_item.data(0)}"
-            )
-            hierarchy_label.setStyleSheet(
-                "font-size: 14px; font-weight: bold; color: gray;"
-            )
-            layout.addWidget(hierarchy_label, alignment=Qt.AlignTop)
+            hierarchy_label = QLabel(f"{parent_item.data(0)} :: {self.tree_item.data(0)}")  # noqa E231
+            hierarchy_label.setStyleSheet("font-size: 14px; font-weight: bold; color: gray;")  # noqa E231
+            layout.addWidget(hierarchy_label, alignment=Qt.AlignmentFlag.AlignTop)
 
         # Description label
         description_label = QLabel()
@@ -93,78 +148,121 @@ class FactorAggregationDialog(QDialog):
         layout.addWidget(description_label)
 
         # Configuration widget and table
-        self.configuration_widget = FactorConfigurationWidget(
-            self.tree_item, self.guids
-        )
+        self.configuration_widget = FactorConfigurationWidget(self.tree_item, self.guids)
 
         self.configuration_widget.selection_changed.connect(self.populate_table)
         layout.addWidget(self.configuration_widget)
 
-        # Table setup
+        # Check if any indicator has OSM download enabled
+        self.has_osm_column = False
+        for guid in self.guids:
+            indicator_item = self.tree_item.getItemByGuid(guid)
+            if indicator_item and indicator_item.attributes().get("osm_download_enabled", 0) == 1:
+                self.has_osm_column = True
+                break
+
         self.table = QTableWidget(self)
         self.table.setRowCount(len(self.guids))
-        self.table.setColumnCount(6)
-        self.table.setHorizontalHeaderLabels(
-            ["Input", "Indicator", "Weight 0-1", "Use", "GUID", ""]
-        )
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Fixed)
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Fixed)
-        self.table.setColumnWidth(2, 100)  # Weight column
-        self.table.setColumnWidth(3, 50)  # Use column (checkbox)
-        self.table.setColumnWidth(5, 75)  # Reset column
-        # hide weight and reset column if only one indicator
-        if not self.weighting_column_visible:
-            self.hide_widgets_in_column(2)
-            self.hide_widgets_in_column(5)
-            self.table.setColumnHidden(2, True)
-            self.table.setColumnHidden(5, True)
+
+        if self.has_osm_column:
+            self.table.setColumnCount(7)
+            self.table.setHorizontalHeaderLabels(
+                ["Input", "OSM Download", "Indicator", "Weight 0-1", "Use", "GUID", ""]
+            )
+            self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+            self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        else:
+            self.table.setColumnCount(6)
+            self.table.setHorizontalHeaderLabels(["Input", "Indicator", "Weight 0-1", "Use", "GUID", ""])
+            # Input holds different widget types depending on analysis_mode
+            # (a small spin box for a fixed value, but a layer/file selector
+            # for others, which wants much more room than a fixed pixel
+            # width can guarantee - a Fixed column that's too narrow for its
+            # cell widget's minimum size hint gets forced wider by Qt,
+            # overflowing the table past the dialog's width and inducing
+            # horizontal scrolling). Stretch mode cannot overflow by
+            # definition, so both Input and Indicator stay Stretch and
+            # share whatever space is actually available - matching how
+            # the OSM-enabled variant of this same table already does it.
+            # Indicator still used to be pinned to a 200px Fixed width
+            # while Input took ALL the stretch space, which was the
+            # original elision complaint this fix addresses.
+            self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+            self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+            self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+            self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+            self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+            self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+
+        if self.has_osm_column:
+            self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+            self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+            self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+            self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+            self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
+
+        if self.has_osm_column:
+            self.table.setColumnWidth(1, 170)
+            self.table.setColumnWidth(3, 100)
+            self.table.setColumnWidth(4, 50)
+            self.table.setColumnWidth(6, 75)
+        else:
+            self.table.setColumnWidth(2, 100)
+            self.table.setColumnWidth(3, 50)
+            self.table.setColumnWidth(5, 75)
 
         layout.addWidget(self.table)
 
+        # Add OSM disclaimer in footer if any OSM downloads are available
+        if self.has_osm_column:
+            self.osm_disclaimer_label = QLabel()
+            self.osm_disclaimer_label.setWordWrap(True)
+            self.osm_disclaimer_label.setText(
+                "<b>OSM Data Disclaimer:</b> The OSM downloader may return a mix of point and polygon geometries "
+                "depending on how features are mapped in OpenStreetMap. Polygon features should be converted to "
+                "points (e.g., centroids) and merged with the downloaded points to form a complete point input layer "
+                "for this indicator."
+            )
+            disclaimer_font = QFont()
+            disclaimer_font.setPointSize(9)
+            self.osm_disclaimer_label.setFont(disclaimer_font)
+            self.osm_disclaimer_label.setStyleSheet(
+                "QLabel { color: #333333; background-color: #f0f0f0; padding: 8px; border-radius: 4px; margin-top: 8px; }"
+            )
+            self.osm_disclaimer_label.setVisible(False)  # Hidden by default
+            layout.addWidget(self.osm_disclaimer_label)
+
         help_layout = QHBoxLayout()
-        help_layout.addItem(
-            QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
-        )
+        help_layout.addItem(QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
         self.help_icon = QPixmap(resources_path("resources", "images", "help.png"))
         self.help_icon = self.help_icon.scaledToWidth(20)
         self.help_label_icon = QLabel()
         self.help_label_icon.setPixmap(self.help_icon)
         self.help_label_icon.setScaledContents(True)
-        self.help_label_icon.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.help_label_icon.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.help_label_icon.setMaximumWidth(20)
-        self.help_label_icon.setAlignment(Qt.AlignRight)
+        self.help_label_icon.setAlignment(Qt.AlignmentFlag.AlignRight)
         help_layout.addWidget(self.help_label_icon)
 
         self.help_label = QLabel(
-            "For detailed instructions on how to use this tool, please refer to the <a href='https://worldbank.github.io/GEEST/docs/user_guide.html'>GEEST User Guide</a>."
+            "For detailed instructions on how to use this tool, please refer to the <a href='https://worldbank.github.io/GEOE3/docs/user_guide.html'>GeoE3 User Guide</a>."
         )
         self.help_label.setOpenExternalLinks(True)
-        self.help_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.help_label)
+        self.help_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.help_label.linkActivated.connect(self.open_link_in_browser)
         help_layout.addWidget(self.help_label)
-        help_layout.addItem(
-            QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
-        )
+        help_layout.addItem(QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
         layout.addLayout(help_layout)
 
-        # Buttons
-        self.button_box = QDialogButtonBox(
-            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
-        )
+        # Buttons — outside the scroll area so they remain always visible
+        self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         auto_calculate_button = QPushButton("Balance Weights")
         toggle_guid_button = QPushButton("Show GUIDs")
         if self.weighting_column_visible:
-            self.button_box.addButton(
-                auto_calculate_button, QDialogButtonBox.ActionRole
-            )
+            self.button_box.addButton(auto_calculate_button, QDialogButtonBox.ButtonRole.ActionRole)
         verbose_mode = setting(key="verbose_mode", default=0)
         if verbose_mode:
-            self.button_box.addButton(toggle_guid_button, QDialogButtonBox.ActionRole)
+            self.button_box.addButton(toggle_guid_button, QDialogButtonBox.ButtonRole.ActionRole)
 
         self.button_box.accepted.connect(self.accept_changes)
         self.button_box.rejected.connect(self.reject)
@@ -173,15 +271,49 @@ class FactorAggregationDialog(QDialog):
         toggle_guid_button.clicked.connect(self.toggle_guid_column)
         self.guid_column_visible = False  # Track GUID column visibility
 
-        layout.addWidget(self.button_box)
-        self.populate_table()
-        self.validate_weightings()
-        self.setLayout(layout)
+        button_wrapper = QWidget()
+        button_wrapper_layout = QHBoxLayout(button_wrapper)
+        button_wrapper_layout.setContentsMargins(20, 0, 20, 0)
+        button_wrapper_layout.addWidget(self.button_box)
+        outer_layout.addWidget(button_wrapper)
+        self.setLayout(outer_layout)
         self.populate_table()  # Populate the table after initializing data_sources and weightings
+        self.validate_weightings()
+        self.restore_dialog_geometry()
 
     def open_link_in_browser(self, url: str):
         """Open the given URL in the user's default web browser using QDesktopServices."""
         QDesktopServices.openUrl(QUrl(url))
+
+    def restore_dialog_geometry(self):
+        """Restore the dialog geometry from QSettings, or apply a sensible default."""
+        settings = QSettings()
+        geometry = settings.value("FactorAggregationDialog/geometry_v2", QByteArray())
+        if geometry:
+            try:
+                self.restoreGeometry(geometry)
+                screen = QApplication.primaryScreen().geometry()
+                if self.width() > int(screen.width() * 0.85) or self.height() > int(screen.height() * 0.85):
+                    settings.remove("FactorAggregationDialog/geometry_v2")
+                else:
+                    return
+            except Exception:  # nosec B110
+                pass
+        # Sensible default: cap at 900px wide, 80% screen height
+        screen = QApplication.primaryScreen().geometry()
+        width = min(900, int(screen.width() * 0.65))
+        height = min(int(screen.height() * 0.80), 750)
+        self.resize(width, height)
+
+    def save_geometry(self):
+        """Save the dialog geometry to QSettings."""
+        settings = QSettings()
+        settings.setValue("FactorAggregationDialog/geometry_v2", self.saveGeometry())
+
+    def closeEvent(self, event):
+        """Save geometry before closing."""
+        self.save_geometry()
+        super().closeEvent(event)
 
     def refresh_configuration(self, attributes: dict):
         """Refresh the configuration widget and table.
@@ -193,108 +325,186 @@ class FactorAggregationDialog(QDialog):
         log_message("data_changed signal received, refreshing configuration")
         self.configuration_widget.refresh_radio_buttons(attributes)
 
-    def create_checkbox_widget(self, row: int, weighting_value: float) -> QWidget:
+    def create_checkbox_widget(self, row: int, is_checked: bool) -> QWidget:
+        """⚙️ Create checkbox widget.
+
+        Args:
+            row: Row.
+            is_checked: Initial checkbox state.
+
+        Returns:
+            The result of the operation.
+        """
         checkbox = QCheckBox()
-        if weighting_value > 0:
-            checkbox.setChecked(True)
-        else:
-            checkbox.setChecked(False)
-        checkbox.stateChanged.connect(
-            lambda state, r=row: self.toggle_row_widgets(r, state)
-        )
+        checkbox.setChecked(is_checked)
+        checkbox.stateChanged.connect(lambda state, r=row: self.toggle_row_widgets(r, state))
 
         container = QWidget()
         layout = QHBoxLayout()
         layout.addWidget(checkbox)
-        layout.setAlignment(Qt.AlignCenter)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.setContentsMargins(0, 0, 0, 0)
         container.setLayout(layout)
         return container
 
     def toggle_row_widgets(self, row: int, state: int):
-        is_enabled = state == Qt.Checked
+        """⚙️ Toggle row widgets.
+
+        Args:
+            row: Row.
+            state: State.
+        """
+        is_enabled = state == Qt.CheckState.Checked
+        # Determine columns to skip (Use checkbox and Reset columns)
+        skip_cols = [self.col_use]
+        if self.weighting_column_visible:
+            skip_cols.append(self.col_reset)
+
         for col in range(self.table.columnCount()):
-            if col in (3, 5):  # Skip Use (checkbox) and Reset columns
+            if col in skip_cols:
                 continue
             widget = self.table.cellWidget(row, col)
             if widget:
                 if isinstance(widget, QDoubleSpinBox) and not is_enabled:
                     widget.setValue(0)
-                if isinstance(widget, QDoubleSpinBox) and is_enabled:
-                    widget.setValue(1.0)
                 widget.setEnabled(is_enabled)
         self.validate_weightings()
 
     def populate_table(self):
+        """⚙️ Populate table."""
+        # Start with the base number of rows, we'll add more for disclaimers
         self.table.setRowCount(len(self.guids))
-        for row, guid in enumerate(self.guids):
+
+        # Calculate column indices and store as instance variables for use in other methods
+        self.col_input = 0
+        self.col_osm = 1 if self.has_osm_column else None
+        self.col_indicator = 2 if self.has_osm_column else 1
+        self.col_weight = 3 if self.has_osm_column else 2
+        self.col_use = 4 if self.has_osm_column else 3
+        self.col_guid = 5 if self.has_osm_column else 4
+        self.col_reset = 6 if self.has_osm_column else 5
+
+        # Track if we need to show the OSM disclaimer in footer
+        has_osm_download = False
+
+        for guid_index, guid in enumerate(self.guids):
+            row = guid_index
             item = self.tree_item.getItemByGuid(guid)
             attributes = item.attributes()
+            analysis_item = self.tree_item.parentItem.parentItem if self.tree_item.parentItem else None
+            if analysis_item:
+                attributes["analysis_scale"] = analysis_item.attribute("analysis_scale", "")
+                attributes["road_network_layer_path"] = analysis_item.attribute("road_network_layer_path", "")
             log_message(f"Populating table for GUID: {guid}")
             log_message(f"Attributes: {item.attributesAsMarkdown()}")
+
             # Data Source Widget
-            data_source_widget = DataSourceWidgetFactory.create_widget(
-                attributes["analysis_mode"], 1, attributes
-            )
-            # Expand the widget to fill the available horizontal space
-            data_source_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            data_source_widget = DataSourceWidgetFactory.create_widget(attributes["analysis_mode"], 1, attributes)
             if not data_source_widget:
                 continue
+            data_source_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             data_source_widget.data_changed.connect(self.refresh_configuration)
             default_factor_weighting = attributes.get("default_factor_weighting", 0)
-            self.table.setCellWidget(row, 0, data_source_widget)
+
+            # Important: Show the widget before adding it to the table
+            data_source_widget.show()
+
+            self.table.setCellWidget(row, self.col_input, data_source_widget)
             self.data_sources[guid] = data_source_widget
 
-            # Indicator Name
-            name_item = QTableWidgetItem(attributes.get("indicator", ""))
-            name_item.setFlags(Qt.ItemIsEnabled)
-            self.table.setItem(row, 1, name_item)
+            # Force the widget and all its children to update their style
+            data_source_widget.style().unpolish(data_source_widget)
+            data_source_widget.style().polish(data_source_widget)
+            for child in data_source_widget.findChildren(QWidget):
+                child.style().unpolish(child)
+                child.style().polish(child)
+                if isinstance(child, QToolButton):
+                    child.ensurePolished()
+                    child.update()
 
-            # Weighting
+            if self.has_osm_column:
+                osm_button = None
+                if hasattr(data_source_widget, "get_osm_download_button"):
+                    osm_button = data_source_widget.get_osm_download_button()
+                if osm_button:
+                    osm_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+                    self.table.setCellWidget(row, self.col_osm, osm_button)
+                    has_osm_download = True
+
+            # Indicator Name
+            indicator_name = attributes.get("indicator", "")
+            indicator_description = attributes.get("description", "")
+            name_item = QTableWidgetItem(indicator_name)
+            name_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            name_item.setToolTip(
+                indicator_name if not indicator_description else f"{indicator_name}\n\n{indicator_description}"
+            )
+            self.table.setItem(row, self.col_indicator, name_item)
+
             if self.weighting_column_visible:
                 weighting_value = float(attributes.get("factor_weighting", 0.0))
+                is_included_in_analysis = (
+                    item.getStatus() != "Excluded from analysis"
+                    and weighting_value > 0
+                    and attributes.get("analysis_mode", "") != "Do Not Use"
+                )
                 weighting_item = QDoubleSpinBox()
                 weighting_item.setRange(0.0, 1.0)
                 weighting_item.setDecimals(4)
                 weighting_item.setSingleStep(0.01)
                 weighting_item.setValue(weighting_value)
                 weighting_item.valueChanged.connect(self.validate_weightings)
-                self.table.setCellWidget(row, 2, weighting_item)
+                self.table.setCellWidget(row, self.col_weight, weighting_item)
                 self.weightings[guid] = weighting_item
-                # Use (Checkbox)
-                checkbox_widget = self.create_checkbox_widget(row, weighting_value)
+                checkbox_widget = self.create_checkbox_widget(row, is_included_in_analysis)
             else:
-                checkbox_widget = self.create_checkbox_widget(row, 1)
-            self.table.setCellWidget(row, 3, checkbox_widget)
+                weighting_value = float(attributes.get("factor_weighting", 0.0))
+                is_included_in_analysis = (
+                    item.getStatus() != "Excluded from analysis"
+                    and weighting_value > 0
+                    and attributes.get("analysis_mode", "") != "Do Not Use"
+                )
+                checkbox_widget = self.create_checkbox_widget(row, is_included_in_analysis)
+            self.table.setCellWidget(row, self.col_use, checkbox_widget)
 
-            # GUID
+            # Ensure row widgets are immediately in sync with initial checkbox state.
+            initial_state = Qt.CheckState.Checked if self.is_checkbox_checked(row) else Qt.CheckState.Unchecked
+            self.toggle_row_widgets(row, initial_state)
+
             guid_item = QTableWidgetItem(guid)
-            guid_item.setFlags(Qt.ItemIsEnabled)
+            guid_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
             guid_item.setToolTip(str(item.attributes()))
-            self.table.setItem(row, 4, guid_item)
+            self.table.setItem(row, self.col_guid, guid_item)
 
-            # Reset Button
             if self.weighting_column_visible:
                 reset_button = QPushButton("Reset")
                 reset_button.clicked.connect(
-                    lambda checked, item=weighting_item, value=default_factor_weighting: item.setValue(
-                        value
-                    )
+                    lambda checked, item=weighting_item, value=default_factor_weighting: item.setValue(value)
                 )
-                self.table.setCellWidget(row, 5, reset_button)
+                self.table.setCellWidget(row, self.col_reset, reset_button)
 
-        self.table.setColumnHidden(
-            4, not self.guid_column_visible
-        )  # Hide GUID column by default
-        self.validate_weightings()  # Initial validation check
-        # If we dont have the weightings column, we can enable the OK button
+        self.table.setColumnHidden(self.col_guid, not self.guid_column_visible)
+
+        # Store whether we need to show the OSM disclaimer in footer
+        self.has_osm_download = has_osm_download
+
+        # Hide weight and reset columns if not needed
         if not self.weighting_column_visible:
-            self.button_box.button(QDialogButtonBox.Ok).setEnabled(True)
+            self.hide_widgets_in_column(self.col_weight)
+            self.hide_widgets_in_column(self.col_reset)
+            self.table.setColumnHidden(self.col_weight, True)
+            self.table.setColumnHidden(self.col_reset, True)
+
+        self.validate_weightings()
+
+        # Show OSM disclaimer in footer if any OSM download buttons exist
+        if hasattr(self, "osm_disclaimer_label") and self.has_osm_download:
+            self.osm_disclaimer_label.setVisible(True)
 
     def toggle_guid_column(self):
         """Toggle the visibility of the GUID column."""
         self.guid_column_visible = not self.guid_column_visible
-        self.table.setColumnHidden(4, not self.guid_column_visible)
+        self.table.setColumnHidden(self.col_guid, not self.guid_column_visible)
 
     def hide_widgets_in_column(self, column: int):
         """Hide all widgets in the specified column."""
@@ -311,29 +521,46 @@ class FactorAggregationDialog(QDialog):
                 widget.setVisible(True)  # Explicitly show the widget
 
     def auto_calculate_weightings(self):
-        enabled_rows = [
-            row for row in range(self.table.rowCount()) if self.is_checkbox_checked(row)
-        ]
+        """⚙️ Auto calculate weightings."""
+        enabled_rows = [row for row in range(self.table.rowCount()) if self.is_checkbox_checked(row)]
         if not enabled_rows:
             equal_weighting = 0.0
         else:
             equal_weighting = 1.0 / len(enabled_rows)
 
         for row in enabled_rows:
-            widget = self.table.cellWidget(row, 2)  # Weight column
-            widget.setValue(equal_weighting)
+            widget = self.table.cellWidget(row, self.col_weight)  # Weight column
+            if widget:
+                widget.setValue(equal_weighting)
         for row in range(self.table.rowCount()):
             if row not in enabled_rows:
-                widget = self.table.cellWidget(row, 2)
-                widget.setValue(0)
+                widget = self.table.cellWidget(row, self.col_weight)
+                if widget:
+                    widget.setValue(0)
         self.validate_weightings()
 
     def is_checkbox_checked(self, row: int) -> bool:
+        """⚙️ Check if checkbox checked.
+
+        Args:
+            row: Row.
+
+        Returns:
+            The result of the operation.
+        """
         checkbox = self.get_checkbox_in_row(row)
         return checkbox.isChecked() if checkbox else False
 
     def get_checkbox_in_row(self, row: int) -> QCheckBox:
-        container = self.table.cellWidget(row, 3)  # Use (Checkbox) column
+        """⚙️ Get checkbox in row.
+
+        Args:
+            row: Row.
+
+        Returns:
+            The result of the operation.
+        """
+        container = self.table.cellWidget(row, self.col_use)  # Use (Checkbox) column
         if container and isinstance(container, QWidget):
             layout = container.layout()
             if layout and layout.count() > 0:
@@ -351,34 +578,108 @@ class FactorAggregationDialog(QDialog):
             except ValueError:
                 log_message(
                     f"Invalid weighting input for GUID: {indicator_guid}",
-                    tag="Geest",
+                    tag="GeoE3",
                     level=Qgis.Warning,
                 )
                 import traceback
 
-                log_message(traceback.format_exc(), tag="Geest", level=Qgis.Warning)
+                log_message(traceback.format_exc(), tag="GeoE3", level=Qgis.Warning)
 
     def accept_changes(self):
         """Handle the OK button by applying changes and closing the dialog."""
+        self.save_use_state_to_model()
         self.save_weightings_to_model()
+        self._clear_changed_indicator_results()
+        self.save_geometry()
         self.accept()
+
+    @staticmethod
+    def _normalized_attributes_for_change_check(attributes: dict) -> dict:
+        """Return attributes with non-configuration keys removed for change checks."""
+        excluded_keys = {
+            "result",
+            "result_file",
+            "error",
+            "error_file",
+            "execution_start_time",
+            "execution_end_time",
+            "factor_weighting",
+            "default_factor_weighting",
+            "dimension_weighting",
+            "default_dimension_weighting",
+            "analysis_weighting",
+            "default_analysis_weighting",
+        }
+        return {key: value for key, value in attributes.items() if key not in excluded_keys}
+
+    def _clear_changed_indicator_results(self) -> None:
+        """Clear result state for indicators whose configuration changed in this dialog."""
+        for guid in self.guids:
+            indicator_item = self.tree_item.getItemByGuid(guid)
+            if indicator_item is None:
+                continue
+
+            previous_attributes = self._initial_indicator_attributes.get(guid, {})
+            current_attributes = indicator_item.attributes()
+
+            previous_normalized = self._normalized_attributes_for_change_check(previous_attributes)
+            current_normalized = self._normalized_attributes_for_change_check(current_attributes)
+
+            if previous_normalized != current_normalized:
+                indicator_item.clear(recursive=False)
+
+    def save_use_state_to_model(self) -> None:
+        """Persist the Use checkbox state to indicator factor_weighting values."""
+        for row, indicator_guid in enumerate(self.guids):
+            checkbox_checked = self.is_checkbox_checked(row)
+            indicator_item = self.tree_item.getItemByGuid(indicator_guid)
+            if indicator_item is None:
+                continue
+
+            analysis_mode = indicator_item.attribute("analysis_mode", "")
+            old_weighting = float(indicator_item.attribute("factor_weighting", 0.0) or 0.0)
+            was_enabled = analysis_mode != "Do Not Use" and old_weighting > 0.0
+
+            # If user explicitly re-enables an indicator that was disabled via
+            # analysis_mode="Do Not Use", restore a valid mode first.
+            if checkbox_checked and analysis_mode == "Do Not Use":
+                indicator_item.ensureValidAnalysisMode()
+                analysis_mode = indicator_item.attribute("analysis_mode", "")
+
+            # No usable analysis mode could be restored; keep it disabled.
+            if analysis_mode == "Do Not Use":
+                checkbox_checked = False
+
+            new_weighting = old_weighting
+            if checkbox_checked:
+                if new_weighting == 0.0:
+                    default_weighting = float(indicator_item.attribute("default_factor_weighting", 1.0) or 1.0)
+                    new_weighting = default_weighting
+            else:
+                new_weighting = 0.0
+
+            will_be_enabled = analysis_mode != "Do Not Use" and new_weighting > 0.0
+            if was_enabled != will_be_enabled:
+                indicator_item.clear(recursive=False)
+
+            indicator_item.setAttribute("factor_weighting", new_weighting)
+            indicator_item.setData(2, f"{new_weighting:.2f}")
 
     def validate_weightings(self):
         """Validate weightings to ensure they sum to 1 and are within range."""
+        # If weighting column is not visible (single indicator), always enable OK button
+        if not self.weighting_column_visible:
+            self.button_box.button(QDialogButtonBox.StandardButton.Ok).setEnabled(True)
+            return
+
         try:
-            total_weighting = sum(
-                float(spin_box.value() or 0) for spin_box in self.weightings.values()
-            )
-            valid_sum = (
-                abs(total_weighting - 1.0) < 0.001
-            )  # Allow slight floating-point tolerance
+            total_weighting = sum(float(spin_box.value() or 0) for spin_box in self.weightings.values())
+            valid_sum = abs(total_weighting - 1.0) < 0.001  # Allow slight floating-point tolerance
         except ValueError:
             valid_sum = False
 
         # In the case that all rows are disabled, the sum is valid
-        enabled_rows = [
-            row for row in range(self.table.rowCount()) if self.is_checkbox_checked(row)
-        ]
+        enabled_rows = [row for row in range(self.table.rowCount()) if self.is_checkbox_checked(row)]
         enabled_rows_count = len(enabled_rows)
         if enabled_rows_count == 0:
             valid_sum = True
@@ -389,13 +690,9 @@ class FactorAggregationDialog(QDialog):
         # Update button state and cell highlighting
         for spin_box in self.weightings.values():
             if valid_sum:
-                spin_box.setStyleSheet(
-                    normal_color
-                )  # Reset font color to black if valid
+                spin_box.setStyleSheet(normal_color)  # Reset font color to black if valid
             else:
-                spin_box.setStyleSheet(
-                    "color: red;"
-                )  # Set font color to red if invalid
+                spin_box.setStyleSheet("color: red;")  # Set font color to red if invalid
 
         # Enable or disable the OK button based on the validity of the sum
-        self.button_box.button(QDialogButtonBox.Ok).setEnabled(valid_sum)
+        self.button_box.button(QDialogButtonBox.StandardButton.Ok).setEnabled(valid_sum)

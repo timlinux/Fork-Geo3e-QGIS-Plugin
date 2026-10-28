@@ -1,14 +1,10 @@
+# -*- coding: utf-8 -*0,00-
 import os
 import unittest
-from qgis.core import (
-    QgsVectorLayer,
-    QgsProcessingContext,
-    QgsFeedback,
-)
-from geest.core.tasks import (
-    StudyAreaProcessingTask,
-)  # Adjust the import path as necessary
+
+from qgis.core import QgsFeedback, QgsProcessingContext
 from utilities_for_testing import prepare_fixtures
+
 from geest.core.algorithms import WEEByPopulationScoreProcessingTask
 
 
@@ -26,7 +22,7 @@ class TestWEEScoreProcessingTask(unittest.TestCase):
 
     def setUp(self):
         self.task = WEEByPopulationScoreProcessingTask(
-            # geest_raster_path=f"{self.working_directory}/wee_masked_0.tif",
+            # geoe3_raster_path=f"{self.working_directory}/wee_masked_0.tif",
             # pop_raster_path=f"{self.working_directory}/population/reclassified_0.tif",
             study_area_gpkg_path=f"{self.working_directory}/study_area/study_area.gpkg",
             working_directory=f"{self.working_directory}",
@@ -36,7 +32,7 @@ class TestWEEScoreProcessingTask(unittest.TestCase):
 
     def test_initialization(self):
         self.assertTrue(
-            self.task.output_dir.endswith("wee_by_population_score"),
+            self.task.output_dir.endswith("geoe3_by_population_score"),
             msg=f"Output directory is {self.task.output_dir}",
         )
         self.assertEqual(self.task.target_crs.authid(), "EPSG:32620")
