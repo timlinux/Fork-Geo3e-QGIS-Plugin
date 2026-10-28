@@ -27,9 +27,7 @@ Follow the steps below to install the GEOE3 QGIS plugin.
 > - 1. Launch QGIS.
 > - 1. Go to **Plugins** > **Manage and Install Plugins…**.
 
-<a href="../images/new%20images/plugins.JPG" target="_blank">
-  <img src="../images/new%20images/plugins.JPG" alt="QGIS Plugin Setup" width="500" style="display: block; margin-left: auto; margin-right: auto;" title="Click to enlarge">
-</a>
+![QGIS Plugin Setup](../images/new%20images/plugins.JPG){ width="50%" }
 
 #### Step 2: Install the Plugin
 
@@ -37,21 +35,17 @@ Follow the steps below to install the GEOE3 QGIS plugin.
 > - 2. Search for `GEOE3`.
 > - 3. Select the plugin and click **Install Plugin**.
 
-<a href="../images/new%20images/Install_page_plugin.png" target="_blank">
-  <img src="../images/new%20images/Install_page_plugin.png" alt="QGIS Plugin Installation" width="600" style="display: block; margin-left: auto; margin-right: auto;" title="Click to enlarge">
-</a>
+![QGIS Plugin Installation](../images/new%20images/Install_page_plugin.png){ width="60%" }
 
 #### Step 3: Verify the Installation and Configure the Tool
 
-> - 1. After installation, check the QGIS toolbar for the new **GEOE3** icon *Show/Hide GEOE3 Panel*. [![GEOE3 Toolbar Icons](../images/new%20images/icons.jpg)](../images/new%20images/icons.jpg "Click to enlarge")
+> - 1. After installation, check the QGIS toolbar for the new **GEOE3** icon *Show/Hide GEOE3 Panel*.
+
+![GEOE3 Toolbar Icons](../images/new%20images/icons.jpg){ width="40%" }
 > - 2. If the icon is not visible, go to **Plugins** > **Manage and Install Plugins…**, then click on the **Installed** tab.
 > - 3. In the list, find **Geospatial Enabling Environments for Employment Spatial Tool (GEOE3)** and ensure the checkbox is ticked. The GEOE3 panel should now appear in the QGIS interface.
 
-<p align="center">
-  <a href="../images/new%20images/Install_page_show.png" target="_blank">
-    <img src="../images/new%20images/Install_page_show.png" alt="QGIS Plugin Installation" width="600" title="Click to enlarge">
-  </a>
-</p>
+![QGIS Plugin Installation](../images/new%20images/Install_page_show.png){ width="60%" }
 
 > - 4. Optionally, you can customize the plugin's behavior by navigating to:
 >   **Settings Menu** → **Options** → **GEOE3 Settings**. While the **default settings are recommended**, the following configurable sections are available:
@@ -90,6 +84,4 @@ Follow the steps below to install the GEOE3 QGIS plugin.
 Next: [The Interface](interface.md), opening the plugin, creating your
 first project, and getting oriented in the model tree.
 
-<a href="../images/new%20images/Install_page_settings.png" target="_blank">
-  <img src="../images/new%20images/Install_page_settings.png" alt="GEOE3 Settings" width="600" style="display: block; margin-left: auto; margin-right: auto;" title="Click to enlarge">
-</a>
+![GEOE3 Settings](../images/new%20images/Install_page_settings.png){ width="60%" }
