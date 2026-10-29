@@ -341,6 +341,30 @@ def study_area_sources(working_directory: str) -> List[PackSource]:
 RESULT_SUFFIX = "_result"
 TOP_LEVEL_RESULT_NAME = "analysis"
 
+#: Extra top-level composite rasters model.json can carry beyond the
+#: single "result_file" - produced once the GHSL-masking/population-
+#: weighting/opportunity-masking workflows have actually been run. This
+#: is the authoritative list AnalysisReport displays (see
+#: analysis_report.py's product_keys) - without these, a project whose
+#: analysis_aggregation step has run loses every one of these composite
+#: products on a country-pack round trip.
+TOP_LEVEL_RESULT_RASTER_FIELDS = [
+    "geoe3_score_ghsl_masked_result_file",
+    "geoe3_by_population",
+    "geoe3_score_by_population_ghsl_masked_result_file",
+    "opportunities_mask_result_file",
+]
+
+#: Subnational aggregation outputs - one polygon-per-administrative-zone
+#: vector GeoPackage per product (see analysis_report.py's
+#: subnational_product_keys), carrying the majority score per zone.
+TOP_LEVEL_SUBNATIONAL_AGGREGATION_FIELDS = [
+    "geoe3_score_subnational_aggregation",
+    "geoe3_score_ghsl_masked_subnational_aggregation",
+    "geoe3_by_population_subnational_aggregation",
+    "geoe3_score_by_population_ghsl_masked_subnational_aggregation",
+]
+
 
 def _iter_result_nodes(model: dict):
     """Yield (name, node) for every model.json node that can carry a result_file.
@@ -368,23 +392,29 @@ def _iter_result_nodes(model: dict):
 
 
 def result_sources(model: dict) -> List[PackSource]:
-    """Every already-computed result_file this project has, at any level.
+    """Every already-computed result this project has, at any level.
 
     Indicator, factor, dimension, and the top-level analysis node can
     each carry a result_file once that item has been run - almost always
     a .vrt, which GDAL can read and flatten into a plain raster table
     exactly like any other raster input (write_raster_source already
-    handles this; .vrt is just another GDAL-readable format).
+    handles this; .vrt is just another GDAL-readable format). The model
+    can also carry extra top-level composite products
+    (TOP_LEVEL_RESULT_RASTER_FIELDS, rasters; TOP_LEVEL_SUBNATIONAL_
+    AGGREGATION_FIELDS, per-zone vectors) once the analysis_aggregation
+    workflow has run - these use their own field name as the pack's
+    table name directly (no dim_/fac_ prefixing needed - field names
+    are already unique and don't collide with any id).
 
     Args:
         model: The parsed model.json document.
 
     Returns:
-        One PackSource per configured result_file found (clip=False -
-        a result is already confined to the study area by construction).
-        Items that haven't been run yet (empty result_file) are omitted;
-        a result_file pointing at a file that's since been moved or
-        deleted is still returned here and lands in build_country_pack()'s
+        One PackSource per configured result found (clip=False - a
+        result is already confined to the study area by construction).
+        Items that haven't been run yet (empty value) are omitted; a
+        result pointing at a file that's since been moved or deleted is
+        still returned here and lands in build_country_pack()'s
         "skipped" list, the same as any other missing source.
 
         Dimension and factor names get study_area_grid's own "dim_"/
@@ -397,11 +427,22 @@ def result_sources(model: dict) -> List[PackSource]:
         otherwise collide and silently drop one of the two - confirmed
         live against a real project before this prefixing was added.
     """
-    return [
+    sources = [
         PackSource(f"{name}{RESULT_SUFFIX}", node["result_file"], "raster", clip=False)
         for name, node in _iter_result_nodes(model)
         if node.get("result_file")
     ]
+    sources += [
+        PackSource(field, model[field], "raster", clip=False)
+        for field in TOP_LEVEL_RESULT_RASTER_FIELDS
+        if model.get(field)
+    ]
+    sources += [
+        PackSource(field, model[field], "vector", clip=False)
+        for field in TOP_LEVEL_SUBNATIONAL_AGGREGATION_FIELDS
+        if model.get(field)
+    ]
+    return sources
 
 
 def index_score_values(model: dict) -> List[dict]:

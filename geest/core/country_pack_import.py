@@ -42,6 +42,9 @@ from geest.core.country_pack import (
     PROJECT_LEVEL_SOURCES,
     PROJECT_MODEL_TABLE_NAME,
     RESULT_SUFFIX,
+    S2S_VECTOR_FIELD_BY_MODE,
+    TOP_LEVEL_RESULT_RASTER_FIELDS,
+    TOP_LEVEL_SUBNATIONAL_AGGREGATION_FIELDS,
     _indicator_source_field,
     _iter_result_nodes,
     _project_level_source_field,
@@ -149,7 +152,7 @@ def _project_level_import_targets(model: dict) -> Dict[str, tuple]:
 
 
 def _result_import_targets(model: dict) -> Dict[str, tuple]:
-    """layer_name -> (node, "result_file") for every already-computed result.
+    """layer_name -> (node, field_name, kind) for every already-computed result.
 
     Args:
         model: The parsed model.json document.
@@ -157,13 +160,48 @@ def _result_import_targets(model: dict) -> Dict[str, tuple]:
     Returns:
         One entry per indicator/factor/dimension/top-level node that has
         a result_file configured, keyed by result_sources()'s own
-        "{name}_result" naming.
+        "{name}_result" naming, plus one entry per configured extra
+        top-level composite product (TOP_LEVEL_RESULT_RASTER_FIELDS/
+        TOP_LEVEL_SUBNATIONAL_AGGREGATION_FIELDS), keyed by their own
+        field name directly (see result_sources()'s docstring - these
+        don't need dim_/fac_ prefixing, their names are already unique).
     """
-    return {
-        f"{name}{RESULT_SUFFIX}": (node, "result_file")
+    targets = {
+        f"{name}{RESULT_SUFFIX}": (node, "result_file", "raster")
         for name, node in _iter_result_nodes(model)
         if node.get("result_file")
     }
+    for field in TOP_LEVEL_RESULT_RASTER_FIELDS:
+        if model.get(field):
+            targets[field] = (model, field, "raster")
+    for field in TOP_LEVEL_SUBNATIONAL_AGGREGATION_FIELDS:
+        if model.get(field):
+            targets[field] = (model, field, "vector")
+    return targets
+
+
+def _sync_s2s_output_path(indicator: dict) -> None:
+    """Point a Space2Stats indicator's s2s_output_path at its new, already-rewritten layer_source file.
+
+    s2s_output_path duplicates the SAME GeoPackage environmental_
+    hazards_layer_source/nighttime_lights_layer_source references (just
+    without the "|layername=" suffix) - confirmed on a real regional-
+    scale project. Only the layer_source field is rewritten by the main
+    import loop (it's the field indicator_source() actually reads);
+    this keeps the duplicate in sync so it doesn't keep pointing at the
+    exporting machine's path.
+
+    Args:
+        indicator: One (already-rewritten) indicator object from the
+            reconstructed model.
+    """
+    if not indicator.get("s2s_output_path"):
+        return
+    for field_name in S2S_VECTOR_FIELD_BY_MODE.values():
+        value = indicator.get(field_name)
+        if value:
+            indicator["s2s_output_path"] = value.split("|layername=")[0]
+            return
 
 
 def _extract_raster(pack_path: str, table_name: str, out_dir: str) -> str:
@@ -307,6 +345,7 @@ def import_country_pack(
     inputs_dir = os.path.join(imports_dir, "inputs")
     results_dir = os.path.join(imports_dir, "results")
     inputs_gpkg = os.path.join(imports_dir, "inputs.gpkg")
+    results_gpkg = os.path.join(imports_dir, "results.gpkg")
     study_area_gpkg = os.path.join(working_directory, "study_area", "study_area.gpkg")
 
     imported: List[str] = []
@@ -332,8 +371,11 @@ def import_country_pack(
                 else:
                     model[field_name] = _extract_vector_into(pack_path, table_name, inputs_gpkg)
             elif table_name in result_targets:
-                node, field_name = result_targets[table_name]
-                node[field_name] = _extract_raster(pack_path, table_name, results_dir)
+                node, field_name, kind = result_targets[table_name]
+                if kind == "raster":
+                    node[field_name] = _extract_raster(pack_path, table_name, results_dir)
+                else:
+                    node[field_name] = _extract_vector_into(pack_path, table_name, results_gpkg)
             elif table_name in study_area_layer_names:
                 _extract_vector_into(pack_path, table_name, study_area_gpkg)
             else:
@@ -349,6 +391,16 @@ def import_country_pack(
 
     if progress_callback:
         progress_callback(len(ordered_names), len(ordered_names), "")
+
+    # The model records its own working directory - stale after a move,
+    # same as every other path rewritten above.
+    if "working_folder" in model:
+        model["working_folder"] = working_directory
+
+    for dimension in model.get("dimensions", []):
+        for factor in dimension.get("factors", []):
+            for indicator in factor.get("indicators", []):
+                _sync_s2s_output_path(indicator)
 
     with open(model_json_path, "w", encoding="utf-8") as f:
         json.dump(model, f, indent=2)

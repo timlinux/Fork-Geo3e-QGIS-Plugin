@@ -291,6 +291,30 @@ class TestResultSources(unittest.TestCase):
         names = {s.layer_name for s in result_sources(model)}
         self.assertEqual(names, {"fac_fcv_result", "FCV_result"})
 
+    def test_captures_extra_top_level_composite_products(self):
+        """Regression test: model.json can carry up to 8 extra top-level
+        composite products once the analysis_aggregation workflow has
+        run (GHSL-masked/by-population rasters, per-zone subnational
+        aggregation vectors) - confirmed live on a real regional-scale
+        project (StLuciaH3), none of which result_sources() bundled
+        before this was added."""
+        model = {
+            "geoe3_score_ghsl_masked_result_file": "/path/masked.vrt",
+            "geoe3_by_population": "/path/by_pop.vrt",
+            "geoe3_score_by_population_ghsl_masked_result_file": "/path/by_pop_masked.vrt",
+            "opportunities_mask_result_file": "/path/opportunities.vrt",
+            "geoe3_score_subnational_aggregation": "/path/sub1.gpkg|layername=sub1",
+            "geoe3_score_ghsl_masked_subnational_aggregation": "/path/sub2.gpkg|layername=sub2",
+            "geoe3_by_population_subnational_aggregation": "/path/sub3.gpkg|layername=sub3",
+            "geoe3_score_by_population_ghsl_masked_subnational_aggregation": "/path/sub4.gpkg|layername=sub4",
+        }
+        sources = result_sources(model)
+        by_name = {s.layer_name: s for s in sources}
+        self.assertEqual(len(sources), 8)
+        self.assertEqual(by_name["geoe3_score_ghsl_masked_result_file"].kind, "raster")
+        self.assertEqual(by_name["geoe3_score_subnational_aggregation"].kind, "vector")
+        self.assertTrue(all(s.clip is False for s in sources))
+
 
 class TestAllSources(unittest.TestCase):
     def test_combines_project_level_and_every_indicator(self):

@@ -12,6 +12,7 @@ from geest.core.country_pack_import import (
     _indicator_import_targets,
     _project_level_import_targets,
     _result_import_targets,
+    _sync_s2s_output_path,
     import_country_pack,
 )
 
@@ -109,9 +110,38 @@ class TestResultImportTargets(unittest.TestCase):
         }
         targets = _result_import_targets(model)
         self.assertEqual(set(targets), {"dim_contextual_result"})
-        node, field_name = targets["dim_contextual_result"]
+        node, field_name, kind = targets["dim_contextual_result"]
         self.assertIs(node, model["dimensions"][0])
         self.assertEqual(field_name, "result_file")
+        self.assertEqual(kind, "raster")
+
+    def test_resolves_extra_top_level_composite_products(self):
+        model = {
+            "geoe3_by_population": "/old/by_pop.vrt",
+            "geoe3_score_subnational_aggregation": "/old/sub.gpkg|layername=sub",
+        }
+        targets = _result_import_targets(model)
+        self.assertEqual(set(targets), {"geoe3_by_population", "geoe3_score_subnational_aggregation"})
+        node, field_name, kind = targets["geoe3_by_population"]
+        self.assertIs(node, model)
+        self.assertEqual(field_name, "geoe3_by_population")
+        self.assertEqual(kind, "raster")
+        self.assertEqual(targets["geoe3_score_subnational_aggregation"][2], "vector")
+
+
+class TestSyncS2sOutputPath(unittest.TestCase):
+    def test_points_s2s_output_path_at_the_rewritten_layer_source(self):
+        indicator = {
+            "s2s_output_path": "/old/s2s_fire.gpkg",
+            "environmental_hazards_layer_source": "/new/s2s_fire.gpkg|layername=s2s_fire",
+        }
+        _sync_s2s_output_path(indicator)
+        self.assertEqual(indicator["s2s_output_path"], "/new/s2s_fire.gpkg")
+
+    def test_leaves_untouched_when_not_present(self):
+        indicator = {"environmental_hazards_raster": "/new/fire.tif"}
+        _sync_s2s_output_path(indicator)
+        self.assertNotIn("s2s_output_path", indicator)
 
 
 class TestImportCountryPack(unittest.TestCase):
@@ -133,6 +163,7 @@ class TestImportCountryPack(unittest.TestCase):
 
     def _model(self):
         return {
+            "working_folder": TEST_DATA,
             "dimensions": [
                 {
                     "id": "place_characterization",
@@ -187,6 +218,11 @@ class TestImportCountryPack(unittest.TestCase):
         # model.json blob - no index_score_values round trip needed.
         self.assertEqual(by_id["Workplace_Index"]["index_score"], 95)
 
+        # The model's own record of where it lives is updated to the
+        # new working directory, not left pointing at the exporting
+        # machine's.
+        self.assertEqual(reloaded["working_folder"], self.import_dir)
+
         # Spatial inputs got rewritten to point inside the new working
         # directory, not the original fixture directory.
         childcare_path = by_id["Childcare_Location"]["point_per_cell_layer_source"]
@@ -221,6 +257,38 @@ class TestImportCountryPack(unittest.TestCase):
         # Neither metadata table leaks into "imported" as a real layer.
         self.assertNotIn(PROJECT_MODEL_TABLE_NAME, summary["imported"])
         self.assertNotIn(INDEX_SCORE_TABLE_NAME, summary["imported"])
+
+    def test_extra_top_level_composite_products_survive_the_round_trip(self):
+        """Regression test: a project whose analysis_aggregation step
+        has run carries up to 8 extra top-level composite products
+        (GHSL-masked/by-population rasters, per-zone subnational
+        aggregation vectors) - confirmed live on a real regional-scale
+        project (StLuciaH3), none of which build_country_pack()/
+        import_country_pack() touched before this was added, leaving
+        them pointing at the exporting machine's path forever."""
+        model = self._model()
+        model["geoe3_by_population"] = os.path.join(TEST_DATA, "rasters", "raster.tif")
+        model["geoe3_score_subnational_aggregation"] = os.path.join(
+            TEST_DATA, "points", "fake_childcare.gpkg|layername=fake_childcare"
+        )
+        build_country_pack(working_directory=TEST_DATA, model=model, output_path=self.pack_path)
+
+        import_country_pack(self.pack_path, self.import_dir)
+        with open(os.path.join(self.import_dir, "model.json"), encoding="utf-8") as f:
+            reloaded = json.load(f)
+
+        new_raster = reloaded["geoe3_by_population"]
+        self.assertTrue(new_raster.startswith(self.import_dir))
+        raster_ds = gdal.Open(new_raster)
+        self.assertIsNotNone(raster_ds)
+        raster_ds = None
+
+        new_vector = reloaded["geoe3_score_subnational_aggregation"]
+        self.assertTrue(new_vector.startswith(self.import_dir))
+        base_path, layer_name = new_vector.split("|layername=")
+        vector_ds = gdal.OpenEx(base_path, gdal.OF_VECTOR)
+        self.assertIsNotNone(vector_ds.GetLayerByName(layer_name))
+        vector_ds = None
 
     def test_feature_counts_survive_the_round_trip(self):
         self._build_pack()
