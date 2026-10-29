@@ -10,6 +10,7 @@ from geest.core.country_pack import (
     index_score_values,
     indicator_source,
     project_level_sources,
+    result_sources,
     study_area_sources,
 )
 
@@ -211,6 +212,77 @@ class TestStudyAreaSources(unittest.TestCase):
 
     def test_missing_study_area_gpkg_returns_empty_list(self):
         self.assertEqual(study_area_sources("/no/such/working/directory"), [])
+
+
+class TestResultSources(unittest.TestCase):
+    def test_captures_every_level_that_has_run(self):
+        model = {
+            "output_filename": "GeoE3_Score",
+            "result_file": "/path/GeoE3_Score_combined.vrt",
+            "dimensions": [
+                {
+                    "id": "contextual",
+                    "result_file": "/path/Contextual_score_combined.vrt",
+                    "factors": [
+                        {"id": "eplex", "result_file": ""},
+                        {
+                            "id": "workplace_discrimination",
+                            "result_file": "/path/WD_output_combined.vrt",
+                            "indicators": [
+                                {"id": "Workplace_Index", "result_file": "/path/Workplace_Index_combined.vrt"},
+                                {"id": "Unrun_Indicator", "result_file": ""},
+                            ],
+                        },
+                    ],
+                }
+            ],
+        }
+        sources = result_sources(model)
+        by_name = {s.layer_name: s for s in sources}
+        self.assertEqual(
+            set(by_name),
+            {
+                "GeoE3_Score_result",
+                "dim_contextual_result",
+                "fac_workplace_discrimination_result",
+                "Workplace_Index_result",
+            },
+        )
+        self.assertTrue(all(s.kind == "raster" and s.clip is False for s in by_name.values()))
+
+    def test_falls_back_to_a_fixed_name_with_no_output_filename(self):
+        model = {"result_file": "/path/result.vrt", "dimensions": []}
+        sources = result_sources(model)
+        self.assertEqual(sources[0].layer_name, "analysis_result")
+
+    def test_empty_model_has_no_results(self):
+        self.assertEqual(result_sources({}), [])
+
+    def test_factor_and_same_named_indicator_do_not_collide(self):
+        """Regression test: GeoPackage table names are case-insensitive at
+        the SQLite level even though gpkg_contents preserves the display
+        casing, so a factor ("fcv") and its one child indicator ("FCV")
+        sharing the same name in different case would silently collide
+        and drop one of the two without this prefixing - confirmed live
+        against a real project (Cabo Verde) before this was added:
+        "fcv_result" (factor) wrote fine, "FCV_result" (indicator) landed
+        in "skipped" with no further explanation."""
+        model = {
+            "dimensions": [
+                {
+                    "id": "place_characterization",
+                    "factors": [
+                        {
+                            "id": "fcv",
+                            "result_file": "/path/fac_fcv.vrt",
+                            "indicators": [{"id": "FCV", "result_file": "/path/ind_fcv.vrt"}],
+                        }
+                    ],
+                }
+            ]
+        }
+        names = {s.layer_name for s in result_sources(model)}
+        self.assertEqual(names, {"fac_fcv_result", "FCV_result"})
 
 
 class TestAllSources(unittest.TestCase):

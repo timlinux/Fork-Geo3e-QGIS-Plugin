@@ -272,6 +272,60 @@ def study_area_sources(working_directory: str) -> List[PackSource]:
     return sources
 
 
+#: Suffix appended to an indicator/factor/dimension's own id - or the
+#: fixed name used for the top-level analysis result when the model has
+#: no better name for it - so a computed result never collides with
+#: that same item's own input-data entry in the pack.
+RESULT_SUFFIX = "_result"
+TOP_LEVEL_RESULT_NAME = "analysis"
+
+
+def result_sources(model: dict) -> List[PackSource]:
+    """Every already-computed result_file this project has, at any level.
+
+    Indicator, factor, dimension, and the top-level analysis node can
+    each carry a result_file once that item has been run - almost always
+    a .vrt, which GDAL can read and flatten into a plain raster table
+    exactly like any other raster input (write_raster_source already
+    handles this; .vrt is just another GDAL-readable format).
+
+    Args:
+        model: The parsed model.json document.
+
+    Returns:
+        One PackSource per configured result_file found (clip=False -
+        a result is already confined to the study area by construction).
+        Items that haven't been run yet (empty result_file) are omitted;
+        a result_file pointing at a file that's since been moved or
+        deleted is still returned here and lands in build_country_pack()'s
+        "skipped" list, the same as any other missing source.
+
+        Dimension and factor names get study_area_grid's own "dim_"/
+        "fac_" column-naming convention (confirmed against a real
+        project's schema), not just this module's local choice: GeoPackage
+        table names are case-insensitive at the SQLite level even though
+        gpkg_contents preserves the original casing for display, so a
+        factor and its one child indicator sharing the same name in
+        different case (e.g. factor "fcv" under indicator "FCV") would
+        otherwise collide and silently drop one of the two - confirmed
+        live against a real project before this prefixing was added.
+    """
+    sources = []
+
+    def _maybe_add(name, result_file):
+        if result_file:
+            sources.append(PackSource(f"{name}{RESULT_SUFFIX}", result_file, "raster", clip=False))
+
+    _maybe_add(model.get("output_filename") or TOP_LEVEL_RESULT_NAME, model.get("result_file"))
+    for dimension in model.get("dimensions", []):
+        _maybe_add(f"dim_{dimension.get('id')}", dimension.get("result_file"))
+        for factor in dimension.get("factors", []):
+            _maybe_add(f"fac_{factor.get('id')}", factor.get("result_file"))
+            for indicator in factor.get("indicators", []):
+                _maybe_add(indicator.get("id"), indicator.get("result_file"))
+    return sources
+
+
 def index_score_values(model: dict) -> List[dict]:
     """Every manually-typed national-score indicator's configured value.
 
@@ -604,7 +658,7 @@ def build_country_pack(
     if os.path.exists(output_path):
         os.remove(output_path)
 
-    sources = all_sources(model) + study_area_sources(working_directory)
+    sources = all_sources(model) + study_area_sources(working_directory) + result_sources(model)
     written: List[str] = []
     skipped: List[str] = []
 
