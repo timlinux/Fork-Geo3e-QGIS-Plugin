@@ -665,7 +665,18 @@ class RoadNetworkPanel(FORM_CLASS, QWidget):
         ]
 
         if existing_layers:
+            # Block signals: this is restoring the UI to match data already
+            # persisted in model.json, not a new selection to write back. An
+            # unguarded setLayer() here fires currentIndexChanged -> emits
+            # road_network_layer_path_changed -> writes to the model, and
+            # when this runs during a project switch (the combo's filtered
+            # layer list still settling as QgsProject's layers change over)
+            # a stale layer from the PREVIOUS project can be "current" at
+            # that instant, overwriting the new project's own correct path
+            # with the old project's one.
+            self.road_layer_combo.blockSignals(True)
             self.road_layer_combo.setLayer(existing_layers[0])
+            self.road_layer_combo.blockSignals(False)
             log_message(
                 f"Restored road network from existing layer: {layer_path}",
                 level=Qgis.Info,
@@ -690,9 +701,12 @@ class RoadNetworkPanel(FORM_CLASS, QWidget):
             self.road_network_layer_path_changed.emit("")
             return
 
-        # Add to QGIS and select in combo box
+        # Add to QGIS and select in combo box (blockSignals: see the
+        # matching comment on the Case 1 branch above)
         QgsProject.instance().addMapLayer(layer)
+        self.road_layer_combo.blockSignals(True)
         self.road_layer_combo.setLayer(layer)
+        self.road_layer_combo.blockSignals(False)
         log_message(f"Restored road network layer from path: {layer_path}", level=Qgis.Info)
         self.update_road_layer_status()
 
