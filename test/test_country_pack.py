@@ -47,6 +47,35 @@ class TestIndicatorSource(unittest.TestCase):
         self.assertEqual(source.path, "/path/fire.tif")
         self.assertEqual(source.kind, "raster")
 
+    def test_environmental_hazards_falls_back_to_s2s_vector_field(self):
+        """Regression test: a regional-scale, Space2Stats-backed project
+        leaves environmental_hazards_raster empty and stores its actual
+        configured source (an OGR vector layer, not a raster) under
+        environmental_hazards_layer_source instead - confirmed live
+        against a real project where every hazard indicator was silently
+        dropped from the pack until this fallback was added."""
+        indicator = {
+            "id": "Fire",
+            "analysis_mode": "use_environmental_hazards",
+            "environmental_hazards_raster": "",
+            "environmental_hazards_source": "s2s",
+            "environmental_hazards_layer_source": "/path/s2s_fire.gpkg|layername=s2s_fire",
+        }
+        source = indicator_source(indicator)
+        self.assertEqual(source.path, "/path/s2s_fire.gpkg|layername=s2s_fire")
+        self.assertEqual(source.kind, "vector")
+
+    def test_nighttime_lights_falls_back_to_s2s_vector_field(self):
+        indicator = {
+            "id": "Street_Lights",
+            "analysis_mode": "use_nighttime_lights",
+            "nighttime_lights_raster": "",
+            "nighttime_lights_layer_source": "/path/s2s_ntl.gpkg|layername=s2s_ntl",
+        }
+        source = indicator_source(indicator)
+        self.assertEqual(source.path, "/path/s2s_ntl.gpkg|layername=s2s_ntl")
+        self.assertEqual(source.kind, "vector")
+
     def test_csv_mode_captures_xy_fields(self):
         indicator = {
             "id": "FCV",

@@ -47,10 +47,24 @@ VECTOR_WIDGET_MODES = {
     "use_classify_safety_polygon_into_classes",
 }
 
-#: analysis_mode -> the one field holding its raster path directly.
+#: analysis_mode -> the field holding its raster path, when the source
+#: is a local raster file.
 RASTER_FIELD_BY_MODE = {
     "use_environmental_hazards": "environmental_hazards_raster",
     "use_nighttime_lights": "nighttime_lights_raster",
+}
+
+#: Both of those same two analysis_modes also have a Space2Stats-backed
+#: variant (used at regional scale): instead of a local raster file, the
+#: configured source is an OGR-provider vector layer (study area grid
+#: cells pre-joined to an S2S field), saved under a differently-named
+#: field - confirmed live on a real regional-scale project where the
+#: plain raster field was empty but this one held the actual configured
+#: source, silently dropping every hazard/nighttime-lights indicator
+#: from the pack.
+S2S_VECTOR_FIELD_BY_MODE = {
+    "use_environmental_hazards": "environmental_hazards_layer_source",
+    "use_nighttime_lights": "nighttime_lights_layer_source",
 }
 
 #: analysis_mode -> (csv field name, x field, y field) for the one
@@ -107,7 +121,9 @@ def indicator_source(indicator: dict) -> Optional[PackSource]:
         A PackSource, or None if this indicator has no file-based input
         (a manually-typed national score such as EPLEX or a WBL factor,
         an indicator nobody has configured yet, or a regional-scale
-        Space2Stats-backed polygon indicator with no local file).
+        use_polygon_per_cell indicator - unlike environmental hazards and
+        nighttime lights, its Space2Stats variant has no queryable layer
+        path field at all, only a join configuration).
     """
     mode = indicator.get("analysis_mode")
     layer_name = indicator.get("id")
@@ -116,7 +132,11 @@ def indicator_source(indicator: dict) -> Optional[PackSource]:
 
     if mode in RASTER_FIELD_BY_MODE:
         path = indicator.get(RASTER_FIELD_BY_MODE[mode])
-        return PackSource(layer_name, path, "raster") if path else None
+        if path:
+            return PackSource(layer_name, path, "raster")
+        s2s_field = S2S_VECTOR_FIELD_BY_MODE.get(mode)
+        s2s_path = indicator.get(s2s_field) if s2s_field else None
+        return PackSource(layer_name, s2s_path, "vector") if s2s_path else None
 
     if mode in CSV_MODE_FIELDS:
         field_name, x_field, y_field = CSV_MODE_FIELDS[mode]
