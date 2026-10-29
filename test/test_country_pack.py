@@ -4,6 +4,7 @@ import unittest
 
 from geest.core.country_pack import (
     INDEX_SCORE_TABLE_NAME,
+    PROJECT_MODEL_TABLE_NAME,
     _actual_table_names,
     all_sources,
     build_country_pack,
@@ -15,6 +16,10 @@ from geest.core.country_pack import (
 )
 
 TEST_DATA = os.path.join(os.path.dirname(__file__), "test_data")
+
+#: build_country_pack() always writes this table (the full model.json),
+#: regardless of what sources the project has configured.
+ALWAYS_WRITTEN_TABLE_NAMES = {PROJECT_MODEL_TABLE_NAME}
 
 #: Layers in test/test_data/study_area/study_area.gpkg - bundled
 #: automatically by build_country_pack() whenever working_directory has
@@ -407,7 +412,9 @@ class TestBuildCountryPack(unittest.TestCase):
         )
         self.assertEqual(
             set(summary["written"]),
-            {"Childcare_Location", "Generic_Raster", "Fire", "index_score_values"} | STUDY_AREA_LAYER_NAMES,
+            {"Childcare_Location", "Generic_Raster", "Fire", "index_score_values"}
+            | STUDY_AREA_LAYER_NAMES
+            | ALWAYS_WRITTEN_TABLE_NAMES,
         )
         self.assertEqual(summary["skipped"], [])
         self.assertTrue(os.path.exists(self.out_path))
@@ -446,7 +453,9 @@ class TestBuildCountryPack(unittest.TestCase):
             model=model,
             output_path=self.out_path,
         )
-        expected = {"Generic_Raster", "Fire", "index_score_values"} | STUDY_AREA_LAYER_NAMES
+        expected = (
+            {"Generic_Raster", "Fire", "index_score_values"} | STUDY_AREA_LAYER_NAMES | ALWAYS_WRITTEN_TABLE_NAMES
+        )
         self.assertEqual(set(summary["written"]), expected)
         self.assertEqual(_actual_table_names(self.out_path), expected)
 
@@ -490,6 +499,22 @@ class TestBuildCountryPack(unittest.TestCase):
 
         self.assertEqual(rows["Workplace_Index"], 95.0)
         self.assertEqual(rows["eplex_score_indicator"], 0.65)
+
+    def test_project_model_table_round_trips_the_exact_model(self):
+        import json
+
+        from osgeo import ogr
+
+        model = self._model()
+        build_country_pack(working_directory=TEST_DATA, model=model, output_path=self.out_path)
+
+        ds = ogr.Open(self.out_path)
+        layer = ds.GetLayerByName(PROJECT_MODEL_TABLE_NAME)
+        feature = next(iter(layer))
+        reloaded = json.loads(feature["model_json"])
+        ds = None
+
+        self.assertEqual(reloaded, model)
 
 
 if __name__ == "__main__":

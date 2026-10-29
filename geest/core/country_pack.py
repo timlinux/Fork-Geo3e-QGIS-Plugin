@@ -1,16 +1,32 @@
 # -*- coding: utf-8 -*-
 """📦 Country pack module.
 
-Builds a single "country pack" GeoPackage from a project's own configured
-INPUT data - not the computed indicator results, but the raw datasets a
-user pointed each indicator at (the schools shapefile, the hazard raster,
-the road network, and so on). Each one is clipped to the study area and
-written as its own layer/raster table, named after the indicator's own
-id for per-indicator sources, or a fixed name for project-level ones
-(road network, population, masks, the subnational aggregation boundary).
-A handful of indicators (EPLEX, the WBL-sourced Contextual factors) have
-no spatial dataset at all - just a number a user typed in - and get a
-row in one plain, non-spatial INDEX_SCORE_TABLE_NAME table instead.
+Builds a single "country pack" GeoPackage self-contained enough to
+reconstruct an entire GeoE3 project elsewhere. Four kinds of content go
+in, each its own named layer/raster table:
+
+- Configured INPUT data: the raw dataset a user pointed each indicator
+  at (the schools shapefile, the hazard raster, the road network, and so
+  on), clipped to the study area and named after the indicator's own id
+  for per-indicator sources, or a fixed name for project-level ones
+  (road network, population, masks, the subnational aggregation
+  boundary). See all_sources().
+- The project's own study_area.gpkg, bundled wholesale (not just the
+  grid boundary - study_area_grid also carries every already-computed
+  indicator/factor/dimension/analysis score as its own attribute
+  column, which is what makes already-computed results survive the
+  round trip almost for free). See study_area_sources().
+- Already-computed result rasters, when they exist (an item that's been
+  run), named "{id}_result" (dim_/fac_ prefixed for dimensions/factors -
+  see result_sources()'s docstring for why that matters).
+- A handful of indicators (EPLEX, the WBL-sourced Contextual factors)
+  have no spatial dataset at all - just a number a user typed in - and
+  get a row in INDEX_SCORE_TABLE_NAME instead (index_score_values()).
+
+The project's full model.json also goes in as a single JSON blob, in
+PROJECT_MODEL_TABLE_NAME (write_project_model_table()) - everything
+else in this module writes the DATA a model.json points at; this is
+what lets an importer reconstruct the model.json itself.
 
 Every function here does its own file I/O (GDAL/OGR) and never touches
 QgsProject.instance() - safe to call from a QgsTask worker thread. If a
@@ -22,6 +38,7 @@ AnalysisReportTask - see base_report.py's history) and pass it in via
 style_xml_by_path.
 """
 
+import json
 import os
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
@@ -558,6 +575,59 @@ def write_index_score_table(rows: List[dict], out_gpkg: str, append: bool) -> No
     dataset = None  # noqa: F841 - closes/flushes the dataset
 
 
+#: Name of the aspatial table write_project_model_table() writes the
+#: project's full model.json into.
+PROJECT_MODEL_TABLE_NAME = "project_model"
+
+
+def write_project_model_table(model: dict, out_gpkg: str, append: bool) -> None:
+    """Write the project's full model.json into the pack as a single-row, non-spatial table.
+
+    Serialized as one JSON text field rather than one column per
+    model.json key: model.json's shape (dimensions -> factors ->
+    indicators, each with dozens of fields that vary by analysis_mode)
+    doesn't map onto a flat table row, and a single blob means the pack
+    can reconstruct the exact project it came from without this module
+    needing to separately track a schema for every field model.json
+    happens to have today.
+
+    Args:
+        model: The parsed model.json document.
+        out_gpkg: Path to the output country pack GeoPackage.
+        append: True if out_gpkg already has other content - see
+            write_index_score_table()'s matching parameter.
+
+    Raises:
+        RuntimeError: If the table can't be created.
+    """
+    if append:
+        dataset = gdal.OpenEx(out_gpkg, gdal.OF_UPDATE | gdal.OF_ALL)
+    else:
+        dataset = ogr.GetDriverByName("GPKG").CreateDataSource(out_gpkg)
+
+    if dataset is None:
+        raise RuntimeError(f"Could not open '{out_gpkg}' to write {PROJECT_MODEL_TABLE_NAME}")
+
+    layer = dataset.CreateLayer(PROJECT_MODEL_TABLE_NAME, geom_type=ogr.wkbNone)
+    if layer is None:
+        dataset = None
+        raise RuntimeError(f"Could not create the {PROJECT_MODEL_TABLE_NAME} table")
+
+    # width=0: unlimited. GPKG's underlying SQLite TEXT column has no
+    # real length cap regardless, but OGR defaults OFTString to a
+    # 255-character width that some drivers DO enforce/truncate to.
+    model_json_field = ogr.FieldDefn("model_json", ogr.OFTString)
+    model_json_field.SetWidth(0)
+    layer.CreateField(model_json_field)
+
+    feature = ogr.Feature(layer.GetLayerDefn())
+    feature.SetField("model_json", json.dumps(model))
+    layer.CreateFeature(feature)
+    feature = None
+
+    dataset = None  # noqa: F841 - closes/flushes the dataset
+
+
 def _apply_style(uri: str, is_raster: bool, style_xml: str) -> None:
     """Embed a style into a just-written GPKG layer's layer_styles table.
 
@@ -713,6 +783,13 @@ def build_country_pack(
         except Exception as e:
             log_message(f"Skipping {INDEX_SCORE_TABLE_NAME}: {e}", tag="GeoE3")
             skipped.append(INDEX_SCORE_TABLE_NAME)
+
+    try:
+        write_project_model_table(model, output_path, os.path.exists(output_path))
+        written.append(PROJECT_MODEL_TABLE_NAME)
+    except Exception as e:
+        log_message(f"Skipping {PROJECT_MODEL_TABLE_NAME}: {e}", tag="GeoE3")
+        skipped.append(PROJECT_MODEL_TABLE_NAME)
 
     # Final, authoritative check: re-open the finished file and confirm
     # every layer the loop above believes it wrote is actually still
