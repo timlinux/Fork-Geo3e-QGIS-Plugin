@@ -8,6 +8,7 @@ from qgis.PyQt.QtCore import pyqtSignal
 from qgis.PyQt.QtGui import QFont
 from qgis.PyQt.QtWidgets import QWidget
 
+from geest.gui.panels.blank_project_guard import ensure_blank_qgis_project
 from geest.gui.widgets import CustomBannerLabel
 from geest.utilities import (
     get_ui_class,
@@ -63,7 +64,15 @@ class SetupPanel(FORM_CLASS, QWidget):
         self.switch_to_create_project_tab.emit()
 
     def import_project(self):
-        """⚙️ Import a country pack."""
+        """⚙️ Import a country pack - prompts to save and start fresh if needed.
+
+        Importing points the dock's working directory at a different
+        project's data and re-populates the Tree panel from its
+        model.json - doing that on top of an already-open project would
+        silently mix the two, so a blank QGIS project is required first.
+        """
+        if not ensure_blank_qgis_project(self):
+            return
         self.switch_to_import_project_tab.emit()
 
     def on_previous_button_clicked(self):

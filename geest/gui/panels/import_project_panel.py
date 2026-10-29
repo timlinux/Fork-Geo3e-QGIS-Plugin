@@ -12,6 +12,7 @@ from qgis.PyQt.QtGui import QFont
 from qgis.PyQt.QtWidgets import QFileDialog, QWidget
 
 from geest.core.tasks import ImportCountryPackTask
+from geest.gui.panels.blank_project_guard import ensure_blank_qgis_project
 from geest.gui.widgets import CustomBannerLabel
 from geest.utilities import (
     get_ui_class,
@@ -90,6 +91,11 @@ class ImportProjectPanel(FORM_CLASS, QWidget):
 
     def import_project(self):
         """⚙️ Validate the chosen pack/directory and start the import task."""
+        # Defensive backstop - SetupPanel's own button already prompts
+        # to save and start fresh before switching to this panel, but
+        # re-check here too in case the QGIS project changed in between.
+        if not ensure_blank_qgis_project(self):
+            return
         if not self.pack_path or not os.path.exists(self.pack_path):
             self.status_label.setText("Choose a country pack GeoPackage first.")
             return
