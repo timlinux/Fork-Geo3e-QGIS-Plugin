@@ -185,14 +185,9 @@ class AnalysisReport(BaseReport):
         """
         if self._cleanup_done:
             return
-        # Remove temporary layers added for rendering
-        for layer in self.temp_layers:
-            if layer:
-                try:
-                    QgsProject.instance().removeMapLayer(layer.id())
-                    log_message(f"Removed temporary layer '{layer.name()}' from project.")
-                except Exception as e:
-                    log_message(f"Could not remove temporary layer: {e}")
+        # temp_layers are never registered with QgsProject (see
+        # _load_raster/_load_vector/_load_study_area_layer) - just drop the
+        # references so they can be garbage collected.
         self.temp_layers = []
         # Rasterised subnational score matrix pages (see
         # _render_score_matrix_page_image()) - temp PNG files on disk,
@@ -234,8 +229,12 @@ class AnalysisReport(BaseReport):
                     }
                 )
                 layer.setRenderer(QgsSingleSymbolRenderer(symbol))
-                # Add to project temporarily for rendering
-                QgsProject.instance().addMapLayer(layer, False)
+                # Kept alive via temp_layers (GC only) - report generation
+                # runs on a QgsTask worker thread, and QgsProject.addMapLayer()
+                # mutates the GUI-thread-only layer registry, which crashes
+                # intermittently (observed as a Windows access violation).
+                # QgsLayoutItemMap.setLayers() renders directly from the
+                # layer object; project membership was never required.
                 self.temp_layers.append(layer)
                 log_message(f"Loaded study area outline from {layer_name}")
                 break
@@ -549,7 +548,6 @@ class AnalysisReport(BaseReport):
             log_message(f"Layer {layer_uri} is invalid — omitted from report.", tag="GeoE3")
             self._raster_cache[layer_uri] = None
             return None
-        QgsProject.instance().addMapLayer(layer, False)
         self.temp_layers.append(layer)
         self._raster_cache[layer_uri] = layer
         return layer
@@ -579,7 +577,6 @@ class AnalysisReport(BaseReport):
         if os.path.exists(qml_path):
             layer.loadNamedStyle(qml_path)
             AnalysisReport._thin_vector_outlines(layer)
-        QgsProject.instance().addMapLayer(layer, False)
         self.temp_layers.append(layer)
         self._vector_cache[layer_uri] = layer
         return layer
