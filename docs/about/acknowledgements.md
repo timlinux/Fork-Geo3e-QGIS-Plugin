@@ -10,17 +10,9 @@ For further inquiries or to get involved, please feel free to drop us an **email
 
 We look forward to hearing from you!
 
-<p align="center">
-  <a href="https://www.worldbank.org/en/topic/climatechange/brief/canada-world-bank-clean-energy-and-forests-climate-facility">
-    <img src="../images/new%20images/Canada-removebg-preview.png" alt="Canada-World Bank Clean Energy and Forests Climate Facility" width="100" style="margin-right: 100px;"/>
-  </a>
-  <a href="https://worldbank.github.io/GOST">
-    <img src="../images/new%20images/logo_GDA.jpg" alt="WB GDA" width="150" style="margin-right: 100px;"/>
-  </a>
-  <a href="https://worldbank.github.io/GOST">
-    <img src="../images/new%20images/wb-gost.png" alt="WB GOST" width="200" style="margin-right: 100px;"/>
-  </a>
-<a href="https://www.kartoza.com">
-  <img src="../images/new%20images/KartozaLogoHorizontalCMYK-removebg-preview.png" alt="Kartoza" width="150"/>
-</a>
+<p align="center" markdown="1">
+[![Canada-World Bank Clean Energy and Forests Climate Facility](../images/new%20images/Canada-removebg-preview.png){ width="100" }](https://www.worldbank.org/en/topic/climatechange/brief/canada-world-bank-clean-energy-and-forests-climate-facility)
+[![WB GDA](../images/new%20images/logo_GDA.jpg){ width="150" }](https://worldbank.github.io/GOST)
+[![WB GOST](../images/new%20images/wb-gost.png){ width="200" }](https://worldbank.github.io/GOST)
+[![Kartoza](../images/new%20images/KartozaLogoHorizontalCMYK-removebg-preview.png){ width="150" }](https://www.kartoza.com)
 </p>
