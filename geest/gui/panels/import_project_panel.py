@@ -106,7 +106,10 @@ class ImportProjectPanel(FORM_CLASS, QWidget):
         self.disable_widgets()
 
         self.import_task = ImportCountryPackTask(self.pack_path, self.working_dir)
-        self.import_task.progressChanged.connect(self.progress_bar.setValue)
+        # QgsTask.progressChanged emits a float; QProgressBar.setValue
+        # wants an int - PyQt6/QGIS 4 enforces this strictly where
+        # PyQt5/QGIS 3 silently coerced it.
+        self.import_task.progressChanged.connect(lambda value: self.progress_bar.setValue(int(value)))
         self.import_task.taskCompleted.connect(self.on_import_completed)
         self.import_task.taskTerminated.connect(self.on_import_failed)
         QgsApplication.taskManager().addTask(self.import_task)
