@@ -157,6 +157,51 @@ class PackSource:
     clip: bool = True
 
 
+def _indicator_source_field(indicator: dict) -> Optional[tuple]:
+    """Resolve which populated field holds one indicator's configured input, if any.
+
+    Factored out of indicator_source() so the country pack importer can
+    resolve the exact same field - by the exact same rules - to know
+    which one to overwrite with a freshly-extracted local path, rather
+    than re-deriving this mode-dispatch logic a second time and risking
+    the two falling out of step.
+
+    Args:
+        indicator: One indicator object from model.json.
+
+    Returns:
+        (field_name, kind, x_field, y_field) for the one field that's
+        actually populated, or None if this indicator has no file-based
+        input (see indicator_source()'s docstring for the cases this
+        covers). x_field/y_field are only meaningful for kind "csv".
+    """
+    mode = indicator.get("analysis_mode")
+    if not mode:
+        return None
+
+    if mode in RASTER_FIELD_BY_MODE:
+        field_name = RASTER_FIELD_BY_MODE[mode]
+        if indicator.get(field_name):
+            return field_name, "raster", None, None
+        s2s_field = S2S_VECTOR_FIELD_BY_MODE.get(mode)
+        if s2s_field and indicator.get(s2s_field):
+            return s2s_field, "vector", None, None
+        return None
+
+    if mode in CSV_MODE_FIELDS:
+        field_name, x_field, y_field = CSV_MODE_FIELDS[mode]
+        return (field_name, "csv", x_field, y_field) if indicator.get(field_name) else None
+
+    if mode in VECTOR_WIDGET_MODES:
+        widget_key = mode[len("use_") :]
+        for candidate in (f"{widget_key}_layer_source", f"{widget_key}_shapefile"):
+            if indicator.get(candidate):
+                return candidate, "vector", None, None
+        return None
+
+    return None
+
+
 def indicator_source(indicator: dict) -> Optional[PackSource]:
     """The configured input dataset for one indicator.
 
@@ -171,29 +216,33 @@ def indicator_source(indicator: dict) -> Optional[PackSource]:
         nighttime lights, its Space2Stats variant has no queryable layer
         path field at all, only a join configuration).
     """
-    mode = indicator.get("analysis_mode")
     layer_name = indicator.get("id")
-    if not mode or not layer_name:
+    if not layer_name:
         return None
+    resolved = _indicator_source_field(indicator)
+    if not resolved:
+        return None
+    field_name, kind, x_field, y_field = resolved
+    return PackSource(layer_name, indicator[field_name], kind, x_field, y_field)
 
-    if mode in RASTER_FIELD_BY_MODE:
-        path = indicator.get(RASTER_FIELD_BY_MODE[mode])
-        if path:
-            return PackSource(layer_name, path, "raster")
-        s2s_field = S2S_VECTOR_FIELD_BY_MODE.get(mode)
-        s2s_path = indicator.get(s2s_field) if s2s_field else None
-        return PackSource(layer_name, s2s_path, "vector") if s2s_path else None
 
-    if mode in CSV_MODE_FIELDS:
-        field_name, x_field, y_field = CSV_MODE_FIELDS[mode]
-        path = indicator.get(field_name)
-        return PackSource(layer_name, path, "csv", x_field, y_field) if path else None
+def _project_level_source_field(model: dict, field_names: List[str]) -> Optional[str]:
+    """The first of a project-level input's candidate field names that's actually populated.
 
-    if mode in VECTOR_WIDGET_MODES:
-        widget_key = mode[len("use_") :]
-        path = indicator.get(f"{widget_key}_layer_source") or indicator.get(f"{widget_key}_shapefile")
-        return PackSource(layer_name, path, "vector") if path else None
+    Factored out of project_level_sources() for the same reason as
+    _indicator_source_field() - the importer needs to know exactly which
+    field to overwrite, not just the path it currently holds.
 
+    Args:
+        model: The parsed model.json document.
+        field_names: Candidate field names to try, in order.
+
+    Returns:
+        The first populated field name, or None if none of them are set.
+    """
+    for field_name in field_names:
+        if model.get(field_name):
+            return field_name
     return None
 
 
@@ -209,19 +258,15 @@ def project_level_sources(model: dict) -> List[PackSource]:
     """
     sources = []
     for layer_name, field_names, kind in PROJECT_LEVEL_SOURCES:
-        path = None
-        for field_name in field_names:
-            path = model.get(field_name)
-            if path:
-                break
-        if not path:
+        field_name = _project_level_source_field(model, field_names)
+        if not field_name:
             continue
         actual_kind = kind
         if actual_kind is None:
             # Population is the one source whose kind varies project to
             # project - population_source records which it is.
             actual_kind = "raster" if model.get("population_source") == "raster" else "vector"
-        sources.append(PackSource(layer_name, path, actual_kind))
+        sources.append(PackSource(layer_name, model[field_name], actual_kind))
     return sources
 
 
@@ -297,6 +342,31 @@ RESULT_SUFFIX = "_result"
 TOP_LEVEL_RESULT_NAME = "analysis"
 
 
+def _iter_result_nodes(model: dict):
+    """Yield (name, node) for every model.json node that can carry a result_file.
+
+    Factored out of result_sources() so the country pack importer can
+    walk the exact same nodes, under the exact same names, to know which
+    node's result_file to overwrite with a freshly-extracted local path.
+
+    Args:
+        model: The parsed model.json document.
+
+    Yields:
+        (name, node) pairs - name is the unprefixed/un-suffixed id (see
+        result_sources()'s docstring for the dim_/fac_ prefixing applied
+        on top of this), node is the dict to look for "result_file" on
+        (the model itself, for the top-level analysis node).
+    """
+    yield model.get("output_filename") or TOP_LEVEL_RESULT_NAME, model
+    for dimension in model.get("dimensions", []):
+        yield f"dim_{dimension.get('id')}", dimension
+        for factor in dimension.get("factors", []):
+            yield f"fac_{factor.get('id')}", factor
+            for indicator in factor.get("indicators", []):
+                yield indicator.get("id"), indicator
+
+
 def result_sources(model: dict) -> List[PackSource]:
     """Every already-computed result_file this project has, at any level.
 
@@ -327,20 +397,11 @@ def result_sources(model: dict) -> List[PackSource]:
         otherwise collide and silently drop one of the two - confirmed
         live against a real project before this prefixing was added.
     """
-    sources = []
-
-    def _maybe_add(name, result_file):
-        if result_file:
-            sources.append(PackSource(f"{name}{RESULT_SUFFIX}", result_file, "raster", clip=False))
-
-    _maybe_add(model.get("output_filename") or TOP_LEVEL_RESULT_NAME, model.get("result_file"))
-    for dimension in model.get("dimensions", []):
-        _maybe_add(f"dim_{dimension.get('id')}", dimension.get("result_file"))
-        for factor in dimension.get("factors", []):
-            _maybe_add(f"fac_{factor.get('id')}", factor.get("result_file"))
-            for indicator in factor.get("indicators", []):
-                _maybe_add(indicator.get("id"), indicator.get("result_file"))
-    return sources
+    return [
+        PackSource(f"{name}{RESULT_SUFFIX}", node["result_file"], "raster", clip=False)
+        for name, node in _iter_result_nodes(model)
+        if node.get("result_file")
+    ]
 
 
 def index_score_values(model: dict) -> List[dict]:
