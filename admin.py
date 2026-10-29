@@ -71,11 +71,11 @@ def _ignore_patterns(directory: str, files: list) -> set:
     return ignored
 
 
-# Vendored dependencies to bundle with the plugin by default - pinned to
-# match requirements-dev.txt's h3==4.4.2 exactly, so the dev env and the
-# shipped plugin always carry the identical version. bundle_deps() is
-# wired into build()/generate_zip(), so this is bundled automatically,
-# not as a separate manual step - see WHEEL_PLATFORMS below for which
+# Vendored dependencies to bundle with the plugin by default - each pinned
+# to match requirements-dev.txt exactly, so the dev env and the shipped
+# plugin always carry identical versions. bundle_deps() is wired into
+# build()/generate_zip(), so this is bundled automatically, not as a
+# separate manual step - see WHEEL_PLATFORMS below for which
 # platforms/Python versions get a compiled wheel; the plugin zip has a
 # hard 15MB size limit on QGIS's plugin infrastructure (see
 # MAX_ZIP_SIZE_MB and the size-check in generate_zip()), so this list is
@@ -83,9 +83,20 @@ def _ignore_patterns(directory: str, files: list) -> set:
 # "packages a real indicator/workflow unconditionally needs that aren't
 # already in every QGIS Python" (pyarrow, by contrast, is NOT vendored:
 # see geest/core/arrow_batch_writer.py's module docstring - it degrades
-# gracefully when absent, and OSGeo4W's Windows QGIS already bundles it).
+# gracefully when absent, and OSGeo4W's Windows QGIS already bundles it;
+# numpy and pandas are likewise assumed already bundled - every
+# indicator/report module imports them unconditionally, same as h3, but
+# they're core QGIS/GDAL dependencies rather than geospatial-niche ones).
+# jsonschema is deliberately NOT here: it only ever backed JSONValidator
+# (geest/core/json_validator.py), which nothing in the runtime code called
+# - removed entirely rather than vendoring a 5-package dependency chain
+# (jsonschema + attrs + jsonschema-specifications + referencing + the
+# compiled rpds-py) for dead code. The same model.json/schema.json check
+# now runs as a pre-commit hook (scripts/validate_model_schema.py) using
+# the flake-provisioned jsonschema instead.
 VENDORED_PACKAGES = [
     "h3==4.4.2",
+    "defusedxml==0.7.1",
 ]
 # Platform tags for wheel downloads. Deliberately narrow, not "every
 # platform/Python combo PyPI has a wheel for" - the 15MB zip limit forced
@@ -379,7 +390,6 @@ def build(
     if icon_path is None:
         _log("Could not copy icon", context=context)
     # compile_resources(context, output_directory)
-    add_requirements_file(context, output_directory)
     generate_metadata(context, output_directory)
     return output_directory
 
@@ -456,17 +466,6 @@ def compile_resources(
     target_path.parent.mkdir(parents=True, exist_ok=True)
     _log(f"compile_resources target_path: {target_path}", context=context)
     subprocess.run(shlex.split(f"pyrcc5 -o {target_path} {resources_path}"))  # nosec B603
-
-
-@app.command()
-def add_requirements_file(
-    context: typer.Context,
-    output_directory: typing.Optional[Path] = LOCAL_ROOT_DIR / "build/temp",
-):
-    resources_path = LOCAL_ROOT_DIR / "requirements-dev.txt"
-    target_path = output_directory / "requirements-dev.txt"
-
-    shutil.copy(str(resources_path.resolve()), str(target_path))
 
 
 @app.command()
