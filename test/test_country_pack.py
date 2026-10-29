@@ -3,6 +3,7 @@ import os
 import unittest
 
 from geest.core.country_pack import (
+    _actual_table_names,
     all_sources,
     build_country_pack,
     indicator_source,
@@ -238,6 +239,25 @@ class TestBuildCountryPack(unittest.TestCase):
         self.assertIn("Childcare_Location", summary["skipped"])
         self.assertIn("Generic_Raster", summary["written"])
         self.assertIn("Fire", summary["written"])
+
+    def test_verification_works_on_a_raster_only_pack(self):
+        """Regression test: ogr.Open() returns None for a GeoPackage that
+        has no vector layers at all (confirmed live via the test above,
+        before this was fixed) - verification has to open with
+        gdal.OF_ALL instead, or a pack with every vector source skipped
+        would look like it verified nothing, even though the rasters
+        wrote and survived correctly."""
+        model = self._model()
+        # Drop every vector source, leaving only the two rasters.
+        del model["dimensions"][0]["factors"][0]["indicators"][0]
+
+        summary = build_country_pack(
+            working_directory=TEST_DATA,
+            model=model,
+            output_path=self.out_path,
+        )
+        self.assertEqual(set(summary["written"]), {"Generic_Raster", "Fire"})
+        self.assertEqual(_actual_table_names(self.out_path), {"Generic_Raster", "Fire"})
 
     def test_vector_then_raster_order_does_not_lose_the_vector_layer(self):
         """Regression test: GDAL's GPKG driver recreates the whole file

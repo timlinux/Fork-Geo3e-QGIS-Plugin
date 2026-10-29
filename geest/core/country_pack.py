@@ -348,6 +348,44 @@ def _apply_style(uri: str, is_raster: bool, style_xml: str) -> None:
         log_message(f"Could not save style for '{uri}' into the pack: {error}", tag="GeoE3")
 
 
+def _actual_table_names(output_path: str) -> set:
+    """The table names a GeoPackage genuinely contains, vector and raster alike.
+
+    A write call succeeding doesn't guarantee a layer survives to the end
+    of the build - GDAL's GPKG driver, for one real example, silently
+    recreates the whole file (destroying everything already in it)
+    unless told to append (see build_country_pack()'s "append" handling,
+    added after this exact failure mode wiped out an already-written
+    layer). Querying gpkg_contents directly, rather than GetLayerCount()
+    (vector only) or GetSubDatasets() (which comes back empty when a
+    GeoPackage has exactly one raster table - not "no rasters", just an
+    API quirk of how GDAL exposes a single raster), is the one way to
+    reliably list both kinds regardless of how many of each are present.
+    Opened with gdal.OF_ALL rather than plain ogr.Open(), which returns
+    None for a GeoPackage that happens to have no vector layers at all
+    (confirmed live: a pack with only raster sources, e.g. after the one
+    configured vector source failed and got skipped, couldn't be
+    reopened by the OGR driver on its own).
+
+    Args:
+        output_path: Path to the pack GeoPackage.
+
+    Returns:
+        Every table name gpkg_contents lists, or an empty set if the
+        file can't be opened at all.
+    """
+    dataset = gdal.OpenEx(output_path, gdal.OF_ALL)
+    if dataset is None:
+        return set()
+    names = set()
+    result = dataset.ExecuteSQL("SELECT table_name FROM gpkg_contents")
+    for feature in result:
+        names.add(feature.GetField("table_name"))
+    dataset.ReleaseResultSet(result)
+    dataset = None
+    return names
+
+
 def build_country_pack(
     working_directory: str,
     model: dict,
@@ -370,9 +408,11 @@ def build_country_pack(
             current_layer_name), called after each source is processed.
 
     Returns:
-        {"written": [...], "skipped": [...]} - layer names written, and
-        source paths that failed and were skipped (the pack still
-        contains everything that succeeded).
+        {"written": [...], "skipped": [...]} - layer names confirmed
+        present in the finished file (re-verified against the file
+        itself, not just "the write call didn't raise" - see
+        _actual_table_names()), and names that either failed outright or
+        didn't survive to the end of the build.
     """
     style_xml_by_path = style_xml_by_path or {}
     study_area_gpkg = os.path.join(working_directory, "study_area", "study_area.gpkg")
@@ -428,4 +468,20 @@ def build_country_pack(
     if progress_callback:
         progress_callback(len(sources), len(sources), "")
 
-    return {"written": written, "skipped": skipped}
+    # Final, authoritative check: re-open the finished file and confirm
+    # every layer the loop above believes it wrote is actually still
+    # there. A write call not raising is not proof of that - see
+    # _actual_table_names()'s docstring for the exact failure mode this
+    # caught live.
+    actual_names = _actual_table_names(output_path) if written else set()
+    verified = [name for name in written if name in actual_names]
+    lost = [name for name in written if name not in actual_names]
+    if lost:
+        log_message(
+            f"Country pack: {len(lost)} layer(s) were written but are missing from "
+            f"the final file (likely overwritten by a later write): {lost}",
+            tag="GeoE3",
+        )
+        skipped = skipped + lost
+
+    return {"written": verified, "skipped": skipped}
