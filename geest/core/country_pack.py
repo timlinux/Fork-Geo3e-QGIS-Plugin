@@ -43,7 +43,7 @@ import os
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
-from osgeo import gdal, ogr
+from osgeo import gdal, ogr, osr
 from qgis.core import QgsRasterLayer, QgsVectorLayer
 from qgis.PyQt.QtXml import QDomDocument
 
@@ -532,6 +532,77 @@ def write_raster_source(
     result = None  # noqa: F841 - closes/flushes the dataset
 
 
+def _source_vector_srs(base_path: str, source_layer_name: Optional[str], kind: str) -> Optional[osr.SpatialReference]:
+    """Best-effort spatial reference of a vector/CSV source, for clip-geometry reprojection.
+
+    Args:
+        base_path: Path to the source dataset (no "|layername=" suffix).
+        source_layer_name: Layer to read within base_path, or None to use the first layer.
+        kind: "vector" or "csv".
+
+    Returns:
+        The source's CRS, or EPSG:4326 for a CSV (X_POSSIBLE_NAMES/
+        Y_POSSIBLE_NAMES columns are always plain lon/lat - the one CSV-
+        sourced indicator type here uses ACLED's own "longitude"/
+        "latitude" columns), or None if it can't be determined (an
+        unreadable source, or a layer with no CRS set at all).
+    """
+    if kind == "csv":
+        srs = osr.SpatialReference()
+        srs.ImportFromEPSG(4326)
+        return srs
+    dataset = gdal.OpenEx(base_path, gdal.OF_VECTOR)
+    if dataset is None:
+        return None
+    layer = dataset.GetLayerByName(source_layer_name) if source_layer_name else dataset.GetLayer(0)
+    return layer.GetSpatialRef() if layer else None
+
+
+def _clip_geometry_wkt(study_area_gpkg: str, study_area_layer: str, target_srs: osr.SpatialReference) -> str:
+    """The study area clip boundary, reprojected into a target CRS, as WKT.
+
+    ogr2ogr's own "-clipsrc <file> -clipsrclayer <name>" form does not
+    reproject the clip geometry to match the source layer's CRS on the
+    GDAL version QGIS 3.34 LTR bundles (3.4.1) - confirmed live: clipping
+    a WGS84 OSM point layer (StLucia's Kindergartens_Location and every
+    other OSM-sourced multi_buffer_point indicator) against a UTM-
+    projected study area boundary silently produced a VALID but EMPTY
+    layer (gdal.VectorTranslate didn't raise, build_country_pack()'s own
+    summary reported it as "written") because the clip polygon's
+    coordinates (metres) never overlap the source's (degrees). Unlike
+    write_raster_source()'s gdal.Warp cutline, which does handle this
+    automatically. Reprojecting the clip geometry ourselves and passing
+    it as a literal WKT geometry (rather than a file+layer reference)
+    sidesteps the gap entirely, regardless of GDAL version.
+
+    Args:
+        study_area_gpkg: Path to the study area GeoPackage.
+        study_area_layer: Name of the study area polygon layer to clip against.
+        target_srs: CRS to reproject the clip geometry into (the
+            source layer's own CRS - see _source_vector_srs()).
+
+    Returns:
+        WKT of the union of every feature in the clip layer, in target_srs.
+    """
+    dataset = ogr.Open(study_area_gpkg)
+    layer = dataset.GetLayerByName(study_area_layer)
+    source_srs = layer.GetSpatialRef()
+    geometry = ogr.Geometry(ogr.wkbMultiPolygon)
+    for feature in layer:
+        geometry = geometry.Union(feature.GetGeometryRef())
+    if source_srs and not source_srs.IsSame(target_srs):
+        # Axis order, not just the projection, has to match how OGR
+        # geometries actually store coordinates (x=easting/lon,
+        # y=northing/lat) - GDAL 3.x's default "authority compliant"
+        # axis strategy can otherwise swap them for CRSes (like
+        # EPSG:4326) formally defined lat-before-lon.
+        source_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+        target_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+        geometry.Transform(osr.CoordinateTransformation(source_srs, target_srs))
+    dataset = None
+    return geometry.ExportToWkt()
+
+
 def write_vector_source(
     source: PackSource,
     study_area_gpkg: str,
@@ -574,10 +645,20 @@ def write_vector_source(
         # tables) would pull in every layer under this one name.
         extra_options = [source_layer_name]
 
-    # clipSrc/clipSrcLayer as named kwargs need a newer GDAL than QGIS
-    # 3.34 LTR bundles (3.4.1) - the "-clipsrc"/"-clipsrclayer" raw CLI
-    # options have been supported since much older GDAL releases.
-    clip_options = ["-clipsrc", study_area_gpkg, "-clipsrclayer", study_area_layer] if source.clip else []
+    clip_options = []
+    if source.clip:
+        # Reproject the clip boundary into the source's own CRS and
+        # pass it as a literal WKT geometry - see _clip_geometry_wkt()'s
+        # docstring for why a plain "-clipsrc <file> -clipsrclayer
+        # <name>" reference silently drops every feature when the two
+        # CRSes differ. Falls back to the file+layer form (the old,
+        # same-CRS-only behaviour) only if the source's CRS genuinely
+        # can't be determined.
+        target_srs = _source_vector_srs(base_path, source_layer_name, source.kind)
+        if target_srs is not None:
+            clip_options = ["-clipsrc", _clip_geometry_wkt(study_area_gpkg, study_area_layer, target_srs)]
+        else:
+            clip_options = ["-clipsrc", study_area_gpkg, "-clipsrclayer", study_area_layer]
     options = gdal.VectorTranslateOptions(
         format="GPKG",
         layerName=source.layer_name,

@@ -2,6 +2,8 @@
 import os
 import unittest
 
+from osgeo import ogr, osr
+
 from geest.core.country_pack import (
     INDEX_SCORE_TABLE_NAME,
     PROJECT_MODEL_TABLE_NAME,
@@ -348,6 +350,84 @@ class TestAllSources(unittest.TestCase):
         self.assertEqual(len(sources), 2)
         self.assertEqual({s.layer_name for s in sources}, {"Kindergartens_Location", "Primary_School_Location"})
         self.assertTrue(all(s.path == shared_path for s in sources))
+
+
+class TestClipAcrossMismatchedCrs(unittest.TestCase):
+    """Regression test: a vector source whose CRS differs from the study
+    area clip boundary's CRS used to silently clip away every feature,
+    with no error - confirmed live against StLuciaH3 and CaboVerde,
+    where every OSM-sourced (WGS84) indicator was reduced to 0 features
+    against each project's UTM-projected study area. ogr2ogr's own
+    "-clipsrc <file> -clipsrclayer <name>" form does not reproject the
+    clip geometry on the GDAL version QGIS 3.34 bundles (3.4.1)."""
+
+    def setUp(self):
+        self.out_path = os.path.join(TEST_DATA, "_country_pack_crs_test_output.gpkg")
+        self.wgs84_points_path = os.path.join(TEST_DATA, "_wgs84_points.gpkg")
+        for path in (self.out_path, self.wgs84_points_path):
+            if os.path.exists(path):
+                os.remove(path)
+
+        # Reproject the existing (UTM 32620) childcare fixture's own
+        # points into WGS84 lon/lat, so they're guaranteed to fall
+        # inside the study area's clip boundary once correctly
+        # reprojected back - not guessed coordinates.
+        source_ds = ogr.Open(os.path.join(TEST_DATA, "points", "fake_childcare.gpkg"))
+        source_layer = source_ds.GetLayerByName("fake_childcare")
+        source_srs = source_layer.GetSpatialRef()
+        wgs84_srs = osr.SpatialReference()
+        wgs84_srs.ImportFromEPSG(4326)
+        source_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+        wgs84_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+        transform = osr.CoordinateTransformation(source_srs, wgs84_srs)
+
+        self.expected_feature_count = source_layer.GetFeatureCount()
+
+        driver = ogr.GetDriverByName("GPKG")
+        out_ds = driver.CreateDataSource(self.wgs84_points_path)
+        out_layer = out_ds.CreateLayer("wgs84_points", srs=wgs84_srs, geom_type=ogr.wkbPoint)
+        for feature in source_layer:
+            geometry = feature.GetGeometryRef().Clone()
+            geometry.Transform(transform)
+            out_feature = ogr.Feature(out_layer.GetLayerDefn())
+            out_feature.SetGeometry(geometry)
+            out_layer.CreateFeature(out_feature)
+            out_feature = None
+        out_ds = None
+        source_ds = None
+
+    def tearDown(self):
+        for path in (self.out_path, self.wgs84_points_path):
+            if os.path.exists(path):
+                os.remove(path)
+
+    def test_clipping_reprojects_the_boundary_to_match_the_source_crs(self):
+        model = {
+            "dimensions": [
+                {
+                    "factors": [
+                        {
+                            "indicators": [
+                                {
+                                    "id": "Wgs84_Points",
+                                    "analysis_mode": "use_point_per_cell",
+                                    "point_per_cell_layer_source": (f"{self.wgs84_points_path}|layername=wgs84_points"),
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+        build_country_pack(working_directory=TEST_DATA, model=model, output_path=self.out_path)
+
+        ds = ogr.Open(self.out_path)
+        layer = ds.GetLayerByName("Wgs84_Points")
+        feature_count = layer.GetFeatureCount()
+        ds = None
+
+        self.assertGreater(self.expected_feature_count, 0)
+        self.assertEqual(feature_count, self.expected_feature_count)
 
 
 class TestBuildCountryPack(unittest.TestCase):
