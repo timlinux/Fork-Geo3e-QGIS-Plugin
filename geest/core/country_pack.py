@@ -124,6 +124,12 @@ class PackSource:
         kind: "vector", "raster", or "csv".
         x_field: For kind "csv", the longitude/X column name.
         y_field: For kind "csv", the latitude/Y column name.
+        clip: Whether to clip this source to the study area on write.
+            False for the study area's own layers (study_area_grid alone
+            can be 400k+ features - clipping it against itself is both
+            pointless and, at that size, genuinely slow) and for already-
+            computed result rasters (already confined to the study area
+            by construction).
     """
 
     layer_name: str
@@ -131,6 +137,7 @@ class PackSource:
     kind: str
     x_field: Optional[str] = None
     y_field: Optional[str] = None
+    clip: bool = True
 
 
 def indicator_source(indicator: dict) -> Optional[PackSource]:
@@ -220,6 +227,48 @@ def all_sources(model: dict) -> List[PackSource]:
                 source = indicator_source(indicator)
                 if source:
                     sources.append(source)
+    return sources
+
+
+def study_area_sources(working_directory: str) -> List[PackSource]:
+    """Every layer in the project's own study_area.gpkg, bundled as-is.
+
+    This is what makes "preserve already-computed results" work almost
+    for free: study_area_grid carries every indicator/factor/dimension/
+    analysis score the project has run so far as its own attribute
+    column (confirmed against a real project's schema), so bundling the
+    grid wholesale captures all of that without needing to separately
+    chase down every possible result layer. Every layer is included
+    (not just the grid) rather than a hand-picked subset, since this
+    file's own layer list can grow as the plugin evolves and a stale
+    hardcoded list would silently drop something that later turned out
+    to matter (GHSL settlements, the coarser display-resolution grid
+    variants, etc.).
+
+    Args:
+        working_directory: The project's working directory.
+
+    Returns:
+        One PackSource per layer in study_area/study_area.gpkg (clip=False
+        - see PackSource's docstring), or an empty list if that file
+        doesn't exist yet (a project that was never run past setup).
+    """
+    study_area_gpkg = os.path.join(working_directory, "study_area", "study_area.gpkg")
+    if not os.path.exists(study_area_gpkg):
+        return []
+    dataset = gdal.OpenEx(study_area_gpkg, gdal.OF_VECTOR)
+    if dataset is None:
+        return []
+    sources = [
+        PackSource(
+            dataset.GetLayerByIndex(i).GetName(),
+            f"{study_area_gpkg}|layername={dataset.GetLayerByIndex(i).GetName()}",
+            "vector",
+            clip=False,
+        )
+        for i in range(dataset.GetLayerCount())
+    ]
+    dataset = None
     return sources
 
 
@@ -332,13 +381,18 @@ def write_raster_source(
     creation_options = [f"RASTER_TABLE={source.layer_name}"]
     if append:
         creation_options.append("APPEND_SUBDATASET=YES")
+    warp_kwargs = {}
+    if source.clip:
+        warp_kwargs = {
+            "cutlineDSName": study_area_gpkg,
+            "cutlineLayer": study_area_layer,
+            "cropToCutline": True,
+        }
     options = gdal.WarpOptions(
         format="GPKG",
-        cutlineDSName=study_area_gpkg,
-        cutlineLayer=study_area_layer,
-        cropToCutline=True,
         outputType=(gdal.GDT_Float32 if _raster_needs_float32(source.path) else gdal.GDT_Unknown),
         creationOptions=creation_options,
+        **warp_kwargs,
     )
     result = gdal.Warp(out_gpkg, base_path, options=options)
     if result is None:
@@ -391,11 +445,12 @@ def write_vector_source(
     # clipSrc/clipSrcLayer as named kwargs need a newer GDAL than QGIS
     # 3.34 LTR bundles (3.4.1) - the "-clipsrc"/"-clipsrclayer" raw CLI
     # options have been supported since much older GDAL releases.
+    clip_options = ["-clipsrc", study_area_gpkg, "-clipsrclayer", study_area_layer] if source.clip else []
     options = gdal.VectorTranslateOptions(
         format="GPKG",
         layerName=source.layer_name,
         accessMode="append" if append else None,
-        options=["-clipsrc", study_area_gpkg, "-clipsrclayer", study_area_layer] + extra_options,
+        options=clip_options + extra_options,
     )
     result = gdal.VectorTranslate(out_gpkg, source_ds, options=options)
     if result is None:
@@ -549,7 +604,7 @@ def build_country_pack(
     if os.path.exists(output_path):
         os.remove(output_path)
 
-    sources = all_sources(model)
+    sources = all_sources(model) + study_area_sources(working_directory)
     written: List[str] = []
     skipped: List[str] = []
 

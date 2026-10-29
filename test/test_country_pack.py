@@ -10,9 +10,22 @@ from geest.core.country_pack import (
     index_score_values,
     indicator_source,
     project_level_sources,
+    study_area_sources,
 )
 
 TEST_DATA = os.path.join(os.path.dirname(__file__), "test_data")
+
+#: Layers in test/test_data/study_area/study_area.gpkg - bundled
+#: automatically by build_country_pack() whenever working_directory has
+#: a study_area/study_area.gpkg, on top of whatever indicator sources a
+#: test configures.
+STUDY_AREA_LAYER_NAMES = {
+    "study_area_bbox",
+    "study_area_bboxes",
+    "study_area_polygons",
+    "study_area_clip_polygons",
+    "study_area_grid",
+}
 
 
 class TestIndicatorSource(unittest.TestCase):
@@ -188,6 +201,18 @@ class TestIndexScoreValues(unittest.TestCase):
         self.assertEqual(index_score_values(model), [])
 
 
+class TestStudyAreaSources(unittest.TestCase):
+    def test_returns_every_layer_unclipped(self):
+        sources = study_area_sources(TEST_DATA)
+        self.assertEqual({s.layer_name for s in sources}, STUDY_AREA_LAYER_NAMES)
+        self.assertTrue(all(s.kind == "vector" for s in sources))
+        self.assertTrue(all(s.clip is False for s in sources))
+        self.assertTrue(all(s.path.startswith(TEST_DATA) for s in sources))
+
+    def test_missing_study_area_gpkg_returns_empty_list(self):
+        self.assertEqual(study_area_sources("/no/such/working/directory"), [])
+
+
 class TestAllSources(unittest.TestCase):
     def test_combines_project_level_and_every_indicator(self):
         model = {
@@ -309,7 +334,8 @@ class TestBuildCountryPack(unittest.TestCase):
             output_path=self.out_path,
         )
         self.assertEqual(
-            set(summary["written"]), {"Childcare_Location", "Generic_Raster", "Fire", "index_score_values"}
+            set(summary["written"]),
+            {"Childcare_Location", "Generic_Raster", "Fire", "index_score_values"} | STUDY_AREA_LAYER_NAMES,
         )
         self.assertEqual(summary["skipped"], [])
         self.assertTrue(os.path.exists(self.out_path))
@@ -328,15 +354,19 @@ class TestBuildCountryPack(unittest.TestCase):
         self.assertIn("Generic_Raster", summary["written"])
         self.assertIn("Fire", summary["written"])
 
-    def test_verification_works_on_a_raster_only_pack(self):
+    def test_verification_works_with_no_indicator_level_vector_sources(self):
         """Regression test: ogr.Open() returns None for a GeoPackage that
         has no vector layers at all (confirmed live via the test above,
         before this was fixed) - verification has to open with
         gdal.OF_ALL instead, or a pack with every vector source skipped
         would look like it verified nothing, even though the rasters
-        wrote and survived correctly."""
+        wrote and survived correctly. study_area_sources() means a real
+        pack is never truly vector-free once study_area.gpkg exists, but
+        this still exercises the same OF_ALL code path with no
+        indicator-level vector content to rely on."""
         model = self._model()
-        # Drop every vector source, leaving only the two rasters.
+        # Drop the one indicator-level vector source, leaving only the
+        # two rasters (plus whatever study_area_sources() always adds).
         del model["dimensions"][0]["factors"][0]["indicators"][0]
 
         summary = build_country_pack(
@@ -344,8 +374,9 @@ class TestBuildCountryPack(unittest.TestCase):
             model=model,
             output_path=self.out_path,
         )
-        self.assertEqual(set(summary["written"]), {"Generic_Raster", "Fire", "index_score_values"})
-        self.assertEqual(_actual_table_names(self.out_path), {"Generic_Raster", "Fire", "index_score_values"})
+        expected = {"Generic_Raster", "Fire", "index_score_values"} | STUDY_AREA_LAYER_NAMES
+        self.assertEqual(set(summary["written"]), expected)
+        self.assertEqual(_actual_table_names(self.out_path), expected)
 
     def test_vector_then_raster_order_does_not_lose_the_vector_layer(self):
         """Regression test: GDAL's GPKG driver recreates the whole file
