@@ -3,9 +3,11 @@ import os
 import unittest
 
 from geest.core.country_pack import (
+    INDEX_SCORE_TABLE_NAME,
     _actual_table_names,
     all_sources,
     build_country_pack,
+    index_score_values,
     indicator_source,
     project_level_sources,
 )
@@ -131,6 +133,61 @@ class TestProjectLevelSources(unittest.TestCase):
         self.assertEqual(project_level_sources({}), [])
 
 
+class TestIndexScoreValues(unittest.TestCase):
+    def _model_with_one_indicator(self, indicator):
+        return {"dimensions": [{"factors": [{"indicators": [indicator]}]}]}
+
+    def test_contextual_index_score_is_captured(self):
+        model = self._model_with_one_indicator(
+            {
+                "id": "Workplace_Index",
+                "indicator": "Workplace Discrimination",
+                "analysis_mode": "use_contextual_index_score",
+                "index_score": 95,
+            }
+        )
+        rows = index_score_values(model)
+        self.assertEqual(
+            rows,
+            [
+                {
+                    "id": "Workplace_Index",
+                    "name": "Workplace Discrimination",
+                    "analysis_mode": "use_contextual_index_score",
+                    "value": 95.0,
+                }
+            ],
+        )
+
+    def test_eplex_uses_its_own_value_field(self):
+        model = self._model_with_one_indicator(
+            {
+                "id": "eplex_score_indicator",
+                "indicator": "EPLEX Score",
+                "analysis_mode": "use_eplex_score",
+                "eplex_score": 0.7,
+            }
+        )
+        rows = index_score_values(model)
+        self.assertEqual(rows[0]["value"], 0.7)
+
+    def test_spatial_indicator_is_not_captured(self):
+        model = self._model_with_one_indicator(
+            {
+                "id": "Kindergartens_Location",
+                "analysis_mode": "use_multi_buffer_point",
+                "multi_buffer_point_layer_source": "/path/points.gpkg",
+            }
+        )
+        self.assertEqual(index_score_values(model), [])
+
+    def test_unconfigured_index_score_indicator_is_omitted(self):
+        model = self._model_with_one_indicator(
+            {"id": "Digital_Inclusion", "analysis_mode": "use_index_score_with_ookla", "index_score": ""}
+        )
+        self.assertEqual(index_score_values(model), [])
+
+
 class TestAllSources(unittest.TestCase):
     def test_combines_project_level_and_every_indicator(self):
         model = {
@@ -251,7 +308,9 @@ class TestBuildCountryPack(unittest.TestCase):
             model=self._model(),
             output_path=self.out_path,
         )
-        self.assertEqual(set(summary["written"]), {"Childcare_Location", "Generic_Raster", "Fire"})
+        self.assertEqual(
+            set(summary["written"]), {"Childcare_Location", "Generic_Raster", "Fire", "index_score_values"}
+        )
         self.assertEqual(summary["skipped"], [])
         self.assertTrue(os.path.exists(self.out_path))
 
@@ -285,8 +344,8 @@ class TestBuildCountryPack(unittest.TestCase):
             model=model,
             output_path=self.out_path,
         )
-        self.assertEqual(set(summary["written"]), {"Generic_Raster", "Fire"})
-        self.assertEqual(_actual_table_names(self.out_path), {"Generic_Raster", "Fire"})
+        self.assertEqual(set(summary["written"]), {"Generic_Raster", "Fire", "index_score_values"})
+        self.assertEqual(_actual_table_names(self.out_path), {"Generic_Raster", "Fire", "index_score_values"})
 
     def test_vector_then_raster_order_does_not_lose_the_vector_layer(self):
         """Regression test: GDAL's GPKG driver recreates the whole file
@@ -306,6 +365,28 @@ class TestBuildCountryPack(unittest.TestCase):
         layer_names = [ds.GetLayerByIndex(i).GetName() for i in range(ds.GetLayerCount())]
         ds = None
         self.assertIn("Childcare_Location", layer_names)
+
+    def test_index_score_table_content_is_readable_back(self):
+        from osgeo import ogr
+
+        model = self._model()
+        model["dimensions"][0]["factors"][0]["indicators"].append(
+            {
+                "id": "eplex_score_indicator",
+                "indicator": "EPLEX Score",
+                "analysis_mode": "use_eplex_score",
+                "eplex_score": 0.65,
+            }
+        )
+        build_country_pack(working_directory=TEST_DATA, model=model, output_path=self.out_path)
+
+        ds = ogr.Open(self.out_path)
+        layer = ds.GetLayerByName(INDEX_SCORE_TABLE_NAME)
+        rows = {f["id"]: f["value"] for f in layer}
+        ds = None
+
+        self.assertEqual(rows["Workplace_Index"], 95.0)
+        self.assertEqual(rows["eplex_score_indicator"], 0.65)
 
 
 if __name__ == "__main__":

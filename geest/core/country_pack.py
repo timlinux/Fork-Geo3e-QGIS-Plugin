@@ -8,6 +8,9 @@ the road network, and so on). Each one is clipped to the study area and
 written as its own layer/raster table, named after the indicator's own
 id for per-indicator sources, or a fixed name for project-level ones
 (road network, population, masks, the subnational aggregation boundary).
+A handful of indicators (EPLEX, the WBL-sourced Contextual factors) have
+no spatial dataset at all - just a number a user typed in - and get a
+row in one plain, non-spatial INDEX_SCORE_TABLE_NAME table instead.
 
 Every function here does its own file I/O (GDAL/OGR) and never touches
 QgsProject.instance() - safe to call from a QgsTask worker thread. If a
@@ -23,7 +26,7 @@ import os
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
-from osgeo import gdal
+from osgeo import gdal, ogr
 from qgis.core import QgsRasterLayer, QgsVectorLayer
 from qgis.PyQt.QtXml import QDomDocument
 
@@ -73,6 +76,25 @@ S2S_VECTOR_FIELD_BY_MODE = {
 CSV_MODE_FIELDS = {
     "use_csv_to_point_layer": ("csv_to_point_layer_csv_file", "longitude", "latitude"),
 }
+
+#: analysis_mode -> field holding the configured value, for indicators
+#: that are a manually-typed single national score rather than a spatial
+#: dataset (EPLEX, and the WBL-sourced Contextual factors). Nothing to
+#: clip or copy for these - captured as rows in INDEX_SCORE_TABLE_NAME
+#: instead, so a project's full configuration survives in the pack
+#: rather than this handful of indicators silently having nothing to
+#: show for them.
+INDEX_SCORE_FIELD_BY_MODE = {
+    "use_index_score": "index_score",
+    "use_contextual_index_score": "index_score",
+    "use_index_score_with_ghsl": "index_score",
+    "use_index_score_with_ookla": "index_score",
+    "use_eplex_score": "eplex_score",
+}
+
+#: Name of the aspatial (non-spatial) table build_country_pack() writes
+#: the INDEX_SCORE_FIELD_BY_MODE values into.
+INDEX_SCORE_TABLE_NAME = "index_score_values"
 
 #: Project-level (not per-indicator) inputs: output layer name -> candidate
 #: field names to try in order -> data kind, or None when the kind varies
@@ -199,6 +221,46 @@ def all_sources(model: dict) -> List[PackSource]:
                 if source:
                     sources.append(source)
     return sources
+
+
+def index_score_values(model: dict) -> List[dict]:
+    """Every manually-typed national-score indicator's configured value.
+
+    These indicators (EPLEX, the WBL-sourced Contextual factors, and a
+    couple of others - see INDEX_SCORE_FIELD_BY_MODE) have no spatial
+    dataset to bundle: the "input" is just a number a user researched and
+    typed in. Returned separately from all_sources() rather than folded
+    in, since there's no file to clip/copy here - build_country_pack()
+    writes these as rows in one plain table instead.
+
+    Args:
+        model: The parsed model.json document.
+
+    Returns:
+        One dict per configured indicator of these modes:
+        {"id", "name", "analysis_mode", "value"}. Indicators of these
+        modes with no value typed in yet are omitted.
+    """
+    rows = []
+    for dimension in model.get("dimensions", []):
+        for factor in dimension.get("factors", []):
+            for indicator in factor.get("indicators", []):
+                mode = indicator.get("analysis_mode")
+                field_name = INDEX_SCORE_FIELD_BY_MODE.get(mode)
+                if not field_name:
+                    continue
+                value = indicator.get(field_name)
+                if value in (None, ""):
+                    continue
+                rows.append(
+                    {
+                        "id": indicator.get("id", ""),
+                        "name": indicator.get("indicator", ""),
+                        "analysis_mode": mode,
+                        "value": float(value),
+                    }
+                )
+    return rows
 
 
 def _split_source_uri(path: str):
@@ -339,6 +401,52 @@ def write_vector_source(
     if result is None:
         raise RuntimeError(f"Failed to write vector '{source.layer_name}': {gdal.GetLastErrorMsg()}")
     result = None  # noqa: F841 - closes/flushes the dataset
+
+
+def write_index_score_table(rows: List[dict], out_gpkg: str, append: bool) -> None:
+    """Write the manually-typed index-score values as a plain (non-spatial) GeoPackage table.
+
+    Args:
+        rows: Rows from index_score_values().
+        out_gpkg: Path to the output country pack GeoPackage.
+        append: True if out_gpkg already has other content - GDAL's GPKG
+            driver needs the dataset opened in update mode to add a new
+            table to an existing file rather than creating a fresh one.
+
+    Raises:
+        RuntimeError: If the table can't be created.
+    """
+    if append:
+        # gdal.OF_ALL rather than a vector-only open: see
+        # _actual_table_names()'s docstring - a pack that's raster-only
+        # so far can't be opened by the vector-only driver mode at all.
+        dataset = gdal.OpenEx(out_gpkg, gdal.OF_UPDATE | gdal.OF_ALL)
+    else:
+        dataset = ogr.GetDriverByName("GPKG").CreateDataSource(out_gpkg)
+
+    if dataset is None:
+        raise RuntimeError(f"Could not open '{out_gpkg}' to write {INDEX_SCORE_TABLE_NAME}")
+
+    layer = dataset.CreateLayer(INDEX_SCORE_TABLE_NAME, geom_type=ogr.wkbNone)
+    if layer is None:
+        dataset = None
+        raise RuntimeError(f"Could not create the {INDEX_SCORE_TABLE_NAME} table")
+
+    layer.CreateField(ogr.FieldDefn("id", ogr.OFTString))
+    layer.CreateField(ogr.FieldDefn("name", ogr.OFTString))
+    layer.CreateField(ogr.FieldDefn("analysis_mode", ogr.OFTString))
+    layer.CreateField(ogr.FieldDefn("value", ogr.OFTReal))
+
+    for row in rows:
+        feature = ogr.Feature(layer.GetLayerDefn())
+        feature.SetField("id", row["id"])
+        feature.SetField("name", row["name"])
+        feature.SetField("analysis_mode", row["analysis_mode"])
+        feature.SetField("value", row["value"])
+        layer.CreateFeature(feature)
+        feature = None
+
+    dataset = None  # noqa: F841 - closes/flushes the dataset
 
 
 def _apply_style(uri: str, is_raster: bool, style_xml: str) -> None:
@@ -487,6 +595,15 @@ def build_country_pack(
 
     if progress_callback:
         progress_callback(len(sources), len(sources), "")
+
+    index_rows = index_score_values(model)
+    if index_rows:
+        try:
+            write_index_score_table(index_rows, output_path, os.path.exists(output_path))
+            written.append(INDEX_SCORE_TABLE_NAME)
+        except Exception as e:
+            log_message(f"Skipping {INDEX_SCORE_TABLE_NAME}: {e}", tag="GeoE3")
+            skipped.append(INDEX_SCORE_TABLE_NAME)
 
     # Final, authoritative check: re-open the finished file and confirm
     # every layer the loop above believes it wrote is actually still
