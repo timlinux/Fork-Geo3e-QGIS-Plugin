@@ -31,6 +31,14 @@ repos:
         exclude: ^(.vscode)
   - repo: local
     hooks:
+      - id: validate-model-schema
+        name: "🧬 validate model.json against schema.json"
+        entry: python3 scripts/validate_model_schema.py
+        language: system
+        pass_filenames: false
+        files: ^geest/resources/(model|schema)\.json$
+  - repo: local
+    hooks:
       - id: black
         name: "🖤 black"
         entry: black

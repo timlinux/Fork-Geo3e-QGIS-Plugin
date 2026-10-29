@@ -25,5 +25,3 @@ from .json_tree_item import JsonTreeItem
 from .settings import set_setting, setting
 from .s2s_task_gate import S2STaskGate
 from .workflow_queue_manager import WorkflowQueueManager
-
-# from .json_validator import JSONValidator
