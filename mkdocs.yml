@@ -155,6 +155,7 @@ nav:
     - The Model: training/the-model.md
     - Processor Types: training/processor-types.md
     - Getting Data: training/datacollection.md
+    - WBL Index Reference: training/wbl-reference.md
     - Configuring Items: training/configuring-items.md
     - Contextual Dimension: training/contextual.md
     - Accessibility Dimension: training/accessibility.md
