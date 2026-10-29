@@ -207,9 +207,9 @@ appropriate.
 
 The table below gives a worked Saint Lucia example and the general
 sources to use for any other country. If you'd rather skip the lookup
-entirely, the [WBL Index Reference](wbl-reference.md) page lists the
-Workplace Discrimination, Regulatory Frameworks and Financial Inclusion
-default score for every country in one table.
+entirely, [Contextual Dimension](contextual.md#default-scores-by-country)
+lists the Workplace Discrimination, Regulatory Frameworks and Financial
+Inclusion default score for every country in one table.
 
 ## Data sources used for the Saint Lucia example
 
