@@ -5,10 +5,14 @@ This module contains the QgsTask for reconstructing a full GeoE3
 project from a country pack GeoPackage in the background.
 """
 
+import json
+import os
 from typing import Dict, List
+from urllib.parse import quote
 
-from qgis.core import Qgis, QgsTask
+from qgis.core import Qgis, QgsProject, QgsRasterLayer, QgsTask, QgsVectorLayer
 
+from geest.core.country_pack import all_sources, result_sources, study_area_sources
 from geest.core.country_pack_import import import_country_pack
 from geest.utilities import log_message
 
@@ -80,8 +84,57 @@ class ImportCountryPackTask(QgsTask):
                 tag="GeoE3",
                 level=Qgis.Info,
             )
+            self._load_layers_into_project()
         else:
             log_message("Country pack import failed.", tag="GeoE3", level=Qgis.Critical)
+
+    def _load_layers_into_project(self) -> None:
+        """Add every layer the import reconstructed into the current QGIS project.
+
+        Runs from finished(), always on the main thread - constructing
+        QgsVectorLayer/QgsRasterLayer and touching QgsProject.instance()
+        here is safe for exactly that reason (see country_pack.py's
+        module docstring on why run()'s worker thread never may).
+
+        Re-derived from the just-written (already path-rewritten)
+        model.json via the same all_sources()/result_sources()/
+        study_area_sources() functions the export side uses, rather
+        than tracked separately during the import loop - every path
+        in it already points inside self.working_directory, so this
+        can't pull in anything from outside it.
+        """
+        model_path = os.path.join(self.working_directory, "model.json")
+        try:
+            with open(model_path, "r", encoding="utf-8") as f:
+                model = json.load(f)
+        except Exception as e:
+            log_message(f"Could not reload model.json to populate the map: {e}", tag="GeoE3", level=Qgis.Warning)
+            return
+
+        sources = all_sources(model) + result_sources(model) + study_area_sources(self.working_directory)
+        project = QgsProject.instance()
+        added = 0
+        for source in sources:
+            try:
+                if source.kind == "raster":
+                    layer = QgsRasterLayer(source.path, source.layer_name)
+                elif source.kind == "csv":
+                    uri = (
+                        f"file:///{quote(source.path)}?type=csv&delimiter=,"
+                        f"&xField={source.x_field}&yField={source.y_field}&crs=EPSG:4326"
+                    )
+                    layer = QgsVectorLayer(uri, source.layer_name, "delimitedtext")
+                else:
+                    layer = QgsVectorLayer(source.path, source.layer_name, "ogr")
+                if not layer.isValid():
+                    log_message(f"Skipping invalid layer '{source.layer_name}' ({source.path})", tag="GeoE3")
+                    continue
+                project.addMapLayer(layer)
+                added += 1
+            except Exception as e:
+                log_message(f"Could not add layer '{source.layer_name}': {e}", tag="GeoE3", level=Qgis.Warning)
+
+        log_message(f"Added {added}/{len(sources)} layers to the QGIS project.", tag="GeoE3", level=Qgis.Info)
 
     def cancel(self) -> None:
         """Called when the task is cancelled."""
