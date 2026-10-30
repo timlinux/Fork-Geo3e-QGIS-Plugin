@@ -13,7 +13,12 @@ from urllib.parse import quote
 from qgis.core import Qgis, QgsProject, QgsRasterLayer, QgsTask, QgsVectorLayer
 
 from geest.core.country_pack import all_sources, result_sources, study_area_sources
-from geest.core.country_pack_import import import_country_pack
+from geest.core.country_pack_import import (
+    _indicator_import_targets,
+    _project_level_import_targets,
+    import_country_pack,
+    sync_layer_metadata_fields,
+)
 from geest.utilities import log_message
 
 
@@ -102,6 +107,13 @@ class ImportCountryPackTask(QgsTask):
         than tracked separately during the import loop - every path
         in it already points inside self.working_directory, so this
         can't pull in anything from outside it.
+
+        For every indicator/project-level source, also points its
+        "already-loaded-layer" companion fields (_layer_id etc - see
+        sync_layer_metadata_fields()) at the layer just added, and
+        re-saves model.json with those updates before the Tree panel
+        re-reads it - otherwise every data source widget would show no
+        selection despite the file being correctly referenced.
         """
         model_path = os.path.join(self.working_directory, "model.json")
         try:
@@ -111,16 +123,24 @@ class ImportCountryPackTask(QgsTask):
             log_message(f"Could not reload model.json to populate the map: {e}", tag="GeoE3", level=Qgis.Warning)
             return
 
+        indicator_targets = _indicator_import_targets(model)
+        project_targets = _project_level_import_targets(model)
+
         sources = all_sources(model) + result_sources(model) + study_area_sources(self.working_directory)
         project = QgsProject.instance()
         added = 0
+        metadata_changed = False
         for source in sources:
             try:
                 if source.kind == "raster":
                     layer = QgsRasterLayer(source.path, source.layer_name)
                 elif source.kind == "csv":
+                    # file:// URIs need an absolute path - source.path is
+                    # normally already absolute (working_directory comes
+                    # from a file picker), but abspath() here is cheap
+                    # insurance against a malformed URI if it isn't.
                     uri = (
-                        f"file:///{quote(source.path)}?type=csv&delimiter=,"
+                        f"file:///{quote(os.path.abspath(source.path))}?type=csv&delimiter=,"
                         f"&xField={source.x_field}&yField={source.y_field}&crs=EPSG:4326"
                     )
                     layer = QgsVectorLayer(uri, source.layer_name, "delimitedtext")
@@ -131,10 +151,26 @@ class ImportCountryPackTask(QgsTask):
                     continue
                 project.addMapLayer(layer)
                 added += 1
+
+                if source.layer_name in indicator_targets:
+                    node, field_name, _kind = indicator_targets[source.layer_name]
+                    sync_layer_metadata_fields(node, field_name, layer)
+                    metadata_changed = True
+                elif source.layer_name in project_targets:
+                    field_name, _kind = project_targets[source.layer_name]
+                    sync_layer_metadata_fields(model, field_name, layer)
+                    metadata_changed = True
             except Exception as e:
                 log_message(f"Could not add layer '{source.layer_name}': {e}", tag="GeoE3", level=Qgis.Warning)
 
         log_message(f"Added {added}/{len(sources)} layers to the QGIS project.", tag="GeoE3", level=Qgis.Info)
+
+        if metadata_changed:
+            try:
+                with open(model_path, "w", encoding="utf-8") as f:
+                    json.dump(model, f, indent=2)
+            except Exception as e:
+                log_message(f"Could not save layer metadata to model.json: {e}", tag="GeoE3", level=Qgis.Warning)
 
     def cancel(self) -> None:
         """Called when the task is cancelled."""

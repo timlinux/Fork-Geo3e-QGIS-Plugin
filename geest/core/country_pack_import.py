@@ -51,6 +51,67 @@ from geest.core.country_pack import (
 )
 from geest.utilities import log_message
 
+#: Suffixes a configured-input field can end in, each stripped to get
+#: the "widget_key"-style prefix the matching datasource widget uses
+#: for its companion "already-loaded-layer" fields (_layer_name/
+#: _layer_provider_type/_layer_crs/_layer_wkb_type/_layer_id - see
+#: VectorDataSourceWidget/RasterDataSourceWidget.update_attributes(),
+#: confirmed against real model.json field names). Order matters -
+#: "_layer_source" must be checked before the generic "_source" would
+#: ever be (it isn't, but keeps the intent obvious).
+_LAYER_FIELD_SUFFIXES = ("_layer_source", "_shapefile", "_raster")
+
+
+def _layer_field_prefix(field_name: str) -> Optional[str]:
+    """The widget-key prefix a configured-input field's companion layer-metadata fields use.
+
+    Args:
+        field_name: A field name resolved by _indicator_source_field()/
+            _project_level_source_field() (e.g. "multi_buffer_point_
+            layer_source", "aggregation_layer_source", "raster_mask_
+            raster").
+
+    Returns:
+        The prefix to use for "{prefix}_layer_id" etc, or None if this
+        field has no such companions (road_network_layer_path and the
+        CSV/ACLED field don't - confirmed against real model.json, see
+        AcledCsvDataSourceWidget.update_attributes()).
+    """
+    for suffix in _LAYER_FIELD_SUFFIXES:
+        if field_name.endswith(suffix):
+            return field_name[: -len(suffix)]
+    return None
+
+
+def sync_layer_metadata_fields(node: dict, field_name: str, layer) -> None:
+    """Point a configured input's "already-loaded-layer" companion fields at a freshly loaded QgsMapLayer.
+
+    VectorDataSourceWidget/RasterDataSourceWidget restore their combo
+    box selection by looking up "{prefix}_layer_id" in the currently
+    open QgsProject - a layer_id copied verbatim from the exporting
+    machine's QGIS session never matches anything in a freshly loaded
+    project, so the widget would show no selection even though the
+    underlying file is correctly referenced. Call this once the
+    corresponding layer has actually been added to QgsProject.instance()
+    so those fields point at it instead.
+
+    Args:
+        node: The indicator dict, or the top-level model dict for a
+            project-level source.
+        field_name: The field _indicator_source_field()/
+            _project_level_source_field() resolved for this source.
+        layer: The QgsMapLayer just added to the project for this source.
+    """
+    prefix = _layer_field_prefix(field_name)
+    if not prefix:
+        return
+    node[f"{prefix}_layer_name"] = layer.name()
+    node[f"{prefix}_layer_provider_type"] = layer.providerType()
+    node[f"{prefix}_layer_crs"] = layer.crs().authid()
+    node[f"{prefix}_layer_id"] = layer.id()
+    if hasattr(layer, "wkbType"):
+        node[f"{prefix}_layer_wkb_type"] = layer.wkbType()
+
 
 def _all_table_names(pack_path: str) -> set:
     """Every table name a country pack GeoPackage contains, vector and raster alike.
