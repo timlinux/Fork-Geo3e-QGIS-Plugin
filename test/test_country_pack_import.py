@@ -14,6 +14,8 @@ from geest.core.country_pack_import import (
     _result_import_targets,
     _sync_s2s_output_path,
     import_country_pack,
+    result_layer_roles,
+    result_qml_path,
 )
 
 TEST_DATA = os.path.join(os.path.dirname(__file__), "test_data")
@@ -142,6 +144,56 @@ class TestSyncS2sOutputPath(unittest.TestCase):
         indicator = {"environmental_hazards_raster": "/new/fire.tif"}
         _sync_s2s_output_path(indicator)
         self.assertNotIn("s2s_output_path", indicator)
+
+
+class TestResultQmlPath(unittest.TestCase):
+    def test_roles_resolve_for_dimension_factor_indicator_and_analysis(self):
+        model = {
+            "result_file": "/old/analysis.vrt",
+            "dimensions": [
+                {
+                    "id": "contextual",
+                    "result_file": "/old/dim.vrt",
+                    "factors": [
+                        {
+                            "id": "eplex",
+                            "result_file": "/old/fac.vrt",
+                            "indicators": [{"id": "Workplace_Index", "result_file": "/old/ind.vrt"}],
+                        }
+                    ],
+                }
+            ],
+        }
+        roles = result_layer_roles(model)
+        self.assertEqual(
+            roles,
+            {
+                "analysis_result": "analysis",
+                "dim_contextual_result": "dimension",
+                "fac_eplex_result": "factor",
+                "Workplace_Index_result": "indicator",
+            },
+        )
+
+    def test_role_based_layers_resolve_to_their_qml_file(self):
+        roles = {
+            "dim_contextual_result": "dimension",
+            "fac_eplex_result": "factor",
+            "Workplace_Index_result": "indicator",
+            "analysis_result": "analysis",
+        }
+        self.assertTrue(result_qml_path("dim_contextual_result", roles).endswith("dimension.qml"))
+        self.assertTrue(result_qml_path("fac_eplex_result", roles).endswith("factor.qml"))
+        self.assertTrue(result_qml_path("Workplace_Index_result", roles).endswith("indicator.qml"))
+        self.assertTrue(result_qml_path("analysis_result", roles).endswith("analysis.qml"))
+
+    def test_extra_top_level_fields_resolve_regardless_of_role(self):
+        self.assertTrue(result_qml_path("geoe3_by_population", {}).endswith("geoe3_by_population_score.qml"))
+        self.assertTrue(result_qml_path("opportunities_mask_result_file", {}).endswith("mask.qml"))
+        self.assertTrue(result_qml_path("geoe3_score_subnational_aggregation", {}).endswith("geoe3_score_vector.qml"))
+
+    def test_unrecognised_layer_name_has_no_style(self):
+        self.assertIsNone(result_qml_path("Childcare_Location", {}))
 
 
 class TestImportCountryPack(unittest.TestCase):

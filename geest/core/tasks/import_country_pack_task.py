@@ -17,6 +17,8 @@ from geest.core.country_pack_import import (
     _indicator_import_targets,
     _project_level_import_targets,
     import_country_pack,
+    result_layer_roles,
+    result_qml_path,
     sync_layer_metadata_fields,
 )
 from geest.utilities import log_message
@@ -125,6 +127,7 @@ class ImportCountryPackTask(QgsTask):
 
         indicator_targets = _indicator_import_targets(model)
         project_targets = _project_level_import_targets(model)
+        result_roles = result_layer_roles(model)
 
         sources = all_sources(model) + result_sources(model) + study_area_sources(self.working_directory)
         project = QgsProject.instance()
@@ -149,6 +152,18 @@ class ImportCountryPackTask(QgsTask):
                 if not layer.isValid():
                     log_message(f"Skipping invalid layer '{source.layer_name}' ({source.path})", tag="GeoE3")
                     continue
+
+                # Already-computed results have no companion .qml next
+                # to the extracted copy (unlike a normal run, which
+                # writes one alongside the .vrt at computation time) -
+                # apply the same style the rest of the app would have,
+                # rather than leaving QGIS's arbitrary auto-styling.
+                qml_path = result_qml_path(source.layer_name, result_roles)
+                if qml_path and os.path.exists(qml_path):
+                    success, message = layer.loadNamedStyle(qml_path)
+                    if not success:
+                        log_message(f"Could not style '{source.layer_name}': {message}", tag="GeoE3")
+
                 project.addMapLayer(layer)
                 added += 1
 

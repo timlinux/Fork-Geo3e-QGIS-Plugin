@@ -49,7 +49,7 @@ from geest.core.country_pack import (
     _iter_result_nodes,
     _project_level_source_field,
 )
-from geest.utilities import log_message
+from geest.utilities import log_message, resources_path
 
 #: Suffixes a configured-input field can end in, each stripped to get
 #: the "widget_key"-style prefix the matching datasource widget uses
@@ -111,6 +111,83 @@ def sync_layer_metadata_fields(node: dict, field_name: str, layer) -> None:
     node[f"{prefix}_layer_id"] = layer.id()
     if hasattr(layer, "wkbType"):
         node[f"{prefix}_layer_wkb_type"] = layer.wkbType()
+
+
+#: Extra top-level composite product field -> its QML style filename
+#: under geest/resources/qml/ - confirmed directly from each product's
+#: own computation code, not guessed: wee_by_population_score_processor.py,
+#: opportunities_by_wee_score_processor.py,
+#: opportunities_by_wee_score_population_processor.py,
+#: opportunities_mask_processor.py and subnational_aggregation_processor.py
+#: each write exactly these source_qml files next to their own output.
+RESULT_QML_BY_FIELD = {
+    "geoe3_score_ghsl_masked_result_file": "analysis.qml",
+    "geoe3_by_population": "geoe3_by_population_score.qml",
+    "geoe3_score_by_population_ghsl_masked_result_file": "geoe3_by_population_score.qml",
+    "opportunities_mask_result_file": "mask.qml",
+    "geoe3_score_subnational_aggregation": "geoe3_score_vector.qml",
+    "geoe3_score_ghsl_masked_subnational_aggregation": "geoe3_score_vector.qml",
+    "geoe3_by_population_subnational_aggregation": "geoe3_by_population_vector_score.qml",
+    "geoe3_score_by_population_ghsl_masked_subnational_aggregation": "geoe3_by_population_vector_score.qml",
+}
+
+#: "role" (as workflow_base.py's _combine_rasters_to_vrt() calls it,
+#: matching JsonTreeItem.role) -> its QML style filename.
+_ROLE_QML = {
+    "dimension": "dimension.qml",
+    "factor": "factor.qml",
+    "indicator": "indicator.qml",
+    "analysis": "analysis.qml",
+}
+
+
+def result_layer_roles(model: dict) -> Dict[str, str]:
+    """layer_name -> "role" (dimension/factor/indicator/analysis) for every result_sources() output.
+
+    Walks the exact same nodes _iter_result_nodes() does, so a role can
+    never disagree with how result_sources() named the layer in the
+    first place - unlike guessing the role back out of the layer name's
+    "dim_"/"fac_" prefix, this also correctly distinguishes the
+    top-level analysis node (by identity, "node is model") from a
+    coincidentally-similarly-named indicator.
+
+    Args:
+        model: The parsed model.json document.
+
+    Returns:
+        One entry per "{name}_result" layer result_sources() would
+        produce for this model.
+    """
+    roles = {}
+    for name, node in _iter_result_nodes(model):
+        if not node.get("result_file"):
+            continue
+        if node is model:
+            role = "analysis"
+        elif name.startswith("dim_"):
+            role = "dimension"
+        elif name.startswith("fac_"):
+            role = "factor"
+        else:
+            role = "indicator"
+        roles[f"{name}{RESULT_SUFFIX}"] = role
+    return roles
+
+
+def result_qml_path(layer_name: str, result_roles: Dict[str, str]) -> Optional[str]:
+    """The QML style file to apply to a result_sources() layer, if any.
+
+    Args:
+        layer_name: A layer name produced by result_sources().
+        result_roles: result_layer_roles(model)'s output.
+
+    Returns:
+        Absolute path to a file under geest/resources/qml/, or None if
+        this layer isn't a recognised result_sources() output.
+    """
+    role = result_roles.get(layer_name)
+    filename = RESULT_QML_BY_FIELD.get(layer_name) or (_ROLE_QML.get(role) if role else None)
+    return resources_path("resources", "qml", filename) if filename else None
 
 
 def _all_table_names(pack_path: str) -> set:
