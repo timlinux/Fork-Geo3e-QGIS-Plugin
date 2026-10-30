@@ -91,7 +91,7 @@ class TestImportCountryPackTaskLoadsLayers(unittest.TestCase):
             {
                 "id": "FCV",
                 "analysis_mode": "use_csv_to_point_layer",
-                "csv_to_point_layer_csv_file": os.path.join(TEST_DATA, "points", "fake_acled.csv"),
+                "use_csv_to_point_layer_csv_file": os.path.join(TEST_DATA, "points", "fake_acled.csv"),
             }
         )
         # Derive the CSV's lon/lat from the existing (UTM) childcare

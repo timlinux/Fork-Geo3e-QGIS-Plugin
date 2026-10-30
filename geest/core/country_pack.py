@@ -89,9 +89,17 @@ S2S_VECTOR_FIELD_BY_MODE = {
 
 #: analysis_mode -> (csv field name, x field, y field) for the one
 #: CSV-sourced indicator type (FCV, backed by ACLED data), using ACLED's
-#: own column names.
+#: own column names. Field name confirmed against real model.json files
+#: (StLuciaH3/Albania/Comoros) - AcledCsvDataSourceWidget.add_internal_
+#: widgets() hardcodes self.widget_key = "use_csv_to_point_layer"
+#: (overwriting the "use_"-stripped key the widget factory actually
+#: passes in), so the field keeps the full mode string as its prefix,
+#: unlike every other indicator-level field. Confirmed live: this
+#: silently dropped every FCV/ACLED indicator from the pack entirely
+#: until fixed, since indicator_source() was reading a field name that
+#: real projects never populate.
 CSV_MODE_FIELDS = {
-    "use_csv_to_point_layer": ("csv_to_point_layer_csv_file", "longitude", "latitude"),
+    "use_csv_to_point_layer": ("use_csv_to_point_layer_csv_file", "longitude", "latitude"),
 }
 
 #: analysis_mode -> field holding the configured value, for indicators

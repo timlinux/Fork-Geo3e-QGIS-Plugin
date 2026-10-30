@@ -103,7 +103,7 @@ class TestIndicatorSource(unittest.TestCase):
         indicator = {
             "id": "FCV",
             "analysis_mode": "use_csv_to_point_layer",
-            "csv_to_point_layer_csv_file": "/path/acled.csv",
+            "use_csv_to_point_layer_csv_file": "/path/acled.csv",
         }
         source = indicator_source(indicator)
         self.assertEqual(source.kind, "csv")
