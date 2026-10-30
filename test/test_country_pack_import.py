@@ -164,6 +164,7 @@ class TestImportCountryPack(unittest.TestCase):
     def _model(self):
         return {
             "working_folder": TEST_DATA,
+            "qgis_project_path": "/some/other/project/elsewhere.qgz",
             "dimensions": [
                 {
                     "id": "place_characterization",
@@ -222,6 +223,12 @@ class TestImportCountryPack(unittest.TestCase):
         # new working directory, not left pointing at the exporting
         # machine's.
         self.assertEqual(reloaded["working_folder"], self.import_dir)
+
+        # qgis_project_path is cleared, not left pointing at a .qgz
+        # whose own layers reference the exporting machine's paths -
+        # loading it would pull foreign layers into the freshly
+        # started QGIS project the import flow requires.
+        self.assertEqual(reloaded["qgis_project_path"], "")
 
         # Spatial inputs got rewritten to point inside the new working
         # directory, not the original fixture directory.

@@ -397,6 +397,17 @@ def import_country_pack(
     if "working_folder" in model:
         model["working_folder"] = working_directory
 
+    # qgis_project_path points at the exporting project's own .qgz,
+    # whose layers reference the exporting machine's paths - unlike
+    # every other field above, there's no local copy of it to rewrite
+    # to, so it's cleared rather than left dangling. If it survived,
+    # the dock's open_associated_qgis_project() would load that .qgz
+    # wholesale the moment this import finishes, pulling layers
+    # pointing outside the new working directory into what's supposed
+    # to be a freshly started QGIS project.
+    if "qgis_project_path" in model:
+        model["qgis_project_path"] = ""
+
     for dimension in model.get("dimensions", []):
         for factor in dimension.get("factors", []):
             for indicator in factor.get("indicators", []):
