@@ -8,7 +8,7 @@ hide:
 
 <span class="kz-eyebrow">WORLD BANK GROUP &middot; GEOE3</span>
 
-# Map where places enable or block economic enablement
+# Map where places enable or block economic access
 
 A QGIS plugin that scores any landscape against factors that enable or limit
 access to the economic activity, so you can see exactly where to invest to
