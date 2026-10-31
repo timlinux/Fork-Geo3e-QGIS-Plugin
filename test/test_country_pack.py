@@ -1,18 +1,44 @@
 # -*- coding: utf-8 -*-
 import os
+import sys
 import unittest
 
+import numpy as np
+from osgeo import gdal, ogr, osr
+
 from geest.core.country_pack import (
+    FLOAT32_MAX,
     INDEX_SCORE_TABLE_NAME,
+    PROJECT_MODEL_TABLE_NAME,
+    PackSource,
     _actual_table_names,
     all_sources,
     build_country_pack,
     index_score_values,
     indicator_source,
     project_level_sources,
+    result_sources,
+    study_area_sources,
+    write_raster_source,
 )
 
 TEST_DATA = os.path.join(os.path.dirname(__file__), "test_data")
+
+#: build_country_pack() always writes this table (the full model.json),
+#: regardless of what sources the project has configured.
+ALWAYS_WRITTEN_TABLE_NAMES = {PROJECT_MODEL_TABLE_NAME}
+
+#: Layers in test/test_data/study_area/study_area.gpkg - bundled
+#: automatically by build_country_pack() whenever working_directory has
+#: a study_area/study_area.gpkg, on top of whatever indicator sources a
+#: test configures.
+STUDY_AREA_LAYER_NAMES = {
+    "study_area_bbox",
+    "study_area_bboxes",
+    "study_area_polygons",
+    "study_area_clip_polygons",
+    "study_area_grid",
+}
 
 
 class TestIndicatorSource(unittest.TestCase):
@@ -82,7 +108,7 @@ class TestIndicatorSource(unittest.TestCase):
         indicator = {
             "id": "FCV",
             "analysis_mode": "use_csv_to_point_layer",
-            "csv_to_point_layer_csv_file": "/path/acled.csv",
+            "use_csv_to_point_layer_csv_file": "/path/acled.csv",
         }
         source = indicator_source(indicator)
         self.assertEqual(source.kind, "csv")
@@ -188,6 +214,113 @@ class TestIndexScoreValues(unittest.TestCase):
         self.assertEqual(index_score_values(model), [])
 
 
+class TestStudyAreaSources(unittest.TestCase):
+    def test_returns_every_layer_unclipped(self):
+        sources = study_area_sources(TEST_DATA)
+        self.assertEqual({s.layer_name for s in sources}, STUDY_AREA_LAYER_NAMES)
+        self.assertTrue(all(s.kind == "vector" for s in sources))
+        self.assertTrue(all(s.clip is False for s in sources))
+        self.assertTrue(all(s.path.startswith(TEST_DATA) for s in sources))
+
+    def test_missing_study_area_gpkg_returns_empty_list(self):
+        self.assertEqual(study_area_sources("/no/such/working/directory"), [])
+
+
+class TestResultSources(unittest.TestCase):
+    def test_captures_every_level_that_has_run(self):
+        model = {
+            "output_filename": "GeoE3_Score",
+            "result_file": "/path/GeoE3_Score_combined.vrt",
+            "dimensions": [
+                {
+                    "id": "contextual",
+                    "result_file": "/path/Contextual_score_combined.vrt",
+                    "factors": [
+                        {"id": "eplex", "result_file": ""},
+                        {
+                            "id": "workplace_discrimination",
+                            "result_file": "/path/WD_output_combined.vrt",
+                            "indicators": [
+                                {"id": "Workplace_Index", "result_file": "/path/Workplace_Index_combined.vrt"},
+                                {"id": "Unrun_Indicator", "result_file": ""},
+                            ],
+                        },
+                    ],
+                }
+            ],
+        }
+        sources = result_sources(model)
+        by_name = {s.layer_name: s for s in sources}
+        self.assertEqual(
+            set(by_name),
+            {
+                "GeoE3_Score_result",
+                "dim_contextual_result",
+                "fac_workplace_discrimination_result",
+                "Workplace_Index_result",
+            },
+        )
+        self.assertTrue(all(s.kind == "raster" and s.clip is False for s in by_name.values()))
+
+    def test_falls_back_to_a_fixed_name_with_no_output_filename(self):
+        model = {"result_file": "/path/result.vrt", "dimensions": []}
+        sources = result_sources(model)
+        self.assertEqual(sources[0].layer_name, "analysis_result")
+
+    def test_empty_model_has_no_results(self):
+        self.assertEqual(result_sources({}), [])
+
+    def test_factor_and_same_named_indicator_do_not_collide(self):
+        """Regression test: GeoPackage table names are case-insensitive at
+        the SQLite level even though gpkg_contents preserves the display
+        casing, so a factor ("fcv") and its one child indicator ("FCV")
+        sharing the same name in different case would silently collide
+        and drop one of the two without this prefixing - confirmed live
+        against a real project (Cabo Verde) before this was added:
+        "fcv_result" (factor) wrote fine, "FCV_result" (indicator) landed
+        in "skipped" with no further explanation."""
+        model = {
+            "dimensions": [
+                {
+                    "id": "place_characterization",
+                    "factors": [
+                        {
+                            "id": "fcv",
+                            "result_file": "/path/fac_fcv.vrt",
+                            "indicators": [{"id": "FCV", "result_file": "/path/ind_fcv.vrt"}],
+                        }
+                    ],
+                }
+            ]
+        }
+        names = {s.layer_name for s in result_sources(model)}
+        self.assertEqual(names, {"fac_fcv_result", "FCV_result"})
+
+    def test_captures_extra_top_level_composite_products(self):
+        """Regression test: model.json can carry up to 8 extra top-level
+        composite products once the analysis_aggregation workflow has
+        run (GHSL-masked/by-population rasters, per-zone subnational
+        aggregation vectors) - confirmed live on a real regional-scale
+        project (StLuciaH3), none of which result_sources() bundled
+        before this was added."""
+        model = {
+            "geoe3_score_ghsl_masked_result_file": "/path/masked.vrt",
+            "geoe3_by_population": "/path/by_pop.vrt",
+            "geoe3_score_by_population_ghsl_masked_result_file": "/path/by_pop_masked.vrt",
+            "opportunities_mask_result_file": "/path/opportunities.vrt",
+            "geoe3_score_subnational_aggregation": "/path/sub1.gpkg|layername=sub1",
+            "geoe3_score_ghsl_masked_subnational_aggregation": "/path/sub2.gpkg|layername=sub2",
+            "geoe3_by_population_subnational_aggregation": "/path/sub3.gpkg|layername=sub3",
+            "geoe3_score_by_population_ghsl_masked_subnational_aggregation": "/path/sub4.gpkg|layername=sub4",
+        }
+        sources = result_sources(model)
+        by_name = {s.layer_name: s for s in sources}
+        self.assertEqual(len(sources), 8)
+        self.assertEqual(by_name["geoe3_score_ghsl_masked_result_file"].kind, "raster")
+        self.assertEqual(by_name["geoe3_score_subnational_aggregation"].kind, "vector")
+        self.assertTrue(all(s.clip is False for s in sources))
+
+
 class TestAllSources(unittest.TestCase):
     def test_combines_project_level_and_every_indicator(self):
         model = {
@@ -246,6 +379,84 @@ class TestAllSources(unittest.TestCase):
         self.assertEqual(len(sources), 2)
         self.assertEqual({s.layer_name for s in sources}, {"Kindergartens_Location", "Primary_School_Location"})
         self.assertTrue(all(s.path == shared_path for s in sources))
+
+
+class TestClipAcrossMismatchedCrs(unittest.TestCase):
+    """Regression test: a vector source whose CRS differs from the study
+    area clip boundary's CRS used to silently clip away every feature,
+    with no error - confirmed live against StLuciaH3 and CaboVerde,
+    where every OSM-sourced (WGS84) indicator was reduced to 0 features
+    against each project's UTM-projected study area. ogr2ogr's own
+    "-clipsrc <file> -clipsrclayer <name>" form does not reproject the
+    clip geometry on the GDAL version QGIS 3.34 bundles (3.4.1)."""
+
+    def setUp(self):
+        self.out_path = os.path.join(TEST_DATA, "_country_pack_crs_test_output.gpkg")
+        self.wgs84_points_path = os.path.join(TEST_DATA, "_wgs84_points.gpkg")
+        for path in (self.out_path, self.wgs84_points_path):
+            if os.path.exists(path):
+                os.remove(path)
+
+        # Reproject the existing (UTM 32620) childcare fixture's own
+        # points into WGS84 lon/lat, so they're guaranteed to fall
+        # inside the study area's clip boundary once correctly
+        # reprojected back - not guessed coordinates.
+        source_ds = ogr.Open(os.path.join(TEST_DATA, "points", "fake_childcare.gpkg"))
+        source_layer = source_ds.GetLayerByName("fake_childcare")
+        source_srs = source_layer.GetSpatialRef()
+        wgs84_srs = osr.SpatialReference()
+        wgs84_srs.ImportFromEPSG(4326)
+        source_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+        wgs84_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+        transform = osr.CoordinateTransformation(source_srs, wgs84_srs)
+
+        self.expected_feature_count = source_layer.GetFeatureCount()
+
+        driver = ogr.GetDriverByName("GPKG")
+        out_ds = driver.CreateDataSource(self.wgs84_points_path)
+        out_layer = out_ds.CreateLayer("wgs84_points", srs=wgs84_srs, geom_type=ogr.wkbPoint)
+        for feature in source_layer:
+            geometry = feature.GetGeometryRef().Clone()
+            geometry.Transform(transform)
+            out_feature = ogr.Feature(out_layer.GetLayerDefn())
+            out_feature.SetGeometry(geometry)
+            out_layer.CreateFeature(out_feature)
+            out_feature = None
+        out_ds = None
+        source_ds = None
+
+    def tearDown(self):
+        for path in (self.out_path, self.wgs84_points_path):
+            if os.path.exists(path):
+                os.remove(path)
+
+    def test_clipping_reprojects_the_boundary_to_match_the_source_crs(self):
+        model = {
+            "dimensions": [
+                {
+                    "factors": [
+                        {
+                            "indicators": [
+                                {
+                                    "id": "Wgs84_Points",
+                                    "analysis_mode": "use_point_per_cell",
+                                    "point_per_cell_layer_source": (f"{self.wgs84_points_path}|layername=wgs84_points"),
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+        build_country_pack(working_directory=TEST_DATA, model=model, output_path=self.out_path)
+
+        ds = ogr.Open(self.out_path)
+        layer = ds.GetLayerByName("Wgs84_Points")
+        feature_count = layer.GetFeatureCount()
+        ds = None
+
+        self.assertGreater(self.expected_feature_count, 0)
+        self.assertEqual(feature_count, self.expected_feature_count)
 
 
 class TestBuildCountryPack(unittest.TestCase):
@@ -309,7 +520,10 @@ class TestBuildCountryPack(unittest.TestCase):
             output_path=self.out_path,
         )
         self.assertEqual(
-            set(summary["written"]), {"Childcare_Location", "Generic_Raster", "Fire", "index_score_values"}
+            set(summary["written"]),
+            {"Childcare_Location", "Generic_Raster", "Fire", "index_score_values"}
+            | STUDY_AREA_LAYER_NAMES
+            | ALWAYS_WRITTEN_TABLE_NAMES,
         )
         self.assertEqual(summary["skipped"], [])
         self.assertTrue(os.path.exists(self.out_path))
@@ -328,15 +542,19 @@ class TestBuildCountryPack(unittest.TestCase):
         self.assertIn("Generic_Raster", summary["written"])
         self.assertIn("Fire", summary["written"])
 
-    def test_verification_works_on_a_raster_only_pack(self):
+    def test_verification_works_with_no_indicator_level_vector_sources(self):
         """Regression test: ogr.Open() returns None for a GeoPackage that
         has no vector layers at all (confirmed live via the test above,
         before this was fixed) - verification has to open with
         gdal.OF_ALL instead, or a pack with every vector source skipped
         would look like it verified nothing, even though the rasters
-        wrote and survived correctly."""
+        wrote and survived correctly. study_area_sources() means a real
+        pack is never truly vector-free once study_area.gpkg exists, but
+        this still exercises the same OF_ALL code path with no
+        indicator-level vector content to rely on."""
         model = self._model()
-        # Drop every vector source, leaving only the two rasters.
+        # Drop the one indicator-level vector source, leaving only the
+        # two rasters (plus whatever study_area_sources() always adds).
         del model["dimensions"][0]["factors"][0]["indicators"][0]
 
         summary = build_country_pack(
@@ -344,8 +562,11 @@ class TestBuildCountryPack(unittest.TestCase):
             model=model,
             output_path=self.out_path,
         )
-        self.assertEqual(set(summary["written"]), {"Generic_Raster", "Fire", "index_score_values"})
-        self.assertEqual(_actual_table_names(self.out_path), {"Generic_Raster", "Fire", "index_score_values"})
+        expected = (
+            {"Generic_Raster", "Fire", "index_score_values"} | STUDY_AREA_LAYER_NAMES | ALWAYS_WRITTEN_TABLE_NAMES
+        )
+        self.assertEqual(set(summary["written"]), expected)
+        self.assertEqual(_actual_table_names(self.out_path), expected)
 
     def test_vector_then_raster_order_does_not_lose_the_vector_layer(self):
         """Regression test: GDAL's GPKG driver recreates the whole file
@@ -387,6 +608,74 @@ class TestBuildCountryPack(unittest.TestCase):
 
         self.assertEqual(rows["Workplace_Index"], 95.0)
         self.assertEqual(rows["eplex_score_indicator"], 0.65)
+
+    def test_project_model_table_round_trips_the_exact_model(self):
+        import json
+
+        from osgeo import ogr
+
+        model = self._model()
+        build_country_pack(working_directory=TEST_DATA, model=model, output_path=self.out_path)
+
+        ds = ogr.Open(self.out_path)
+        layer = ds.GetLayerByName(PROJECT_MODEL_TABLE_NAME)
+        feature = next(iter(layer))
+        reloaded = json.loads(feature["model_json"])
+        ds = None
+
+        self.assertEqual(reloaded, model)
+
+
+class TestWriteRasterSourceNodataOverflow(unittest.TestCase):
+    """Regression test: several real GeoE3 result rasters are Float64
+
+    with NoDataValue set to Float64's own max (an "unset" sentinel) -
+    downcasting straight to Float32 for GPKG storage silently overflows
+    that value to +inf while the GPKG's own metadata keeps reporting the
+    original, now-mismatched Float64 value - confirmed live against a
+    real project's geoe3_score_by_population_ghsl_masked result."""
+
+    def setUp(self):
+        self.src_path = os.path.join(TEST_DATA, "rasters", "_float64_overflow_nodata.tif")
+        self.out_gpkg = os.path.join(TEST_DATA, "_write_raster_source_nodata_test.gpkg")
+        for path in (self.src_path, self.out_gpkg):
+            if os.path.exists(path):
+                os.remove(path)
+
+        driver = gdal.GetDriverByName("GTiff")
+        dataset = driver.Create(self.src_path, 2, 2, 1, gdal.GDT_Float64)
+        dataset.SetGeoTransform((0, 1, 0, 2, 0, -1))
+        srs = osr.SpatialReference()
+        srs.ImportFromEPSG(4326)
+        dataset.SetProjection(srs.ExportToWkt())
+        band = dataset.GetRasterBand(1)
+        band.SetNoDataValue(sys.float_info.max)
+        band.WriteArray(np.array([[5.0, sys.float_info.max], [sys.float_info.max, 9.0]]))
+        dataset = None
+
+    def tearDown(self):
+        for path in (self.src_path, self.out_gpkg):
+            if os.path.exists(path):
+                os.remove(path)
+
+    def test_nodata_survives_the_float32_downcast_without_overflowing(self):
+        source = PackSource("overflow_test", self.src_path, "raster", clip=False)
+        write_raster_source(source, "", "", self.out_gpkg, append=False)
+
+        dataset = gdal.Open(f"GPKG:{self.out_gpkg}:overflow_test")
+        band = dataset.GetRasterBand(1)
+        nodata = band.GetNoDataValue()
+        array = band.ReadAsArray()
+        dataset = None
+
+        self.assertEqual(nodata, FLOAT32_MAX)
+        self.assertEqual(float(array[0][1]), FLOAT32_MAX)
+        self.assertEqual(float(array[1][0]), FLOAT32_MAX)
+        self.assertFalse(
+            any(value != nodata and value in (float("inf"), float("-inf")) for row in array for value in row)
+        )
+        self.assertEqual(float(array[0][0]), 5.0)
+        self.assertEqual(float(array[1][1]), 9.0)
 
 
 if __name__ == "__main__":
