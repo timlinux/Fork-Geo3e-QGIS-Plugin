@@ -46,7 +46,7 @@ In this section, you'll learn how to clone the repository and prepare it for dev
 
 - Python 3.8 or later
 - QGIS 3.22 or later
-- `pip` and `virtualenv`
+- `pip`
 
 ### Steps
 
