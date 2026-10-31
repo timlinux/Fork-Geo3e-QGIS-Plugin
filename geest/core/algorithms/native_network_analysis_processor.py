@@ -248,7 +248,7 @@ class NativeNetworkAnalysisProcessingTask(QgsTask):
 
         # Set up spatial reference
         srs = osr.SpatialReference()
-        srs.ImportFromProj4(self.target_crs.toProj4())
+        srs.ImportFromWkt(self.target_crs.toWkt())
 
         # Create polygon layer
         layer = ds.CreateLayer("isochrones", srs, ogr.wkbPolygon)

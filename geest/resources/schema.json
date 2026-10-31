@@ -10,13 +10,16 @@
                     "id": {
                         "type": "string"
                     },
+                    "output_filename": {
+                        "type": "string"
+                    },
                     "name": {
                         "type": "string"
                     },
-                    "required": {
+                    "default_analysis_weighting": {
                         "type": "number"
                     },
-                    "default_analysis_weighting": {
+                    "analysis_weighting": {
                         "type": "number"
                     },
                     "description": {
@@ -30,14 +33,23 @@
                                 "id": {
                                     "type": "string"
                                 },
+                                "output_filename": {
+                                    "type": "string"
+                                },
                                 "name": {
                                     "type": "string"
                                 },
-                                "required": {
-                                    "type": "number"
+                                "women_enabling": {
+                                    "type": "integer"
                                 },
                                 "default_dimension_weighting": {
                                     "type": "number"
+                                },
+                                "dimension_weighting": {
+                                    "type": "number"
+                                },
+                                "description": {
+                                    "type": "string"
                                 },
                                 "indicators": {
                                     "type": "array",
@@ -50,14 +62,20 @@
                                             "id": {
                                                 "type": "string"
                                             },
+                                            "output_filename": {
+                                                "type": "string"
+                                            },
                                             "description": {
                                                 "type": "string"
                                             },
                                             "default_factor_weighting": {
                                                 "type": "number"
                                             },
+                                            "factor_weighting": {
+                                                "type": "number"
+                                            },
                                             "index_score": {
-                                                "type": "integer"
+                                                "type": "number"
                                             },
                                             "use_index_score": {
                                                 "type": "integer"
@@ -74,37 +92,13 @@
                                             "use_single_buffer_point": {
                                                 "type": "integer"
                                             },
-                                            "default_pixel": {
-                                                "type": "integer"
-                                            },
-                                            "use_create_grid": {
-                                                "type": "integer"
-                                            },
-                                            "use_osm_downloader": {
-                                                "type": "integer"
-                                            },
-                                            "use_bbox_for_aoi": {
-                                                "type": "integer"
-                                            },
-                                            "use_rasterize_layer": {
-                                                "type": "integer"
-                                            },
-                                            "use_wbl_downloader": {
-                                                "type": "integer"
-                                            },
-                                            "use_humdata_downloader": {
-                                                "type": "integer"
-                                            },
-                                            "use_mapilliary_downloader": {
-                                                "type": "integer"
-                                            },
-                                            "use_other_downloader": {
-                                                "type": "integer"
-                                            },
-                                            "use_add_layers_manually": {
-                                                "type": "integer"
-                                            },
                                             "use_classify_polygon_into_classes": {
+                                                "type": "integer"
+                                            },
+                                            "use_classify_safety_polygon_into_classes": {
+                                                "type": "integer"
+                                            },
+                                            "use_contextual_index_score": {
                                                 "type": "integer"
                                             },
                                             "use_csv_to_point_layer": {
@@ -122,74 +116,89 @@
                                             "use_nighttime_lights": {
                                                 "type": "integer"
                                             },
-                                            "use_s2s_urban_rural_share": {
+                                            "use_environmental_hazards": {
                                                 "type": "integer"
                                             },
-                                            "use_environmental_hazards": {
+                                            "use_index_score_with_ghsl": {
+                                                "type": "integer"
+                                            },
+                                            "use_index_score_with_ookla": {
+                                                "type": "integer"
+                                            },
+                                            "use_street_lights": {
                                                 "type": "integer"
                                             },
                                             "analysis_mode": {
                                                 "type": "string"
                                             },
-                                            "indicator_required": {
+                                            "eplex_score": {
+                                                "type": "number"
+                                            },
+                                            "use_eplex_score": {
+                                                "type": "integer"
+                                            },
+                                            "osm_download_enabled": {
+                                                "type": "integer"
+                                            },
+                                            "use_osm_transport_polyline_per_cell": {
+                                                "type": "integer"
+                                            },
+                                            "s2s_fields": {
+                                                "type": "array"
+                                            },
+                                            "use_s2s_urban_rural_share": {
                                                 "type": "integer"
                                             }
                                         },
                                         "required": [
                                             "indicator",
                                             "id",
+                                            "output_filename",
                                             "description",
                                             "default_factor_weighting",
-                                            "index_score",
+                                            "factor_weighting",
                                             "index_score",
                                             "use_index_score",
                                             "default_multi_buffer_distances",
                                             "use_multi_buffer_point",
                                             "default_single_buffer_distance",
                                             "use_single_buffer_point",
-                                            "default_pixel",
-                                            "use_create_grid",
-                                            "use_osm_downloader",
-                                            "use_bbox_for_aoi",
-                                            "use_rasterize_layer",
-                                            "use_wbl_downloader",
-                                            "use_humdata_downloader",
-                                            "use_mapilliary_downloader",
-                                            "use_other_downloader",
-                                            "use_add_layers_manually",
                                             "use_classify_polygon_into_classes",
+                                            "use_classify_safety_polygon_into_classes",
+                                            "use_contextual_index_score",
                                             "use_csv_to_point_layer",
                                             "use_polygon_per_cell",
                                             "use_polyline_per_cell",
                                             "use_point_per_cell",
                                             "use_nighttime_lights",
-                                            "use_s2s_urban_rural_share",
                                             "use_environmental_hazards",
-                                            "analysis_mode",
-                                            "indicator_required"
+                                            "use_index_score_with_ghsl",
+                                            "use_index_score_with_ookla",
+                                            "use_street_lights",
+                                            "analysis_mode"
                                         ]
                                     }
-                                },
-                                "description": {
-                                    "type": "string"
                                 }
                             },
                             "required": [
                                 "id",
+                                "output_filename",
                                 "name",
-                                "required",
+                                "women_enabling",
                                 "default_dimension_weighting",
-                                "indicators",
-                                "description"
+                                "dimension_weighting",
+                                "description",
+                                "indicators"
                             ]
                         }
                     }
                 },
                 "required": [
                     "id",
+                    "output_filename",
                     "name",
-                    "required",
                     "default_analysis_weighting",
+                    "analysis_weighting",
                     "description",
                     "factors"
                 ]
