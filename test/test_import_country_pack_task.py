@@ -10,13 +10,13 @@ import tempfile
 import unittest
 
 from osgeo import ogr, osr
-from qgis.core import QgsApplication, QgsProject
+from qgis.core import QgsProject
+from utilities_for_testing import get_qgis_app
 
 from geest.core.country_pack import build_country_pack
 from geest.core.tasks import ImportCountryPackTask
 
-QGIS_APP = QgsApplication([], False)
-QGIS_APP.initQgis()
+QGIS_APP = get_qgis_app()
 
 TEST_DATA = os.path.join(os.path.dirname(__file__), "test_data")
 

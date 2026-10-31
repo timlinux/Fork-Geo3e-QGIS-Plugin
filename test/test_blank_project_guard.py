@@ -10,14 +10,13 @@ import shutil
 import tempfile
 import unittest
 
-from qgis.core import QgsApplication, QgsProject, QgsVectorLayer
-from qgis.PyQt.QtWidgets import QFileDialog, QMessageBox, QWidget
+from qgis.core import QgsProject, QgsVectorLayer
+from qgis.PyQt.QtWidgets import QFileDialog, QMessageBox
+from utilities_for_testing import get_qgis_app
 
 from geest.gui.panels.blank_project_guard import ensure_blank_qgis_project, is_qgis_project_blank
 
-QGIS_APP = QgsApplication([], False)
-QGIS_APP.initQgis()
-PARENT = QWidget()
+QGIS_APP, CANVAS, IFACE, PARENT = get_qgis_app()
 
 
 class TestBlankProjectGuard(unittest.TestCase):
